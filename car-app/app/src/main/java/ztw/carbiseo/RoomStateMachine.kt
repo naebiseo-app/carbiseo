@@ -18,7 +18,7 @@ data class RoomSettings(
     val workEnd: LocalTime = LocalTime.of(18, 0),
     val homeDestRadiusM: Double = 300.0,   // 목적지가 "집"으로 인정되는 반경
     val homeNearRadiusM: Double = 2000.0,  // 목적지 없을 때 현재 위치가 "집 근처"인 반경
-    val destGraceMs: Long = 2000,          // 목적지 해제 유예
+    val destGraceMs: Long = 10_000,         // 목적지 해제 유예
     val debounceMs: Long = 300,            // 전환 직후 되돌림 무시 시간
 )
 

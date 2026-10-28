@@ -133,15 +133,15 @@ class RoomStateMachineTest {
         assertEquals(Room.PARK, m.room)
     }
 
-    @Test fun 목적지_해제는_2초_유예_후_반영() {
+    @Test fun 목적지_해제는_유예_후_반영() {
         m.update { copy(destination = home) }; drive()
         assertEquals(Room.DRIVE_REST, m.room)
         settle()
         m.update { copy(destination = null) }
-        clock.ms += 1900; m.tick()
-        assertEquals(Room.DRIVE_REST, m.room)                      // 1.9초: 아직 목적지 유지
+        clock.ms += m.settings.destGraceMs - 100; m.tick()
+        assertEquals(Room.DRIVE_REST, m.room)                      // 유예 직전: 아직 목적지 유지
         clock.ms += 100; m.tick()
-        assertEquals(Room.DRIVE_WORK, m.room)                      // 2.0초: 해제 반영
+        assertEquals(Room.DRIVE_WORK, m.room)                      // 유예 도달: 해제 반영
     }
 
     @Test fun 경유지_추가_취소_잠깐후_복귀면_방_안_바뀜() {
@@ -158,7 +158,7 @@ class RoomStateMachineTest {
     @Test fun 정차중_해제된_목적지는_운전_시작때_유령으로_안_남는다() {
         m.update { copy(destination = home, gear = Gear.PARK) }
         m.update { copy(destination = null) }
-        clock.ms += 3000; m.tick()
+        clock.ms += m.settings.destGraceMs + 1000; m.tick()
         drive()
         assertEquals(Room.DRIVE_WORK, m.room)
     }
