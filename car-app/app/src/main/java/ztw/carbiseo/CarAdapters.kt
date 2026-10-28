@@ -85,14 +85,18 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
     private fun initNavi() {
         val n = NaviHelper(ctx).also { navi = it }
         n.addListener(object : NaviHelperEventListener {
-            override fun onDestinationInfo(i: DestinationInfo) = set { copy(destination = LatLng(i.latitude, i.longitude)) }
+            override fun onError(c: ai.pleos.playground.navi.constants.NaviErrorCode) { Log.w(TAG, "navi onError $c") }
+            // 경로가 없을 때 SDK가 (0,0)을 주므로 목적지 없음으로 취급한다.
+            override fun onDestinationInfo(i: DestinationInfo) = set {
+                copy(destination = if (i.latitude == 0.0 && i.longitude == 0.0) null else LatLng(i.latitude, i.longitude))
+            }
             override fun onCurrentLocationInfo(i: CurrentLocationInfo) = set { copy(location = LatLng(i.latitude, i.longitude)) }
             // 취소/종료만 목적지 해제로 본다. 경유지 추가 직후의 취소->재개 깜빡임은 상태머신 2초 유예가 흡수한다.
-            override fun onRouteCancelled() = set { copy(destination = null) }
+            override fun onRouteCancelled() { Log.i(TAG, "onRouteCancelled"); set { copy(destination = null) } }
             override fun onRouteEnded() = set { copy(destination = null) }
             override fun onDestinationChanged() { n.getDestinationInfo() }
             override fun onWaypointChanged(i: WaypointChangedInfo) { n.getDestinationInfo() }
-            override fun onNavigationStatus(s: NavigationStatus) { if (s == NavigationStatus.ROUTE_DRIVE) n.getDestinationInfo() }
+            override fun onNavigationStatus(s: NavigationStatus) { Log.i(TAG, "navStatus $s"); if (s == NavigationStatus.ROUTE_DRIVE) n.getDestinationInfo() }
         })
         n.initialize({
             n.getDestinationInfo(); n.getCurrentLocationInfo()

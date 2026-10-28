@@ -163,6 +163,14 @@ class RoomStateMachineTest {
         assertEquals(Room.DRIVE_WORK, m.room)
     }
 
+    @Test fun 유예_시간은_설정으로_늘릴_수_있다() {
+        m.settings = m.settings.copy(destGraceMs = 10_000)
+        m.update { copy(destination = home) }; drive(); settle()
+        m.update { copy(destination = null) }
+        clock.ms += 7300; m.tick()                                 // 에뮬 실측: 경유지 추가 후 ROUTE_DRIVE 복귀까지 약 7초
+        assertEquals(Room.DRIVE_REST, m.room)
+    }
+
     @Test fun 첫_이벤트의_from은_null() {
         m.update { copy(gear = Gear.PARK) }
         assertNull(events.first().first)

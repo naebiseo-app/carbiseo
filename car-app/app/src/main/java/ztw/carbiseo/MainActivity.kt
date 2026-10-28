@@ -1,6 +1,8 @@
 package ztw.carbiseo
 
 import ai.pleos.playground.navi.constants.RouteOption
+import ai.pleos.playground.navi.constants.WaypointIndex
+import ai.pleos.playground.navi.data.RequestWaypointInfo
 import ai.pleos.playground.navi.data.RouteInfo
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -34,7 +36,12 @@ class MainActivity : ComponentActivity() {
     private lateinit var adapters: CarAdapters
 
     private val ticker = object : Runnable {
-        override fun run() { machine.tick(); sigText = machine.signals.toString(); ui.postDelayed(this, 200) }
+        override fun run() {
+            machine.tick()
+            val t = machine.signals.toString()
+            if (t != sigText) Log.i("ROOM", "signals $t") // 입력 신호가 바뀔 때만
+            sigText = t; ui.postDelayed(this, 200)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,7 +72,14 @@ class MainActivity : ComponentActivity() {
                 adapters.navi?.requestRoute(RouteInfo(lat, lng, null, null, "debug", "", "", "", RouteOption.RECOMMENDED, "", false))
             }
         }
+        val wp = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                Log.i("ROOM", "debug addWaypoint")
+                adapters.navi?.addWaypoint(RequestWaypointInfo(37.2636, 127.0286, "Test rest area", WaypointIndex.FIRST, "", "", "", ""))
+            }
+        }
         val f = IntentFilter("ztw.carbiseo.ROUTE")
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(wp, IntentFilter("ztw.carbiseo.WP"), Context.RECEIVER_EXPORTED) else registerReceiver(wp, IntentFilter("ztw.carbiseo.WP"))
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(r, f, Context.RECEIVER_EXPORTED) else registerReceiver(r, f)
     }
 
