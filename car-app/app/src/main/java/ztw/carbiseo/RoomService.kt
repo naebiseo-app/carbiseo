@@ -153,6 +153,11 @@ class RoomService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_REST) addRestStop()
+        if (intent?.action == ACTION_GO) intent.run {
+            val lat = getDoubleExtra("lat", 0.0); val lng = getDoubleExtra("lng", 0.0); val name = getStringExtra("name") ?: ""
+            Log.i("ROOM", "go $name $lat,$lng")
+            adapters.navi?.requestRoute(RouteInfo(lat, lng, null, null, name, "", "", "", RouteOption.RECOMMENDED, "", false))
+        }
         return START_STICKY
     }
 
@@ -176,6 +181,7 @@ class RoomService : Service() {
     companion object {
         private const val CH = "room"
         const val ACTION_REST = "ztw.carbiseo.REST"
+        const val ACTION_GO = "ztw.carbiseo.GO" // F7: extras lat, lng, name
         var restOffer by mutableStateOf(false); private set // S2: 화면에 휴게소 버튼
         var restMin by mutableIntStateOf(REST_DEFAULT_MIN) // 연속 주행 기준(분). 설정 화면이 바꾼다.
         var passenger by mutableStateOf(false) // H3: 켜면 업무 TTS(부재중 낭독)·쉼 방 선언(H1)을 끈다. 휴식 제안(S2)은 안전이라 유지.

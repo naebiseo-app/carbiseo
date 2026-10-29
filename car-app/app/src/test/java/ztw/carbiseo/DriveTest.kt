@@ -46,4 +46,13 @@ class DriveTest {
         assertEquals("C", nearestRestStop(LatLng(36.9, 127.0), LatLng(36.8, 127.0), stops)!!.name) // 앞쪽에 없으면 전체 최근접
         assertEquals(null, nearestRestStop(null, null, stops))
     }
+
+    @Test fun 다음_일정은_지금_이후_가장_이른_것() {
+        val e = { t: String, at: Long -> Event(t, at, "곳", LatLng(37.0, 127.0)) }
+        val list = listOf(e("셋", 300), e("하나", 100), e("둘", 200))
+        assertEquals("둘", nextEvent(list, 150)!!.title)
+        assertEquals("하나", nextEvent(list, 0)!!.title)
+        assertEquals(null, nextEvent(list, 300)) // 시작한 일정은 제외
+        assertEquals(null, nextEvent(emptyList(), 0))
+    }
 }

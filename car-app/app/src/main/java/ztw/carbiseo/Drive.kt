@@ -40,3 +40,6 @@ fun nearestRestStop(loc: LatLng?, dest: LatLng?, stops: List<RestStop> = REST_ST
 
 /** F6 데모 일정 1건(서버 /car/schedule). start = epoch ms. */
 data class Event(val title: String, val start: Long, val place: String, val at: LatLng)
+
+/** F7: 아직 시작 안 한 일정 중 가장 이른 것. */
+fun nextEvent(events: List<Event>, nowMs: Long): Event? = events.filter { it.start > nowMs }.minByOrNull { it.start }

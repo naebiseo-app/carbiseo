@@ -180,6 +180,7 @@ private fun Park(onImage: Boolean, onSettings: () -> Unit) {
         val calls = todayCalls(items, java.time.LocalDate.now())
         if (calls > 0) Text("오늘 AI가 대신 받은 전화 ${calls}통 = 운전 중 통화 ${calls}번 줄임",
             Modifier.padding(top = 6.dp), color = if (onImage) Color.White else ParkBody, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        nextEvent(RoomService.schedule, System.currentTimeMillis())?.let { NextEvent(it) }
         LazyColumn(Modifier.weight(1f).padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
             items(items, key = { it.id }) { i ->
                 Note(i, i.id == sel) { sel = if (sel == i.id) null else i.id; seenIds = seenIds + i.id }
@@ -201,6 +202,27 @@ private fun Note(i: InboxItem, selected: Boolean, onTap: () -> Unit) {
                 color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         }
         Text(i.summary.ifBlank { i.raw.take(80) }, color = ParkBody, fontSize = 18.sp, lineHeight = 26.sp)
+    }
+}
+
+/** F7: 다음 일정 카드 + 출발(내비 경로 요청). */
+@Composable
+private fun NextEvent(e: Event) {
+    val ctx = LocalContext.current
+    Row(Tall.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(14.dp)).background(ParkNote).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("다음 일정 · ${hhmm.format(Instant.ofEpochMilli(e.start).atZone(ZoneId.systemDefault()))}", color = ParkBody, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(e.title, color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+            Text(e.place, color = ParkBody, fontSize = 18.sp)
+        }
+        Button({
+            ctx.startService(Intent(ctx, RoomService::class.java).setAction(RoomService.ACTION_GO)
+                .putExtra("lat", e.at.lat).putExtra("lng", e.at.lng).putExtra("name", e.place))
+            toast(ctx, "${e.place}(으)로 길 안내를 시작해요")
+        }, Tall, colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
+            Text("출발", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        }
     }
 }
 
