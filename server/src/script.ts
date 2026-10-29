@@ -26,10 +26,20 @@ export function greeting(owner: string, name?: string): string {
   return `전화가 연결되면 첫 마디로 정확히 '안녕하세요, ${who}. 통화 내용은 요약해서 ${owner}님께 전해 드립니다.'라고 말합니다.`;
 }
 
+// 주행 방 + 도착 예정(분)이 있으면 방 안내를 이것으로 바꾼다.
+const ETA_LINE =
+  "지금 {owner}님은 운전 중입니다. '지금 운전 중이라 약 {eta}분 뒤 도착 예정입니다. 도착 후 연락드리도록 전해 드리겠습니다'라고 안내하고, 용건을 받은 뒤 마무리합니다. 상대가 급하다고 하면 '급한 건으로 표시해 두겠습니다'라고 말합니다.";
+
+// 차 앱이 보낸 남은 분. 0~1440 정수만, 그 밖은 없음.
+export function parseEta(v: unknown): number | null {
+  return Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 1440 ? (v as number) : null;
+}
+
 // 방 상태가 없으면 가장 보수적인 DRIVE_WORK 대본
-export function pickScript(room: Room | null, owner = "주인", name?: string): { room: Room; instruction: string } {
+export function pickScript(room: Room | null, owner = "주인", name?: string, eta?: number | null): { room: Room; instruction: string } {
   const r = room ?? "DRIVE_WORK";
-  return { room: r, instruction: `${greeting(owner, name)} ${COMMON} ${BY_ROOM[r]}`.replaceAll("{owner}", owner) };
+  const byRoom = r !== "PARK" && eta != null ? ETA_LINE.replace("{eta}", String(eta)) : BY_ROOM[r];
+  return { room: r, instruction: `${greeting(owner, name)} ${COMMON} ${byRoom}`.replaceAll("{owner}", owner) };
 }
 
 // 사용자 입력 검증: 1~10자, 글자·숫자·공백만(대본 주입 방지)

@@ -38,6 +38,7 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
     var limitKmh: Int? = null; private set
     var cameraOverspeed = false; private set
     var cautionZone = false; private set
+    var etaMin: Int? = null; private set // 목적지까지 남은 분. null = 목적지 없음.
 
     private fun set(f: Signals.() -> Signals) { ui.post { m.update(f) } }
 
@@ -112,13 +113,16 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
         n.addListener(object : NaviHelperEventListener {
             override fun onError(c: ai.pleos.playground.navi.constants.NaviErrorCode) { Log.w(TAG, "navi onError $c") }
             // 경로가 없을 때 SDK가 (0,0)을 주므로 목적지 없음으로 취급한다.
-            override fun onDestinationInfo(i: DestinationInfo) = set {
-                copy(destination = if (i.latitude == 0.0 && i.longitude == 0.0) null else LatLng(i.latitude, i.longitude))
+            override fun onDestinationInfo(i: DestinationInfo) {
+                val none = i.latitude == 0.0 && i.longitude == 0.0
+                val e = if (none) null else etaMinutes(i.remainTime)
+                ui.post { etaMin = e }
+                set { copy(destination = if (none) null else LatLng(i.latitude, i.longitude)) }
             }
             override fun onCurrentLocationInfo(i: CurrentLocationInfo) = set { copy(location = LatLng(i.latitude, i.longitude)) }
             // 취소/종료만 목적지 해제로 본다. 경유지 추가 직후의 취소->재개 깜빡임은 상태머신 2초 유예가 흡수한다.
-            override fun onRouteCancelled() { Log.i(TAG, "onRouteCancelled"); set { copy(destination = null) } }
-            override fun onRouteEnded() = set { copy(destination = null) }
+            override fun onRouteCancelled() { Log.i(TAG, "onRouteCancelled"); ui.post { etaMin = null }; set { copy(destination = null) } }
+            override fun onRouteEnded() { ui.post { etaMin = null }; set { copy(destination = null) } }
             override fun onDestinationChanged() { n.getDestinationInfo() }
             override fun onWaypointChanged(i: WaypointChangedInfo) { n.getDestinationInfo() }
             // 0 이하 = 제한속도 모름. 목록이 비면 경고/주의구간 해제로 본다.
@@ -130,9 +134,12 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
         })
         n.initialize({
             n.getDestinationInfo(); n.getCurrentLocationInfo()
-            ui.post(object : Runnable { override fun run() { navi?.getCurrentLocationInfo(); ui.postDelayed(this, 5000) } })
+            ui.post(object : Runnable { override fun run() { navi?.getCurrentLocationInfo(); navi?.getDestinationInfo(); ui.postDelayed(this, 5000) } })
         }, { Log.w(TAG, "navi initialize FAIL $it") })
     }
 
     companion object { const val TAG = "ROOMADP" }
 }
+
+/** DestinationInfo.remainTime(초, 에뮬 실측 RouteStartInfo duration=1620과 같은 단위) -> 분 반올림. 0 이하 = 모름. */
+fun etaMinutes(remainSec: Int): Int? = if (remainSec <= 0) null else Math.round(remainSec / 60.0).toInt().coerceAtLeast(1) // "약 0분" 방지

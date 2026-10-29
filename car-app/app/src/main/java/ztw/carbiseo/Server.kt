@@ -19,7 +19,7 @@ object Server {
         (c.responseCode in 200..299).also { c.disconnect() }
     }.getOrDefault(false)
 
-    fun postState(room: String) = post("/car/state", JSONObject().put("room", room))
+    fun postState(room: String, etaMin: Int?) = post("/car/state", JSONObject().put("room", room).put("eta_min", etaMin ?: JSONObject.NULL))
 
     fun postSettings(ownerLabel: String, assistantName: String) =
         post("/car/settings", JSONObject().put("owner_label", ownerLabel).put("assistant_name", assistantName))

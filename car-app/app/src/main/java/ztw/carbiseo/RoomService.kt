@@ -34,6 +34,7 @@ class RoomService : Service() {
     private lateinit var speaker: Speaker
     private val net = Executors.newSingleThreadExecutor() // 서버 호출은 여기서만(순서 보장, 메인 차단 방지)
     private var stateGen = 0       // 방 변경마다 +1. 재시도는 최신 방일 때만.
+    private var sentEta: Int? = null // 마지막으로 올린 남은 분. 분이 바뀔 때만 다시 올린다.
     private var since = 0L
     private var firstPoll = true   // 첫 폴링은 기존 항목을 채우기만 하고 읽지 않는다.
     private lateinit var latch: AlertLatch
@@ -54,11 +55,11 @@ class RoomService : Service() {
         if (!initial) speechFor(fresh, machine.room)?.let { hold.offer(it, alert) }?.let { speaker.speak(it) }
     }
 
-    private fun sendState(r: String, gen: Int, retry: Boolean): Unit = net.execute {
-        val ok = Server.postState(r)
-        Log.i("ROOM", "state $r -> ${if (ok) "ok" else "FAIL"}")
+    private fun sendState(r: String, gen: Int, retry: Boolean, eta: Int? = sentEta): Unit = net.execute {
+        val ok = Server.postState(r, eta)
+        Log.i("ROOM", "state $r eta=$eta -> ${if (ok) "ok" else "FAIL"}")
         // ponytail: 1회 재시도 후 포기(다음 방 변경이 어차피 다시 보냄)
-        if (!ok && retry) ui.postDelayed({ if (gen == stateGen) sendState(r, gen, false) }, 30_000)
+        if (!ok && retry) ui.postDelayed({ if (gen == stateGen) sendState(r, gen, false, eta) }, 30_000)
     }
 
     private val ticker = object : Runnable {
@@ -69,6 +70,9 @@ class RoomService : Service() {
             sig = t
             val a = latch.update(adapters.speedKmh, adapters.limitKmh, adapters.cameraOverspeed, adapters.cautionZone).let { forced ?: it }
             if (a != alert) { alert = a; Log.i("ROOM", "alert $a"); hold.release(a)?.let { speaker.speak(it) } }
+            // 정수 분이라 != 가 곧 "1분 이상 변화". 방 판정 전이면 첫 방 변경이 같이 올린다.
+            val e = adapters.etaMin
+            if (e != sentEta) machine.room?.let { sentEta = e; sendState(it.name, ++stateGen, true) }
             ui.postDelayed(this, 200)
         }
     }
@@ -84,6 +88,7 @@ class RoomService : Service() {
         machine.onChange = { from, to ->
             Log.i("ROOM", "$from -> $to")
             room = to.name
+            sentEta = adapters.etaMin
             sendState(to.name, ++stateGen, true)
             getSystemService(NotificationManager::class.java).notify(1, notification(room))
         }

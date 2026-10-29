@@ -1,4 +1,4 @@
-import { cleanName, parseRoom, pickScript } from "./script.ts";
+import { cleanName, parseEta, parseRoom, pickScript } from "./script.ts";
 
 interface Env {
   DB: D1Database;
@@ -54,11 +54,13 @@ export default {
 
     if (m === "POST" && pathname === "/car/state") {
       if (!authed) return json({ error: "unauthorized" }, 401);
-      const room = parseRoom(((await req.json().catch(() => ({}))) as { room?: unknown }).room);
+      const b = (await req.json().catch(() => ({}))) as { room?: unknown; eta_min?: unknown };
+      const room = parseRoom(b.room);
       if (!room) return json({ error: "room must be PARK|DRIVE_WORK|DRIVE_REST" }, 400);
+      const eta_min = parseEta(b.eta_min);
       await env.DB.prepare("INSERT INTO kv(key,value,updated_at) VALUES('car_context',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
-        .bind(JSON.stringify({ room }), now()).run();
-      return json({ ok: true, room });
+        .bind(JSON.stringify({ room, eta_min }), now()).run();
+      return json({ ok: true, room, eta_min });
     }
 
     // 차 앱 설정: 내 호칭·AI 비서 이름
@@ -90,8 +92,11 @@ export default {
       let room = null as ReturnType<typeof parseRoom>;
       let owner: string | undefined;
       let name: string | undefined;
+      let eta: number | null = null;
       try {
-        room = (await kvGet(env.DB, "car_context"))?.room ?? null;
+        const cc = await kvGet(env.DB, "car_context");
+        room = cc?.room ?? null;
+        eta = parseEta(cc?.eta_min);
         const st = await kvGet(env.DB, "settings");
         owner = st?.owner_label;
         name = st?.assistant_name;
@@ -99,7 +104,7 @@ export default {
       } catch (e) {
         console.log("call-context db error", String(e));
       }
-      const s = pickScript(room, owner, name);
+      const s = pickScript(room, owner, name, eta);
       return json({ CallContext: { Instruction: s.instruction, Variables: { room: s.room } } });
     }
 
