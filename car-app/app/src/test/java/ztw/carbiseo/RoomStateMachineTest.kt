@@ -70,6 +70,14 @@ class RoomStateMachineTest {
         assertEquals(Room.DRIVE_REST, m.room)
     }
 
+    @Test fun 업무시작_전_새벽은_REST_7시부터_WORK() {
+        clock.ms = LocalTime.of(6, 59, 59).toSecondOfDay() * 1000L
+        m.update { copy(destination = far) }; drive()
+        assertEquals(Room.DRIVE_REST, m.room)
+        clock.ms += 1000; m.tick(); clock.ms += 400; m.tick()          // 07:00:00
+        assertEquals(Room.DRIVE_WORK, m.room)
+    }
+
     @Test fun 목적지없음_집2km_이내면_REST() {
         m.update { copy(location = north(1990.0)) }; drive()
         assertEquals(Room.DRIVE_REST, m.room)

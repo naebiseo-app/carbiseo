@@ -15,6 +15,7 @@ data class LatLng(val lat: Double, val lng: Double)
 /** 나중에 설정 화면이 통째로 덮어쓴다(machine.settings = ...). */
 data class RoomSettings(
     val home: LatLng = LatLng(37.4979, 127.0276),
+    val workStart: LocalTime = LocalTime.of(7, 0),
     val workEnd: LocalTime = LocalTime.of(18, 0),
     val homeDestRadiusM: Double = 300.0,   // 목적지가 "집"으로 인정되는 반경
     val homeNearRadiusM: Double = 2000.0,  // 목적지 없을 때 현재 위치가 "집 근처"인 반경
@@ -75,7 +76,8 @@ class RoomStateMachine(
         val dest = effectiveDestination(now) // 정차 중에도 호출해야 유예 시계가 돈다
         val driving = (s.gear != Gear.PARK && s.gear != Gear.UNKNOWN) || s.distractionOptimized
         if (s.charging || !driving) return Room.PARK
-        val afterWork = !clock.instant().atZone(clock.zone).toLocalTime().isBefore(settings.workEnd)
+        val t = clock.instant().atZone(clock.zone).toLocalTime()
+        val afterWork = t.isBefore(settings.workStart) || !t.isBefore(settings.workEnd) // 업무 시간 밖(새벽 포함)
         val rest = when {
             dest != null -> distanceM(dest, settings.home) <= settings.homeDestRadiusM || afterWork
             else -> afterWork || (s.location?.let { distanceM(it, settings.home) <= settings.homeNearRadiusM } ?: false)
