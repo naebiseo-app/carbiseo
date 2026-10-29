@@ -27,4 +27,23 @@ class DriveTest {
         assertTrue(o.fire(true))
         assertEquals(false, o.fire(true))
     }
+
+    @Test fun 연속_주행_기준() {
+        assertFalse(restDue(null, 10_000_000, 1))
+        assertFalse(restDue(0, 59_999, 1))
+        assertTrue(restDue(0, 60_000, 1))
+        assertFalse(restDue(0, 119 * 60_000L, REST_DEFAULT_MIN))
+        assertTrue(restDue(0, 120 * 60_000L, REST_DEFAULT_MIN))
+    }
+
+    @Test fun 휴게소는_앞쪽에서_가장_가까운_곳() {
+        val a = RestStop("A", LatLng(37.30, 127.0)); val b = RestStop("B", LatLng(37.20, 127.0)); val c = RestStop("C", LatLng(37.00, 127.0))
+        val stops = listOf(a, b, c)
+        val loc = LatLng(37.25, 127.0)
+        assertEquals("B", nearestRestStop(loc, LatLng(36.5, 127.0), stops)!!.name) // 남쪽으로 가는 중: A는 뒤
+        assertEquals("A", nearestRestStop(loc, LatLng(37.6, 127.0), stops)!!.name) // 북쪽으로 가는 중
+        assertEquals("B", nearestRestStop(LatLng(37.21, 127.0), null, stops)!!.name) // 목적지 없음: 그냥 최근접
+        assertEquals("C", nearestRestStop(LatLng(36.9, 127.0), LatLng(36.8, 127.0), stops)!!.name) // 앞쪽에 없으면 전체 최근접
+        assertEquals(null, nearestRestStop(null, null, stops))
+    }
 }

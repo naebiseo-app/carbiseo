@@ -1,6 +1,7 @@
 package ztw.carbiseo
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.drawable.AnimatedImageDrawable
 import android.graphics.drawable.Drawable
@@ -219,7 +220,18 @@ private fun Sheet(i: InboxItem, onDone: () -> Unit) {
     }
 }
 
-/** 업무 운전(판정 전도 이 화면): 조작 요소 없음. */
+/** S2: 연속 주행 기준을 넘으면 주행 화면에 큰 버튼 1개. 움직임 없음, 한 번 터치. */
+@Composable
+private fun RestButton(bg: Color, ink: Color, m: Modifier = Modifier) {
+    if (!RoomService.restOffer) return
+    val ctx = LocalContext.current
+    Button({ ctx.startService(Intent(ctx, RoomService::class.java).setAction(RoomService.ACTION_REST)) },
+        m.fillMaxWidth().heightIn(min = 96.dp), colors = ButtonDefaults.buttonColors(containerColor = bg)) {
+        Text("가까운 휴게소 들르기", color = ink, fontSize = 30.sp, fontWeight = FontWeight.Black)
+    }
+}
+
+/** 업무 운전(판정 전도 이 화면): 조작 요소는 휴게소 버튼(S2)뿐. */
 @Composable
 private fun Work(r: String) {
     val n = RoomService.inbox.count { it.urgent && it.id !in seenIds }
@@ -230,6 +242,7 @@ private fun Work(r: String) {
             Text("$n", color = WorkInk, fontSize = 120.sp, lineHeight = 130.sp, fontWeight = FontWeight.Black)
             Text("급한 건", color = WorkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         }
+        RestButton(WorkAcc, WorkBg1, Modifier.align(Alignment.BottomCenter))
     }
 }
 
@@ -241,6 +254,7 @@ private fun Rest() {
         Text("오늘 일은 여기까지", color = RestInk, fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Black)
         // TODO: 집까지 ETA·가족 전화 카드 — 내비 ETA·가족 연락처 데이터가 생기면 추가
         Spacer(Modifier.weight(1f))
+        RestButton(RestAcc, RestBg1, Modifier.padding(bottom = 16.dp))
         Text("업무 ${n}건은 내일 아침에 알려 드릴게요", color = RestInk, fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold)
     }
 }
@@ -275,6 +289,16 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
                     colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) { Text("사진/GIF 고르기", fontSize = 18.sp) }
                 OutlinedButton({ prefs.edit().remove(r).apply(); File(ctx.filesDir, "bg_$r").delete(); onBg() }, Tall) {
                     Text("기본으로", color = ParkInk, fontSize = 18.sp)
+                }
+            }
+        }
+        Text("휴식 제안: 연속 운전 ${RoomService.restMin}분부터", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            for ((min, t) in listOf(1 to "1분(시연)", 60 to "60분", REST_DEFAULT_MIN to "120분")) {
+                val on = RoomService.restMin == min
+                Button({ RoomService.restMin = min; prefs.edit().putInt("rest_min", min).apply() }, Tall,
+                    colors = ButtonDefaults.buttonColors(containerColor = if (on) ParkAcc else ParkNote)) {
+                    Text(t, color = if (on) Color.White else ParkInk, fontSize = 18.sp)
                 }
             }
         }

@@ -20,6 +20,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.time.Clock
@@ -41,6 +42,8 @@ class RoomService : Service() {
     private val hold = SpeechHold()
     private var forced: Alert? = null // 디버그 브로드캐스트로 강제한 값
     private val homeOnce = Once()
+    private val restOnce = Once()
+    private var driveStart: Long? = null // 이번 운전 시작(PARK에서 나온 시각). 정차 중 null.
 
     private val poller = object : Runnable {
         override fun run() { net.execute { Server.fetchInbox(since)?.let { r -> ui.post { onInbox(r) } } }; ui.postDelayed(this, 15_000) }
@@ -77,6 +80,7 @@ class RoomService : Service() {
             // 정수 분이라 != 가 곧 "1분 이상 변화". 방 판정 전이면 첫 방 변경이 같이 올린다.
             val e = adapters.etaMin
             if (e != sentEta) machine.room?.let { sentEta = e; sendState(it.name, ++stateGen, true) }
+            if (restOnce.fire(restDue(driveStart, System.currentTimeMillis(), restMin))) { restOffer = true; say(REST_SPEECH) }
             if (homeOnce.fire(homeSoon(machine.room, machine.signals.destination, machine.settings, e))) say(HOME_SOON_SPEECH)
             ui.postDelayed(this, 200)
         }
@@ -88,12 +92,14 @@ class RoomService : Service() {
             .createNotificationChannel(NotificationChannel(CH, "내비서", NotificationManager.IMPORTANCE_LOW))
         val n = notification(room)
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(1, n)
+        restMin = getSharedPreferences("car_ui", MODE_PRIVATE).getInt("rest_min", REST_DEFAULT_MIN)
         latch = AlertLatch(Clock.systemDefaultZone())
         machine = RoomStateMachine(Clock.systemDefaultZone()) // settings = 기본 상수. 설정 화면이 machine.settings를 덮어쓴다.
         machine.onChange = { from, to ->
             Log.i("ROOM", "$from -> $to")
             room = to.name
-            if (to == Room.PARK) homeOnce.reset()
+            if (to == Room.PARK) { homeOnce.reset(); restOnce.reset(); restOffer = false; driveStart = null }
+            else if (driveStart == null) driveStart = System.currentTimeMillis()
             sentEta = adapters.etaMin
             sendState(to.name, ++stateGen, true)
             getSystemService(NotificationManager::class.java).notify(1, notification(room))
@@ -139,7 +145,21 @@ class RoomService : Service() {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_REST) addRestStop()
+        return START_STICKY
+    }
+
+    /** S2 버튼: 경로상 앞쪽 휴게소를 첫 경유지로. 목적지가 없으면 그 휴게소로 경로를 연다. */
+    private fun addRestStop() {
+        restOffer = false
+        val s = machine.signals
+        val stop = nearestRestStop(s.location, s.destination) ?: return say("위치를 몰라 휴게소를 못 찾았어요")
+        Log.i("ROOM", "rest stop ${stop.name} dest=${s.destination}")
+        val n = adapters.navi ?: return
+        if (s.destination != null) n.addWaypoint(RequestWaypointInfo(stop.at.lat, stop.at.lng, stop.name, WaypointIndex.FIRST, "", "", "", ""))
+        else n.requestRoute(RouteInfo(stop.at.lat, stop.at.lng, null, null, stop.name, "", "", "", RouteOption.RECOMMENDED, "", false))
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -149,6 +169,9 @@ class RoomService : Service() {
 
     companion object {
         private const val CH = "room"
+        const val ACTION_REST = "ztw.carbiseo.REST"
+        var restOffer by mutableStateOf(false); private set // S2: 화면에 휴게소 버튼
+        var restMin by mutableIntStateOf(REST_DEFAULT_MIN) // 연속 주행 기준(분). 설정 화면이 바꾼다.
         var room by mutableStateOf("(판정 전)"); private set
         var sig by mutableStateOf(""); private set
         var inbox by mutableStateOf(listOf<InboxItem>()); private set // id 내림차순
