@@ -1,16 +1,23 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
+// 현대차공모전/.env 의 CAR_TOKEN(없으면 빈 문자열). 값은 소스에 두지 않고 BuildConfig로만 주입한다.
+val carToken = file("../../.env").takeIf { it.exists() }?.readLines()
+    ?.firstOrNull { it.startsWith("CAR_TOKEN=") }?.substringAfter("=")?.trim()?.trim { it.code == 34 || it.code == 39 } ?: ""
 android {
     namespace = "ztw.carbiseo"
     compileSdk = 34
-    defaultConfig { applicationId = "ztw.carbiseo"; minSdk = 28; targetSdk = 34; versionCode = 1; versionName = "0.1" }
+    defaultConfig { applicationId = "ztw.carbiseo"; minSdk = 28; targetSdk = 34; versionCode = 1; versionName = "0.1"
+        buildConfigField("String", "SERVER_URL", "\"https://carbiseo-api.wondi81.workers.dev\"")
+        buildConfigField("String", "CAR_TOKEN", "\"$carToken\"")
+    }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.15" }
 }
 dependencies {
     implementation("ai.pleos.playground:Vehicle:2.3.2")
     implementation("ai.pleos.playground:NaviHelper:3.0.5")
+    implementation("ai.pleos.playground:TextToSpeech:3.3.1")
     implementation(platform("androidx.compose:compose-bom:2024.09.03"))
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.9.3")

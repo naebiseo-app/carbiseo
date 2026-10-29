@@ -22,6 +22,8 @@ class MainActivity : ComponentActivity() {
             Column(Modifier.padding(24.dp)) {
                 Text("방: ${RoomService.room}", fontSize = 32.sp)
                 Text(RoomService.sig, fontSize = 16.sp)
+                Text("부재중 (최근 5건)", fontSize = 20.sp, modifier = Modifier.padding(top = 16.dp))
+                RoomService.inbox.take(5).forEach { Text(itemLine(it), fontSize = 16.sp) }
             }
         }
     }
