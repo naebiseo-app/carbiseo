@@ -11,13 +11,18 @@ object Server {
         setRequestProperty("Authorization", "Bearer ${BuildConfig.CAR_TOKEN}")
     }
 
-    fun postState(room: String): Boolean = runCatching {
-        val c = open("/car/state", "POST")
+    private fun post(path: String, body: JSONObject): Boolean = runCatching {
+        val c = open(path, "POST")
         c.doOutput = true
         c.setRequestProperty("Content-Type", "application/json")
-        c.outputStream.use { it.write(JSONObject().put("room", room).toString().toByteArray()) }
+        c.outputStream.use { it.write(body.toString().toByteArray()) }
         (c.responseCode in 200..299).also { c.disconnect() }
     }.getOrDefault(false)
+
+    fun postState(room: String) = post("/car/state", JSONObject().put("room", room))
+
+    fun postSettings(ownerLabel: String, assistantName: String) =
+        post("/car/settings", JSONObject().put("owner_label", ownerLabel).put("assistant_name", assistantName))
 
     fun fetchInbox(since: Long): List<InboxItem>? = runCatching {
         val c = open("/car/inbox?since=$since", "GET")
