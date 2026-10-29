@@ -30,9 +30,12 @@ object Server {
             if (c.responseCode !in 200..299) return@runCatching null
             val arr = JSONObject(c.inputStream.bufferedReader().readText()).getJSONArray("items")
             (0 until arr.length()).map { arr.getJSONObject(it) }.map {
-                InboxItem(it.getLong("id"), it.optString("from_label"), it.optString("summary"),
-                    it.optInt("urgent") != 0, it.optLong("created_at"), it.optString("raw"), it.optString("kind", "call"))
+                InboxItem(it.getLong("id"), it.str("from_label"), it.str("summary"),
+                    it.optInt("urgent") != 0, it.optLong("created_at"), it.str("raw"), it.str("kind").ifEmpty { "call" })
             }
         } finally { c.disconnect() }
     }.getOrNull()
 }
+
+// JSON null을 "null" 글자가 아니라 빈 문자열로
+private fun JSONObject.str(k: String) = if (isNull(k)) "" else optString(k)

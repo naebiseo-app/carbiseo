@@ -20,17 +20,20 @@ class Speaker(private val ctx: Context) {
     fun start() {
         runCatching {
             val t = TextToSpeech(ctx, Mode.ON_DEVICE).also { pleos = it }
-            t.setLocale(Locale.KOREAN)
-            t.addEventListener(object : EventListener {
+            // SDK는 initialize 성공 뒤에만 setLocale/addEventListener를 받는다(에뮬 실측: 먼저 부르면 lateinit 예외)
+            val events = object : EventListener {
                 override fun onStart() {}
                 override fun onReady() {}
                 override fun onDone() {}
                 override fun onStop() {}
                 override fun onUpdatedRms(rms: Double) {}
                 override fun onError(e: ErrorType) = useFallback("pleos onError $e", replay = true)
-            })
+            }
             t.initialize(object : OnInitializeListener {
-                override fun onSuccess() { ready = true; Log.i("ROOM", "TTS pleos ready") }
+                override fun onSuccess() {
+                    runCatching { t.setLocale(Locale.KOREAN); t.addEventListener(events); ready = true; Log.i("ROOM", "TTS pleos ready") }
+                        .onFailure { useFallback("pleos setup $it", replay = false) }
+                }
                 override fun onFailure(e: ErrorType) = useFallback("pleos init $e", replay = false)
             })
         }.onFailure { useFallback("pleos start $it", replay = false) }
