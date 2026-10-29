@@ -6,3 +6,4 @@ build/
 local.properties
 *.apk
 .idea/
+!apk/*.apk
