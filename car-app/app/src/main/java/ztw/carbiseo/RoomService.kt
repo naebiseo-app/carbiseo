@@ -46,7 +46,13 @@ class RoomService : Service() {
     private var driveStart: Long? = null // 이번 운전 시작(PARK에서 나온 시각). 정차 중 null.
 
     private val poller = object : Runnable {
-        override fun run() { net.execute { Server.fetchInbox(since)?.let { r -> ui.post { onInbox(r) } } }; ui.postDelayed(this, 15_000) }
+        override fun run() {
+            net.execute {
+                Server.fetchInbox(since)?.let { r -> ui.post { onInbox(r) } }
+                Server.fetchSchedule()?.let { r -> ui.post { schedule = r } }
+            }
+            ui.postDelayed(this, 15_000)
+        }
     }
 
     private fun onInbox(fetched: List<InboxItem>) {
@@ -177,5 +183,6 @@ class RoomService : Service() {
         var sig by mutableStateOf(""); private set
         var inbox by mutableStateOf(listOf<InboxItem>()); private set // id 내림차순
         var alert by mutableStateOf(Alert.NONE); private set
+        var schedule by mutableStateOf(listOf<Event>()); private set // F6 데모 일정
     }
 }

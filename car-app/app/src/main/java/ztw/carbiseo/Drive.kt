@@ -37,3 +37,6 @@ fun nearestRestStop(loc: LatLng?, dest: LatLng?, stops: List<RestStop> = REST_ST
     val ahead = if (dest == null) stops else stops.filter { distanceM(it.at, dest) < distanceM(loc, dest) }
     return ahead.ifEmpty { stops }.minByOrNull { distanceM(loc, it.at) }
 }
+
+/** F6 데모 일정 1건(서버 /car/schedule). start = epoch ms. */
+data class Event(val title: String, val start: Long, val place: String, val at: LatLng)

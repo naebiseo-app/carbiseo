@@ -35,6 +35,17 @@ object Server {
             }
         } finally { c.disconnect() }
     }.getOrNull()
+
+    fun fetchSchedule(): List<Event>? = runCatching {
+        val c = open("/car/schedule", "GET")
+        try {
+            if (c.responseCode !in 200..299) return@runCatching null
+            val arr = JSONObject(c.inputStream.bufferedReader().readText()).getJSONArray("items")
+            (0 until arr.length()).map { arr.getJSONObject(it) }.map {
+                Event(it.str("title"), it.getLong("start"), it.str("place"), LatLng(it.getDouble("lat"), it.getDouble("lng")))
+            }
+        } finally { c.disconnect() }
+    }.getOrNull()
 }
 
 // JSON null을 "null" 글자가 아니라 빈 문자열로

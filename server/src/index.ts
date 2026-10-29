@@ -1,10 +1,12 @@
 import { cleanName, parseEta, parseRoom, pickScript } from "./script.ts";
+import { adminPage, basicOk, demoSchedule, parseFakeCall } from "./admin.ts";
 
 interface Env {
   DB: D1Database;
   CAR_TOKEN: string;
   CALL_CONTEXT_SECRET: string;
   CLAWOPS_SIGNING_KEY?: string; // 아직 없으면 서명 검증은 'nokey'로 기록만
+  ADMIN_TOKEN?: string; // 없으면 /admin 전부 401
 }
 
 const json = (o: unknown, status = 200) =>
@@ -114,6 +116,32 @@ export default {
       console.log("clawops webhook sig=" + sig, "ct=" + req.headers.get("content-type"));
       await saveInbox(env.DB, "event", "received", null, raw, { ct: req.headers.get("content-type"), sig, sig_header: req.headers.get("x-signature") });
       return json({ ok: true });
+    }
+
+    if (m === "GET" && pathname === "/car/schedule") {
+      if (!authed) return json({ error: "unauthorized" }, 401);
+      return json({ items: (await kvGet(env.DB, "schedule")) ?? [] });
+    }
+
+    // F6 데모 모드 관리 페이지. 브라우저 기본 로그인 창(비밀번호 = ADMIN_TOKEN).
+    if (pathname === "/admin" || pathname.startsWith("/admin/")) {
+      if (!basicOk(req.headers.get("authorization"), env.ADMIN_TOKEN))
+        return new Response("unauthorized", { status: 401, headers: { "www-authenticate": 'Basic realm="carbiseo-admin", charset="UTF-8"' } });
+      const html = (msg: string, status = 200) => new Response(adminPage(msg), { status, headers: { "content-type": "text/html; charset=utf-8" } });
+      if (m === "GET" && pathname === "/admin") return html("");
+      if (m === "POST" && pathname === "/admin/fake-call") {
+        const c = parseFakeCall(await req.formData());
+        if (!c) return html("입력 확인: 이름 1~10자(글자·숫자·공백), 용건 1~120자", 400);
+        const room = (await kvGet(env.DB, "car_context"))?.room ?? null;
+        await env.DB.prepare("INSERT INTO inbox(kind,status,room,from_label,summary,urgent,created_at,raw,meta) VALUES('call','demo',?,?,?,?,?,?,?)")
+          .bind(room, c.from_label, c.summary, c.urgent, now(), JSON.stringify(c), JSON.stringify({ demo: true })).run();
+        return html(`넣었습니다: ${c.from_label} / ${c.summary}`);
+      }
+      if (m === "POST" && pathname === "/admin/reset-schedule") {
+        const s = demoSchedule(now());
+        await env.DB.prepare("INSERT OR REPLACE INTO kv(key,value,updated_at) VALUES('schedule',?,?)").bind(JSON.stringify(s), now()).run();
+        return html(`일정 ${s.length}건으로 초기화했습니다`);
+      }
     }
 
     return json({ error: "not found" }, 404);
