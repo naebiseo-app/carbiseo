@@ -24,19 +24,26 @@ async function saveInbox(db: D1Database, kind: string, status: string, room: str
     .run();
 }
 
-const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
 const b64 = (b: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(b)));
 
-// 인코딩 미확인: hex/base64 둘 다 시도. 결과 = hex | base64 | fail | nokey | nosig
-async function checkSig(env: Env, raw: string, sig: string | null) {
+// ClawOps 서명(문서 platform.claw-ops.com/docs/webhooks/signature-verification, 10-29 확인):
+// base64(HMAC-SHA256(key, 웹훅URL + 파라미터를 키 사전순으로 key+value 이어붙인 것)). 폼이 아니면 JSON 최상위 값으로 같은 규칙.
+export function signData(url: string, ct: string | null, raw: string): string {
+  let params: [string, string][] = [];
+  if ((ct ?? "").includes("json")) {
+    try { params = Object.entries(JSON.parse(raw)).map(([k, v]) => [k, typeof v === "string" ? v : JSON.stringify(v)]); } catch { /* 빈 파라미터 */ }
+  } else params = [...new URLSearchParams(raw)];
+  params.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return url + params.map(([k, v]) => k + v).join("");
+}
+
+// 결과 = ok | fail | nokey | nosig. ponytail: 아직 기록만 하고 거절하지 않음 — 실제 이벤트로 ok 확인 후 fail을 401로.
+async function checkSig(env: Env, url: string, ct: string | null, raw: string, sig: string | null) {
   if (!env.CLAWOPS_SIGNING_KEY) return "nokey";
   if (!sig) return "nosig";
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.CLAWOPS_SIGNING_KEY), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(raw));
-  const s = sig.replace(/^sha256=/, "").trim();
-  if (s.toLowerCase() === hex(mac)) return "hex";
-  if (s === b64(mac)) return "base64";
-  return "fail";
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signData(url, ct, raw)));
+  return sig.trim() === b64(mac) ? "ok" : "fail";
 }
 
 export default {
@@ -98,7 +105,7 @@ export default {
 
     if (m === "POST" && pathname === "/clawops/events") {
       const raw = await req.text();
-      const sig = await checkSig(env, raw, req.headers.get("x-signature"));
+      const sig = await checkSig(env, req.url, req.headers.get("content-type"), raw, req.headers.get("x-signature"));
       console.log("clawops webhook sig=" + sig, "ct=" + req.headers.get("content-type"));
       await saveInbox(env.DB, "event", "received", null, raw, { ct: req.headers.get("content-type"), sig, sig_header: req.headers.get("x-signature") });
       return json({ ok: true });
