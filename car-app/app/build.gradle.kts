@@ -5,6 +5,7 @@ val carToken = file("../../.env").takeIf { it.exists() }?.readLines()
 android {
     namespace = "ztw.carbiseo"
     compileSdk = 34
+    useLibrary("android.car") // CarPropertyManager(속도). 런타임은 매니페스트 uses-library
     defaultConfig { applicationId = "ztw.carbiseo"; minSdk = 28; targetSdk = 34; versionCode = 1; versionName = "0.1"
         buildConfigField("String", "SERVER_URL", "\"https://carbiseo-api.wondi81.workers.dev\"")
         buildConfigField("String", "CAR_TOKEN", "\"$carToken\"")

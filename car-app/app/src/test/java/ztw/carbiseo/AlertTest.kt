@@ -1,0 +1,62 @@
+package ztw.carbiseo
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+class AlertTest {
+    @Test fun 경계값_제한속도_더하기_3까지는_과속_아님() {
+        assertEquals(Alert.NONE, alertFor(53f, 50, false, false))
+        assertEquals(Alert.OVERSPEED, alertFor(53.1f, 50, false, false))
+    }
+
+    @Test fun 우선순위_과속이_주의구간보다_위() {
+        assertEquals(Alert.OVERSPEED, alertFor(80f, 50, false, true))
+        assertEquals(Alert.OVERSPEED, alertFor(10f, 50, true, true))
+        assertEquals(Alert.CAUTION, alertFor(40f, 50, false, true))
+    }
+
+    @Test fun null이면_그_조건_무시() {
+        assertEquals(Alert.NONE, alertFor(null, 50, false, false))
+        assertEquals(Alert.NONE, alertFor(120f, null, false, false))
+        assertEquals(Alert.OVERSPEED, alertFor(null, null, true, false))
+        assertEquals(Alert.CAUTION, alertFor(null, null, false, true))
+    }
+
+    @Test fun 과속_해제는_제한속도_이하_2초_유지() {
+        val c = FakeClock(0); val l = AlertLatch(c)
+        assertEquals(Alert.OVERSPEED, l.update(60f, 50, false, false))
+        c.ms = 100; assertEquals(Alert.OVERSPEED, l.update(52f, 50, false, false)) // 여유 안이지만 제한 초과 -> 유지
+        c.ms = 200; assertEquals(Alert.OVERSPEED, l.update(50f, 50, false, false)) // 진정 시작
+        c.ms = 2100; assertEquals(Alert.OVERSPEED, l.update(49f, 50, false, false))
+        c.ms = 2200; assertEquals(Alert.NONE, l.update(49f, 50, false, false))
+    }
+
+    @Test fun 해제_대기중_다시_넘으면_시계_리셋() {
+        val c = FakeClock(0); val l = AlertLatch(c)
+        l.update(60f, 50, false, false)
+        c.ms = 100; l.update(45f, 50, false, false)
+        c.ms = 1500; l.update(51f, 50, false, false) // 제한 초과 -> 리셋
+        c.ms = 1600; l.update(45f, 50, false, false)
+        c.ms = 3500; assertEquals(Alert.OVERSPEED, l.update(45f, 50, false, false))
+        c.ms = 3600; assertEquals(Alert.NONE, l.update(45f, 50, false, false))
+    }
+
+    @Test fun 과속_해제후_주의구간이면_CAUTION() {
+        val c = FakeClock(0); val l = AlertLatch(c)
+        l.update(null, null, true, true)
+        c.ms = 10; assertEquals(Alert.OVERSPEED, l.update(null, null, false, true))
+        c.ms = 2010; assertEquals(Alert.CAUTION, l.update(null, null, false, true))
+        c.ms = 2020; assertEquals(Alert.NONE, l.update(null, null, false, false)) // CAUTION은 즉시 해제
+    }
+
+    @Test fun 음성_보류_후_최신_1개만() {
+        val h = SpeechHold()
+        assertEquals("a", h.offer("a", Alert.NONE))
+        assertNull(h.offer("b", Alert.OVERSPEED))
+        assertNull(h.offer("c", Alert.CAUTION))
+        assertNull(h.release(Alert.CAUTION))
+        assertEquals("c", h.release(Alert.NONE))
+        assertNull(h.release(Alert.NONE))
+    }
+}

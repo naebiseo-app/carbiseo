@@ -36,6 +36,9 @@ class RoomService : Service() {
     private var stateGen = 0       // 방 변경마다 +1. 재시도는 최신 방일 때만.
     private var since = 0L
     private var firstPoll = true   // 첫 폴링은 기존 항목을 채우기만 하고 읽지 않는다.
+    private lateinit var latch: AlertLatch
+    private val hold = SpeechHold()
+    private var forced: Alert? = null // 디버그 브로드캐스트로 강제한 값
 
     private val poller = object : Runnable {
         override fun run() { net.execute { Server.fetchInbox(since)?.let { r -> ui.post { onInbox(r) } } }; ui.postDelayed(this, 15_000) }
@@ -48,7 +51,7 @@ class RoomService : Service() {
         if (fresh.isEmpty()) return
         inbox = (fresh.filter { it.kind == "call" } + inbox).sortedByDescending { it.id }.take(50)
         Log.i("ROOM", "inbox ${if (initial) "initial" else "new"} ${fresh.size}")
-        if (!initial) speechFor(fresh, machine.room)?.let { speaker.speak(it) }
+        if (!initial) speechFor(fresh, machine.room)?.let { hold.offer(it, alert) }?.let { speaker.speak(it) }
     }
 
     private fun sendState(r: String, gen: Int, retry: Boolean): Unit = net.execute {
@@ -63,7 +66,10 @@ class RoomService : Service() {
             machine.tick()
             val t = machine.signals.toString()
             if (t != sig) Log.i("ROOM", "signals $t") // 입력 신호가 바뀔 때만
-            sig = t; ui.postDelayed(this, 200)
+            sig = t
+            val a = latch.update(adapters.speedKmh, adapters.limitKmh, adapters.cameraOverspeed, adapters.cautionZone).let { forced ?: it }
+            if (a != alert) { alert = a; Log.i("ROOM", "alert $a"); hold.release(a)?.let { speaker.speak(it) } }
+            ui.postDelayed(this, 200)
         }
     }
 
@@ -73,6 +79,7 @@ class RoomService : Service() {
             .createNotificationChannel(NotificationChannel(CH, "차량비서", NotificationManager.IMPORTANCE_LOW))
         val n = notification(room)
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(1, n)
+        latch = AlertLatch(Clock.systemDefaultZone())
         machine = RoomStateMachine(Clock.systemDefaultZone()) // settings = 기본 상수. 설정 화면이 machine.settings를 덮어쓴다.
         machine.onChange = { from, to ->
             Log.i("ROOM", "$from -> $to")
@@ -108,7 +115,14 @@ class RoomService : Service() {
                 adapters.navi?.addWaypoint(RequestWaypointInfo(37.2636, 127.0286, "Test rest area", WaypointIndex.FIRST, "", "", "", ""))
             }
         }
-        for ((rc, action) in listOf(wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE")) {
+        // adb shell am broadcast -a ztw.carbiseo.ALERT --es v OVERSPEED|CAUTION|NONE (NONE = 강제 해제, 실제 신호로 복귀)
+        val al = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                forced = runCatching { Alert.valueOf(i.getStringExtra("v") ?: "") }.getOrNull()?.takeIf { it != Alert.NONE }
+                Log.i("ROOM", "debug alert force=$forced")
+            }
+        }
+        for ((rc, action) in listOf(wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT")) {
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(rc, IntentFilter(action), Context.RECEIVER_EXPORTED) else registerReceiver(rc, IntentFilter(action))
             receivers += rc
         }
@@ -127,5 +141,6 @@ class RoomService : Service() {
         var room by mutableStateOf("(판정 전)"); private set
         var sig by mutableStateOf(""); private set
         var inbox by mutableStateOf(listOf<InboxItem>()); private set // id 내림차순
+        var alert by mutableStateOf(Alert.NONE); private set
     }
 }

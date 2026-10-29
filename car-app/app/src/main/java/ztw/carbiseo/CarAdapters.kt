@@ -1,6 +1,8 @@
 package ztw.carbiseo
 
 import ai.pleos.playground.navi.constants.NavigationStatus
+import ai.pleos.playground.navi.data.CameraAlert
+import ai.pleos.playground.navi.data.CautionPoint
 import ai.pleos.playground.navi.data.CurrentLocationInfo
 import ai.pleos.playground.navi.data.DestinationInfo
 import ai.pleos.playground.navi.data.WaypointChangedInfo
@@ -9,6 +11,10 @@ import ai.pleos.playground.navi.helper.listener.NaviHelperEventListener
 import ai.pleos.playground.vehicle.Vehicle
 import ai.pleos.playground.vehicle.constant.control.VehicleGear
 import ai.pleos.playground.vehicle.listener.GearSelectionListener
+import android.car.Car
+import android.car.VehiclePropertyIds
+import android.car.hardware.CarPropertyValue
+import android.car.hardware.property.CarPropertyManager
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -26,6 +32,12 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
     var navi: NaviHelper? = null
         private set
     private var car: Any? = null
+
+    // 차 상태 반응 입력(메인 스레드에서만 씀). null = 모름/미지원.
+    var speedKmh: Float? = null; private set
+    var limitKmh: Int? = null; private set
+    var cameraOverspeed = false; private set
+    var cautionZone = false; private set
 
     private fun set(f: Signals.() -> Signals) { ui.post { m.update(f) } }
 
@@ -55,6 +67,19 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
         val carCls = Class.forName("android.car.Car")
         car = carCls.getMethod("createCar", Context::class.java).invoke(null, ctx)
         ui.postDelayed({ runCatching { attachUx(carCls) }.onFailure { Log.w(TAG, "uxr attach FAIL ${it.cause ?: it}") } }, 2000)
+        ui.postDelayed({ attachSpeed() }, 2000)
+    }
+
+    // 속도: Pleos Vehicle SDK엔 없음 -> 공식 FAQ대로 AAOS PERF_VEHICLE_SPEED(m/s). CAR_SPEED 권한이 늦게 허용될 수 있어 실패 시 5초 뒤 재시도.
+    private fun attachSpeed() {
+        runCatching {
+            val pm = (car as Car).getCarManager(Car.PROPERTY_SERVICE) as CarPropertyManager
+            pm.registerCallback(object : CarPropertyManager.CarPropertyEventCallback {
+                override fun onChangeEvent(v: CarPropertyValue<*>) { val k = (v.value as? Float)?.let { Math.abs(it) * 3.6f }; ui.post { speedKmh = k } }
+                override fun onErrorEvent(id: Int, zone: Int) { Log.w("ROOM", "speed onError $id"); ui.post { speedKmh = null } }
+            }, VehiclePropertyIds.PERF_VEHICLE_SPEED, CarPropertyManager.SENSOR_RATE_UI)
+            Log.i(TAG, "speed attached")
+        }.onFailure { Log.w("ROOM", "speed attach FAIL ${it.cause ?: it}"); if (it is SecurityException) ui.postDelayed({ attachSpeed() }, 5000) }
     }
 
     private fun attachUx(carCls: Class<*>) {
@@ -96,6 +121,10 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
             override fun onRouteEnded() = set { copy(destination = null) }
             override fun onDestinationChanged() { n.getDestinationInfo() }
             override fun onWaypointChanged(i: WaypointChangedInfo) { n.getDestinationInfo() }
+            // 0 이하 = 제한속도 모름. 목록이 비면 경고/주의구간 해제로 본다.
+            override fun onCurrentRoadSpeedLimit(l: Int) { ui.post { limitKmh = l.takeIf { it > 0 } } }
+            override fun onCameraAlert(a: List<CameraAlert>) { val o = a.any { it.isOverSpeed || it.isOverSectionAvrSpeed }; ui.post { cameraOverspeed = o } }
+            override fun onCautionPointInfo(p: List<CautionPoint>) { val z = p.isNotEmpty(); ui.post { cautionZone = z } }
             override fun onNavigationStatus(s: NavigationStatus) { Log.i(TAG, "navStatus $s"); if (s == NavigationStatus.ROUTE_DRIVE) n.getDestinationInfo() }
         })
         n.initialize({

@@ -26,6 +26,7 @@ apk/       제출용 release APK
 3. 앱을 열면 상단 알림에 "차량비서 실행 중 — 방: ○○"이 뜬다. 내비를 앞에 띄워도 방 판정은 계속된다(포그라운드 서비스).
 4. 방 바꿔 보기: Vehicle Emulator(Virtual Console)에서 기어를 P ↔ D로 바꾸고, 내비에서 목적지를 집/다른 곳으로 설정한다.
 5. 로그 확인: `adb logcat -s ROOM` — 방 변경, 서버 업로드, 부재중 수신, TTS 출력이 찍힌다.
+6. 차 상태 반응 시연(디버그 빌드): `adb shell am broadcast -a ztw.carbiseo.ALERT --es v OVERSPEED` (CAUTION·NONE도 가능, NONE은 강제 해제) — 화면 테두리·상단 문구가 뜨고, 경고 중 새 부재중 음성은 해제 후 1건만 읽는다.
 
 ### 직접 빌드할 때
 ```
