@@ -25,10 +25,13 @@ test("주행 방 + ETA면 도착 예정 분을 넣고, PARK·ETA 없음은 그�
   for (const r of ["DRIVE_WORK", "DRIVE_REST"] as const) {
     const s = pickScript(r, "주인", "하루", 23).instruction;
     assert.match(s, /약 23분 뒤 도착 예정/);
-    assert.match(s, /도착 후 연락드리도록/);
     assert.match(s, /^전화가 연결되면 첫 마디로 정확히 '안녕하세요, 주인님의 AI 비서 하루입니다/);
     assert.equal(pickScript(r, "주인", "하루", null).instruction, pickScript(r, "주인", "하루").instruction);
   }
+  assert.match(pickScript("DRIVE_WORK", "주인", undefined, 23).instruction, /도착 후 연락드리도록/);
+  const rest = pickScript("DRIVE_REST", "주인", undefined, 23).instruction;
+  assert.match(rest, /오늘 업무는 마치셨고/);                  // 쉼 방은 업무 마침·내일 연락 유지
+  assert.match(rest, /내일 오전에 연락드리도록/);
   assert.equal(pickScript("PARK", "주인", undefined, 23).instruction, pickScript("PARK", "주인").instruction);
   assert.match(pickScript(null, "주인", undefined, 5).instruction, /약 5분 뒤/);
   assert.equal(parseEta(12), 12);

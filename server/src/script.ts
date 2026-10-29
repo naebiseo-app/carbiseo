@@ -26,9 +26,13 @@ export function greeting(owner: string, name?: string): string {
   return `전화가 연결되면 첫 마디로 정확히 '안녕하세요, ${who}. 통화 내용은 요약해서 ${owner}님께 전해 드립니다.'라고 말합니다.`;
 }
 
-// 주행 방 + 도착 예정(분)이 있으면 방 안내를 이것으로 바꾼다.
-const ETA_LINE =
-  "지금 {owner}님은 운전 중입니다. '지금 운전 중이라 약 {eta}분 뒤 도착 예정입니다. 도착 후 연락드리도록 전해 드리겠습니다'라고 안내하고, 용건을 받은 뒤 마무리합니다. 상대가 급하다고 하면 '급한 건으로 표시해 두겠습니다'라고 말합니다.";
+// 주행 방 + 도착 예정(분)이 있으면 방 안내를 이것으로 바꾼다. 쉼 방은 '업무 마침·내일 연락'을 유지한다.
+const ETA_BY_ROOM: Record<"DRIVE_WORK" | "DRIVE_REST", string> = {
+  DRIVE_WORK:
+    "지금 {owner}님은 운전 중입니다. '지금 운전 중이라 약 {eta}분 뒤 도착 예정입니다. 도착 후 연락드리도록 전해 드리겠습니다'라고 안내하고, 용건을 받은 뒤 마무리합니다. 상대가 급하다고 하면 '급한 건으로 표시해 두겠습니다'라고 말합니다.",
+  DRIVE_REST:
+    "오늘 업무는 마치셨습니다. '오늘 업무는 마치셨고, 지금 운전 중이라 약 {eta}분 뒤 도착 예정입니다. 내일 오전에 연락드리도록 전해 드리겠습니다'라고 안내합니다. 상대가 급하다고 하면 '급한 건으로 표시해 두고 도착하시면 바로 보시도록 하겠습니다'라고 말합니다.",
+};
 
 // 차 앱이 보낸 남은 분. 0~1440 정수만, 그 밖은 없음.
 export function parseEta(v: unknown): number | null {
@@ -38,7 +42,7 @@ export function parseEta(v: unknown): number | null {
 // 방 상태가 없으면 가장 보수적인 DRIVE_WORK 대본
 export function pickScript(room: Room | null, owner = "주인", name?: string, eta?: number | null): { room: Room; instruction: string } {
   const r = room ?? "DRIVE_WORK";
-  const byRoom = r !== "PARK" && eta != null ? ETA_LINE.replace("{eta}", String(eta)) : BY_ROOM[r];
+  const byRoom = r !== "PARK" && eta != null ? ETA_BY_ROOM[r].replace("{eta}", String(eta)) : BY_ROOM[r];
   return { room: r, instruction: `${greeting(owner, name)} ${COMMON} ${byRoom}`.replaceAll("{owner}", owner) };
 }
 
