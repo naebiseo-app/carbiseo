@@ -56,7 +56,7 @@ class RoomService : Service() {
         if (fresh.isEmpty()) return
         inbox = (fresh.filter { it.kind == "call" } + inbox).sortedByDescending { it.id }.take(50)
         Log.i("ROOM", "inbox ${if (initial) "initial" else "new"} ${fresh.size}")
-        if (!initial) speechFor(fresh, machine.room)?.let { hold.offer(it, alert) }?.let { speaker.speak(it) }
+        if (!initial && !passenger) speechFor(fresh, machine.room)?.let { hold.offer(it, alert) }?.let { speaker.speak(it) }
     }
 
     /** 과속·주의 경고 중이면 보류했다가 경고가 풀리면 읽는다. */
@@ -81,7 +81,7 @@ class RoomService : Service() {
             val e = adapters.etaMin
             if (e != sentEta) machine.room?.let { sentEta = e; sendState(it.name, ++stateGen, true) }
             if (restOnce.fire(restDue(driveStart, System.currentTimeMillis(), restMin))) { restOffer = true; say(REST_SPEECH) }
-            if (homeOnce.fire(homeSoon(machine.room, machine.signals.destination, machine.settings, e))) say(HOME_SOON_SPEECH)
+            if (homeOnce.fire(homeSoon(machine.room, machine.signals.destination, machine.settings, e)) && !passenger) say(HOME_SOON_SPEECH)
             ui.postDelayed(this, 200)
         }
     }
@@ -92,7 +92,7 @@ class RoomService : Service() {
             .createNotificationChannel(NotificationChannel(CH, "내비서", NotificationManager.IMPORTANCE_LOW))
         val n = notification(room)
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(1, n)
-        restMin = getSharedPreferences("car_ui", MODE_PRIVATE).getInt("rest_min", REST_DEFAULT_MIN)
+        getSharedPreferences("car_ui", MODE_PRIVATE).let { restMin = it.getInt("rest_min", REST_DEFAULT_MIN); passenger = it.getBoolean("passenger", false) }
         latch = AlertLatch(Clock.systemDefaultZone())
         machine = RoomStateMachine(Clock.systemDefaultZone()) // settings = 기본 상수. 설정 화면이 machine.settings를 덮어쓴다.
         machine.onChange = { from, to ->
@@ -172,6 +172,7 @@ class RoomService : Service() {
         const val ACTION_REST = "ztw.carbiseo.REST"
         var restOffer by mutableStateOf(false); private set // S2: 화면에 휴게소 버튼
         var restMin by mutableIntStateOf(REST_DEFAULT_MIN) // 연속 주행 기준(분). 설정 화면이 바꾼다.
+        var passenger by mutableStateOf(false) // H3: 켜면 업무 TTS(부재중 낭독)·쉼 방 선언(H1)을 끈다. 휴식 제안(S2)은 안전이라 유지.
         var room by mutableStateOf("(판정 전)"); private set
         var sig by mutableStateOf(""); private set
         var inbox by mutableStateOf(listOf<InboxItem>()); private set // id 내림차순

@@ -172,6 +172,7 @@ private fun Park(onImage: Boolean, onSettings: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(roomName("PARK"), Modifier.weight(1f), color = if (onImage) Color.White else ParkAcc, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            PassengerToggle(ink)
             TextButton(onSettings, Tall) { Text("꾸미기", color = ink, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
         }
         Text(if (items.isEmpty()) "세워 둔 동안, 볼 건 없어요" else "세워 둔 동안, ${items.size}건만 보면 돼요",
@@ -201,6 +202,17 @@ private fun Note(i: InboxItem, selected: Boolean, onTap: () -> Unit) {
         }
         Text(i.summary.ifBlank { i.raw.take(80) }, color = ParkBody, fontSize = 18.sp, lineHeight = 26.sp)
     }
+}
+
+/** H3 동승자 모드 토글: 정차 화면·설정에 같은 것. */
+@Composable
+private fun PassengerToggle(ink: Color) {
+    val ctx = LocalContext.current
+    val on = RoomService.passenger
+    TextButton({
+        RoomService.passenger = !on
+        ctx.getSharedPreferences("car_ui", Context.MODE_PRIVATE).edit().putBoolean("passenger", !on).apply()
+    }, Tall) { Text(if (on) "동승자 켜짐" else "동승자 꺼짐", color = if (on) ParkAcc else ink, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
 }
 
 /** 보내기 전 확인. 시연 단계라 실제 발송 없음. */
@@ -294,6 +306,10 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
                     Text("기본으로", color = ParkInk, fontSize = 18.sp)
                 }
             }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("동승자 모드 (업무 음성 끔)", Modifier.weight(1f), color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            PassengerToggle(ParkInk)
         }
         Text("휴식 제안: 연속 운전 ${RoomService.restMin}분부터", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
