@@ -48,4 +48,16 @@ class InboxTest {
         assertEquals("가".repeat(80), line.substringAfter("00:00 "))
         assertEquals("[급함] 01-01 00:00 김 / 급건 아님", itemLine(item(1, urgent = true), ZoneOffset.UTC))
     }
+
+    @Test fun 오늘_통화만_센다() {
+        val z = ZoneOffset.ofHours(9)
+        val today = java.time.LocalDate.of(2026, 10, 29)
+        val at = { h: Int, d: Int -> java.time.LocalDateTime.of(2026, 10, d, h, 0).toInstant(z).toEpochMilli() }
+        val items = listOf(
+            InboxItem(1, "", "", false, at(9, 29), ""), InboxItem(2, "", "", false, at(23, 29), ""),
+            InboxItem(3, "", "", false, at(10, 29), "", kind = "event"), InboxItem(4, "", "", false, at(23, 28), ""),
+        )
+        assertEquals(2, todayCalls(items, today, z))
+        assertEquals(0, todayCalls(emptyList(), today, z))
+    }
 }

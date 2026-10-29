@@ -176,6 +176,9 @@ private fun Park(onImage: Boolean, onSettings: () -> Unit) {
         }
         Text(if (items.isEmpty()) "세워 둔 동안, 볼 건 없어요" else "세워 둔 동안, ${items.size}건만 보면 돼요",
             color = ink, fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Black)
+        val calls = todayCalls(items, java.time.LocalDate.now())
+        if (calls > 0) Text("오늘 AI가 대신 받은 전화 ${calls}통 = 운전 중 통화 ${calls}번 줄임",
+            Modifier.padding(top = 6.dp), color = if (onImage) Color.White else ParkBody, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         LazyColumn(Modifier.weight(1f).padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
             items(items, key = { it.id }) { i ->
                 Note(i, i.id == sel) { sel = if (sel == i.id) null else i.id; seenIds = seenIds + i.id }

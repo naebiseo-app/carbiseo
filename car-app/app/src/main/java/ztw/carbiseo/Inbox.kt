@@ -32,3 +32,7 @@ fun itemLine(i: InboxItem, zone: ZoneId = ZoneId.systemDefault()): String {
     else "${i.fromLabel} / ${i.summary}"
     return "${if (i.urgent) "[급함] " else ""}$time $body"
 }
+
+/** S4: 오늘(zone 기준 날짜) 받은 통화 수. 웹훅 이벤트는 같은 통화라 세지 않는다. */
+fun todayCalls(items: List<InboxItem>, today: java.time.LocalDate, zone: ZoneId = ZoneId.systemDefault()): Int =
+    items.count { it.kind == "call" && Instant.ofEpochMilli(it.createdAt).atZone(zone).toLocalDate() == today }
