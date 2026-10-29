@@ -10,9 +10,6 @@ android {
     defaultConfig { applicationId = "ztw.carbiseo"; minSdk = 28; targetSdk = 34; versionCode = 1; versionName = "0.1"
         buildConfigField("String", "SERVER_URL", "\"https://carbiseo-api.wondi81.workers.dev\"")
         buildConfigField("String", "CAR_TOKEN", "\"$carToken\"")
-        // Pleos TTS 서버 모드용(에뮬엔 기기 안 TTS 엔진이 없어 ON_DEVICE가 실패). 비면 ON_DEVICE.
-        buildConfigField("String", "PLEOS_CLIENT_ID", "\"${env("PLEOS_CLIENT_ID")}\"")
-        buildConfigField("String", "PLEOS_CLIENT_SECRET", "\"${env("PLEOS_CLIENT_SECRET")}\"")
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
