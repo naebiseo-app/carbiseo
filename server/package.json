@@ -1,0 +1,9 @@
+{
+  "name": "carbiseo-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/script.test.ts",
+    "deploy": "npx --yes wrangler@4 deploy"
+  }
+}
