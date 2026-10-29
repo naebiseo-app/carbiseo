@@ -124,7 +124,8 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
             // 0 이하 = 제한속도 모름. 목록이 비면 경고/주의구간 해제로 본다.
             override fun onCurrentRoadSpeedLimit(l: Int) { ui.post { limitKmh = l.takeIf { it > 0 } } }
             override fun onCameraAlert(a: List<CameraAlert>) { val o = a.any { it.isOverSpeed || it.isOverSectionAvrSpeed }; ui.post { cameraOverspeed = o } }
-            override fun onCautionPointInfo(p: List<CautionPoint>) { val z = p.isNotEmpty(); ui.post { cautionZone = z } }
+            // ponytail: 남은 거리 단위를 m로 가정(문서 미확인), 에뮬 실측으로 조정
+            override fun onCautionPointInfo(p: List<CautionPoint>) { val z = p.any { it.remainDistance in 0..300 }; ui.post { cautionZone = z } }
             override fun onNavigationStatus(s: NavigationStatus) { Log.i(TAG, "navStatus $s"); if (s == NavigationStatus.ROUTE_DRIVE) n.getDestinationInfo() }
         })
         n.initialize({
