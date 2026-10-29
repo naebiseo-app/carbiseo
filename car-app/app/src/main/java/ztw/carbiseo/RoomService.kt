@@ -76,7 +76,7 @@ class RoomService : Service() {
     override fun onCreate() {
         super.onCreate()
         getSystemService(NotificationManager::class.java)
-            .createNotificationChannel(NotificationChannel(CH, "차량비서", NotificationManager.IMPORTANCE_LOW))
+            .createNotificationChannel(NotificationChannel(CH, "내비서", NotificationManager.IMPORTANCE_LOW))
         val n = notification(room)
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(1, n)
         latch = AlertLatch(Clock.systemDefaultZone())
@@ -96,7 +96,7 @@ class RoomService : Service() {
 
     private fun notification(r: String) = Notification.Builder(this, CH)
         .setSmallIcon(android.R.drawable.ic_menu_directions)
-        .setContentTitle("차량비서 실행 중 — 방: $r")
+        .setContentTitle("내비서 실행 중 — 방: $r")
         .setOngoing(true).build()
 
     // 디버그 빌드 전용: adb shell am broadcast -a ztw.carbiseo.ROUTE --ef lat 37.4979 --ef lng 127.0276

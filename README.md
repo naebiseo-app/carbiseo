@@ -1,4 +1,4 @@
-# 차량비서 (가칭) — 차 한 대, 세 개의 방
+# 내비서 (내 비서 + 내비게이션) — 차 한 대, 세 개의 방
 
 > 기어·내비 목적지·시각으로 지금 차가 **주차 중 사무실 / 업무 운전 / 퇴근길** 중 어느 방인지 판단하고, 운전 중 걸려 온 전화는 AI 비서가 그 방에 맞는 말로 대신 받아 요약해 두는 Pleos Connect 앱.
 
@@ -23,8 +23,8 @@ apk/       제출용 release APK
 ## 실행 방법
 1. Pleos Connect SDK 에뮬레이터(API 34)를 설치하고 실행한다.
 2. APK 설치: `adb install -r -g apk/<팀명>_<앱이름>_release.apk`
-3. 차 화면 하단 앱 목록(⊞)에서 **차량비서**를 눌러 연다. (`adb shell am start`로 열면 앱 창이 아닌 위치에 놓일 수 있다. 명령으로 열 땐 `adb shell monkey -p ztw.carbiseo -c android.intent.category.LAUNCHER 1`.)
-   앱을 열면 상단 알림에 "차량비서 실행 중 — 방: ○○"이 뜬다. 내비를 앞에 띄워도 방 판정은 계속된다(포그라운드 서비스).
+3. 차 화면 하단 앱 목록(⊞)에서 **내비서**를 눌러 연다. (`adb shell am start`로 열면 앱 창이 아닌 위치에 놓일 수 있다. 명령으로 열 땐 `adb shell monkey -p ztw.carbiseo -c android.intent.category.LAUNCHER 1`.)
+   앱을 열면 상단 알림에 "내비서 실행 중 — 방: ○○"이 뜬다. 내비를 앞에 띄워도 방 판정은 계속된다(포그라운드 서비스).
 4. 방 바꿔 보기: `adb forward tcp:8088 tcp:8088` 후 브라우저로 `http://127.0.0.1:8088/`(Virtual Console)을 열어 둔 채(창을 닫으면 차량 신호가 꺼진다) 기어를 P ↔ D로 바꾸고, 내비에서 목적지를 집/다른 곳으로 설정한다.
 5. 로그 확인: `adb logcat -s ROOM` — 방 변경, 서버 업로드, 부재중 수신, TTS 출력이 찍힌다.
 6. 차 상태 반응 시연(디버그 빌드): `adb shell am broadcast -a ztw.carbiseo.ALERT --es v OVERSPEED` (CAUTION·NONE도 가능, NONE은 강제 해제) — 화면 테두리·상단 문구가 뜨고, 경고 중 새 부재중 음성은 해제 후 1건만 읽는다.

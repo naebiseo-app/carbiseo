@@ -12,7 +12,7 @@
     <queries>
         <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
     </queries>
-    <application android:theme="@android:style/Theme.DeviceDefault.NoActionBar" android:label="차량비서" android:allowBackup="false">
+    <application android:theme="@android:style/Theme.DeviceDefault.NoActionBar" android:label="내비서" android:allowBackup="false">
         <uses-library android:name="android.car" android:required="false" />
         <meta-data android:name="distractionOptimized" android:value="true" />
         <service android:name=".RoomService" android:exported="false" android:foregroundServiceType="specialUse">
