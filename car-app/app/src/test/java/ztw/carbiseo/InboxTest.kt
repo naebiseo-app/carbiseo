@@ -30,6 +30,12 @@ class InboxTest {
         assertNull(speechFor(emptyList(), Room.DRIVE_WORK))
     }
 
+    @Test fun 같은_통화의_웹훅_이벤트는_건수에_안_센다() {
+        val ev = InboxItem(2, "", "", false, 0L, "{}", kind = "event")
+        assertEquals("부재중 전화 한 건, AI가 용건을 받아 두었습니다.", speechFor(listOf(item(1), ev, ev.copy(id = 3)), Room.DRIVE_WORK))
+        assertNull(speechFor(listOf(ev), Room.DRIVE_WORK))
+    }
+
     @Test fun since는_최대_id로_갱신_되돌아가지_않는다() {
         assertEquals(7L, nextSince(3, listOf(item(7), item(5))))
         assertEquals(9L, nextSince(9, listOf(item(7))))

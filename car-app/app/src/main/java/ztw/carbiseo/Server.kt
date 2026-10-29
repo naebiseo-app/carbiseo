@@ -26,7 +26,7 @@ object Server {
             val arr = JSONObject(c.inputStream.bufferedReader().readText()).getJSONArray("items")
             (0 until arr.length()).map { arr.getJSONObject(it) }.map {
                 InboxItem(it.getLong("id"), it.optString("from_label"), it.optString("summary"),
-                    it.optInt("urgent") != 0, it.optLong("created_at"), it.optString("raw"))
+                    it.optInt("urgent") != 0, it.optLong("created_at"), it.optString("raw"), it.optString("kind", "call"))
             }
         } finally { c.disconnect() }
     }.getOrNull()

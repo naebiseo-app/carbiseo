@@ -46,7 +46,7 @@ class RoomService : Service() {
         val initial = firstPoll; firstPoll = false
         since = nextSince(since, fresh)
         if (fresh.isEmpty()) return
-        inbox = (fresh + inbox).sortedByDescending { it.id }.take(50)
+        inbox = (fresh.filter { it.kind == "call" } + inbox).sortedByDescending { it.id }.take(50)
         Log.i("ROOM", "inbox ${if (initial) "initial" else "new"} ${fresh.size}")
         if (!initial) speechFor(fresh, machine.room)?.let { speaker.speak(it) }
     }
