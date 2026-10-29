@@ -1,4 +1,4 @@
-import { parseRoom, pickScript } from "./script.ts";
+import { cleanName, parseRoom, pickScript } from "./script.ts";
 
 interface Env {
   DB: D1Database;
@@ -54,6 +54,21 @@ export default {
       return json({ ok: true, room });
     }
 
+    // 차 앱 설정: 내 호칭·AI 비서 이름
+    if (m === "POST" && pathname === "/car/settings") {
+      if (!authed) return json({ error: "unauthorized" }, 401);
+      const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+      const cur = (await kvGet(env.DB, "settings")) ?? {};
+      for (const k of ["owner_label", "assistant_name"] as const) {
+        if (!(k in b)) continue;
+        const v = cleanName(b[k]);
+        if (!v) return json({ error: `bad ${k}` }, 400);
+        cur[k] = v;
+      }
+      await env.DB.prepare("INSERT OR REPLACE INTO kv(key,value,updated_at) VALUES('settings',?,?)").bind(JSON.stringify(cur), Date.now()).run();
+      return json({ ok: true, settings: cur });
+    }
+
     if (m === "GET" && pathname === "/car/inbox") {
       if (!authed) return json({ error: "unauthorized" }, 401);
       const since = Number(new URL(req.url).searchParams.get("since") ?? 0) || 0;
@@ -67,14 +82,17 @@ export default {
       const raw = await req.text();
       let room = null as ReturnType<typeof parseRoom>;
       let owner: string | undefined;
+      let name: string | undefined;
       try {
         room = (await kvGet(env.DB, "car_context"))?.room ?? null;
-        owner = (await kvGet(env.DB, "settings"))?.owner_label;
+        const st = await kvGet(env.DB, "settings");
+        owner = st?.owner_label;
+        name = st?.assistant_name;
         await saveInbox(env.DB, "call", "ringing", room, raw, { ct: req.headers.get("content-type") });
       } catch (e) {
         console.log("call-context db error", String(e));
       }
-      const s = pickScript(room, owner);
+      const s = pickScript(room, owner, name);
       return json({ CallContext: { Instruction: s.instruction, Variables: { room: s.room } } });
     }
 

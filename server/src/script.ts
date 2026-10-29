@@ -20,8 +20,21 @@ export function parseRoom(v: unknown): Room | null {
   return ROOMS.includes(v as Room) ? (v as Room) : null;
 }
 
+// 첫 마디: 누구의 AI 비서인지 밝힌다(AI임을 숨기지 않음). 이름은 사용자가 정한다.
+export function greeting(owner: string, name?: string): string {
+  const who = name ? `${owner}님의 AI 비서 ${name}입니다` : `${owner}님의 AI 비서입니다`;
+  return `전화가 연결되면 첫 마디로 정확히 '안녕하세요, ${who}. 통화 내용은 요약해서 ${owner}님께 전해 드립니다.'라고 말합니다.`;
+}
+
 // 방 상태가 없으면 가장 보수적인 DRIVE_WORK 대본
-export function pickScript(room: Room | null, owner = "주인"): { room: Room; instruction: string } {
+export function pickScript(room: Room | null, owner = "주인", name?: string): { room: Room; instruction: string } {
   const r = room ?? "DRIVE_WORK";
-  return { room: r, instruction: `${COMMON} ${BY_ROOM[r]}`.replaceAll("{owner}", owner) };
+  return { room: r, instruction: `${greeting(owner, name)} ${COMMON} ${BY_ROOM[r]}`.replaceAll("{owner}", owner) };
+}
+
+// 사용자 입력 검증: 1~10자, 글자·숫자·공백만(대본 주입 방지)
+export function cleanName(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  return /^[\p{L}\p{N} ]{1,10}$/u.test(t) ? t : null;
 }
