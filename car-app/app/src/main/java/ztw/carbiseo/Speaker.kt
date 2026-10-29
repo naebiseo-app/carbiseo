@@ -5,6 +5,7 @@ import ai.pleos.playground.tts.constant.ErrorType
 import ai.pleos.playground.tts.constant.Mode
 import ai.pleos.playground.tts.listener.EventListener
 import ai.pleos.playground.tts.listener.OnInitializeListener
+import ai.pleos.playground.tts.listener.OnServerConnectionListener
 import android.content.Context
 import android.util.Log
 import java.util.Locale
@@ -19,7 +20,8 @@ class Speaker(private val ctx: Context) {
 
     fun start() {
         runCatching {
-            val t = TextToSpeech(ctx, Mode.ON_DEVICE).also { pleos = it }
+            val server = BuildConfig.PLEOS_CLIENT_ID.isNotEmpty()
+            val t = TextToSpeech(ctx, if (server) Mode.SERVER else Mode.ON_DEVICE).also { pleos = it }
             // SDK는 initialize 성공 뒤에만 setLocale/addEventListener를 받는다(에뮬 실측: 먼저 부르면 lateinit 예외)
             val events = object : EventListener {
                 override fun onStart() {}
@@ -31,8 +33,14 @@ class Speaker(private val ctx: Context) {
             }
             t.initialize(object : OnInitializeListener {
                 override fun onSuccess() {
-                    runCatching { t.setLocale(Locale.KOREAN); t.addEventListener(events); ready = true; Log.i("ROOM", "TTS pleos ready") }
-                        .onFailure { useFallback("pleos setup $it", replay = false) }
+                    runCatching {
+                        t.setLocale(Locale.KOREAN); t.addEventListener(events)
+                        if (!server) { ready = true; Log.i("ROOM", "TTS pleos ready (on-device)"); return@runCatching }
+                        t.registerApp(BuildConfig.PLEOS_CLIENT_ID, BuildConfig.PLEOS_CLIENT_SECRET, object : OnServerConnectionListener {
+                            override fun onConnected() { ready = true; Log.i("ROOM", "TTS pleos ready (server)") }
+                            override fun onFailed(e: ErrorType) = useFallback("pleos server $e", replay = false)
+                        })
+                    }.onFailure { useFallback("pleos setup $it", replay = false) }
                 }
                 override fun onFailure(e: ErrorType) = useFallback("pleos init $e", replay = false)
             })

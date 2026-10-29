@@ -100,6 +100,8 @@ fun App() {
     val p = remember { Animatable(1f) }
     LaunchedEffect(room) { if (room != prev) { p.snapTo(0f); p.animateTo(1f, tween(300)); prev = room } }
     val bg = { r: String -> prefs.getString(r, null)?.let(::File)?.takeIf { it.exists() } }
+    Column(Modifier.fillMaxSize()) {
+    AlertBanner(RoomService.alert)
     Box(Modifier.fillMaxSize()) {
         if (p.value < 1f) RoomScreen(prev, room, bg(prev), ver) {}
         val a = (1 - p.value) * 1.4f
@@ -110,20 +112,27 @@ fun App() {
             color = accent(room), fontSize = 44.sp, fontWeight = FontWeight.Black)
         AlertFrame(RoomService.alert)
     }
+    }
 }
 
-/** 차 상태 경고: 방 화면 위에 테두리 + 상단 한 줄. 나타날 때 300ms 페이드 1회, 이후 고정(깜빡임 없음). */
+/** 차 상태 경고: 상단 한 줄(내용을 밀어 내림) + 방 화면 테두리. 나타날 때 300ms 페이드 1회, 이후 고정(깜빡임 없음). */
+private fun alertColor(a: Alert) = if (a == Alert.OVERSPEED) Color(0xFFE53935) else Color(0xFFFF8F00)
+
+@Composable
+private fun fadeIn(): Float { val f = remember { Animatable(0f) }; LaunchedEffect(Unit) { f.animateTo(1f, tween(300)) }; return f.value }
+
+@Composable
+private fun AlertBanner(a: Alert) {
+    if (a == Alert.NONE) return
+    Text(if (a == Alert.OVERSPEED) "속도를 줄여 주세요 · 전화는 비서가 받는 중" else "주의 구간 · 전화는 비서가 받는 중",
+        Modifier.fillMaxWidth().alpha(fadeIn()).background(alertColor(a)).padding(horizontal = 24.dp, vertical = 10.dp),
+        color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
+}
+
 @Composable
 private fun AlertFrame(a: Alert) {
     if (a == Alert.NONE) return
-    val c = if (a == Alert.OVERSPEED) Color(0xFFE53935) else Color(0xFFFF8F00)
-    val f = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { f.animateTo(1f, tween(300)) }
-    Box(Modifier.fillMaxSize().alpha(f.value).border(12.dp, c)) {
-        Text(if (a == Alert.OVERSPEED) "속도를 줄여 주세요 · 전화는 비서가 받는 중" else "주의 구간 · 전화는 비서가 받는 중",
-            Modifier.fillMaxWidth().background(c).padding(horizontal = 24.dp, vertical = 10.dp),
-            color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
-    }
+    Box(Modifier.fillMaxSize().alpha(fadeIn()).border(12.dp, alertColor(a)))
 }
 
 /** r = 그릴 방, live = 지금 실제 방(배경 재생·스크림 판단은 항상 실제 방 기준). */
