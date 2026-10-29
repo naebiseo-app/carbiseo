@@ -40,6 +40,7 @@ class RoomService : Service() {
     private lateinit var latch: AlertLatch
     private val hold = SpeechHold()
     private var forced: Alert? = null // 디버그 브로드캐스트로 강제한 값
+    private val homeOnce = Once()
 
     private val poller = object : Runnable {
         override fun run() { net.execute { Server.fetchInbox(since)?.let { r -> ui.post { onInbox(r) } } }; ui.postDelayed(this, 15_000) }
@@ -54,6 +55,9 @@ class RoomService : Service() {
         Log.i("ROOM", "inbox ${if (initial) "initial" else "new"} ${fresh.size}")
         if (!initial) speechFor(fresh, machine.room)?.let { hold.offer(it, alert) }?.let { speaker.speak(it) }
     }
+
+    /** 과속·주의 경고 중이면 보류했다가 경고가 풀리면 읽는다. */
+    private fun say(text: String) { hold.offer(text, alert)?.let { speaker.speak(it) } }
 
     private fun sendState(r: String, gen: Int, retry: Boolean, eta: Int? = sentEta): Unit = net.execute {
         val ok = Server.postState(r, eta)
@@ -73,6 +77,7 @@ class RoomService : Service() {
             // 정수 분이라 != 가 곧 "1분 이상 변화". 방 판정 전이면 첫 방 변경이 같이 올린다.
             val e = adapters.etaMin
             if (e != sentEta) machine.room?.let { sentEta = e; sendState(it.name, ++stateGen, true) }
+            if (homeOnce.fire(homeSoon(machine.room, machine.signals.destination, machine.settings, e))) say(HOME_SOON_SPEECH)
             ui.postDelayed(this, 200)
         }
     }
@@ -88,6 +93,7 @@ class RoomService : Service() {
         machine.onChange = { from, to ->
             Log.i("ROOM", "$from -> $to")
             room = to.name
+            if (to == Room.PARK) homeOnce.reset()
             sentEta = adapters.etaMin
             sendState(to.name, ++stateGen, true)
             getSystemService(NotificationManager::class.java).notify(1, notification(room))
