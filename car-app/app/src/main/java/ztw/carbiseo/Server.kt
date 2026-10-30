@@ -39,17 +39,20 @@ object Server {
         } finally { c.disconnect() }
     }.getOrNull()
 
-    fun fetchInbox(since: Long): List<InboxItem>? = runCatching {
+    /** (새 항목, 서버 최소 id). 최소 id: 서버가 비었으면 Long.MAX_VALUE, 옛 서버(값 없음)면 null. */
+    fun fetchInbox(since: Long): Pair<List<InboxItem>, Long?>? = runCatching {
         val c = open("/car/inbox?since=$since", "GET")
         try {
             if (c.responseCode !in 200..299) return@runCatching null
-            val arr = JSONObject(c.inputStream.bufferedReader().readText()).getJSONArray("items")
+            val j = JSONObject(c.inputStream.bufferedReader().readText())
+            val minId = if (!j.has("min_id")) null else if (j.isNull("min_id")) Long.MAX_VALUE else j.getLong("min_id")
+            val arr = j.getJSONArray("items")
             (0 until arr.length()).map { arr.getJSONObject(it) }.map {
                 val meta = runCatching { JSONObject(it.str("meta")) }.getOrNull()
                 InboxItem(it.getLong("id"), it.str("from_label"), it.str("summary"),
                     it.optInt("urgent") != 0, it.optLong("created_at"), it.str("raw"), it.str("kind").ifEmpty { "call" },
                     it.str("status"), meta?.str("code") ?: "", meta?.str("car") ?: "", it.str("room"), it.str("from_number"))
-            }
+            } to minId
         } finally { c.disconnect() }
     }.getOrNull()
 

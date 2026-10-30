@@ -158,7 +158,9 @@ export default {
       if (!authed) return json({ error: "unauthorized" }, 401);
       const since = Number(new URL(req.url).searchParams.get("since") ?? 0) || 0;
       const { results } = await env.DB.prepare(INBOX_SQL).bind(since, now()).all();
-      return json({ items: results });
+      // min_id: 서버에 남은 가장 작은 id(비었으면 null). 차는 이보다 작은 카드를 지운다(관리자 비우기·30일 삭제 반영)
+      const min = await env.DB.prepare("SELECT MIN(id) AS m FROM inbox").first<{ m: number | null }>();
+      return json({ items: results, min_id: min?.m ?? null });
     }
 
     // callContextUrl: 비밀 조각 경로. 어떤 실패에도 유효한 응답을 돌려 통화가 끊기지 않게 한다.
@@ -276,7 +278,7 @@ export default {
       // 녹화 전 부재중 카드 비우기. id는 AUTOINCREMENT라 차의 since 커서와 어긋나지 않는다.
       if (m === "POST" && pathname === "/admin/reset-inbox") {
         const r = await env.DB.prepare("DELETE FROM inbox").run();
-        return html(`inbox ${r.meta.changes ?? 0}건을 비웠습니다(차 화면은 앱을 다시 열면 비워집니다)`);
+        return html(`inbox ${r.meta.changes ?? 0}건을 비웠습니다(차 화면도 15초 안에 비워집니다)`);
       }
       if (m === "POST" && pathname === "/admin/replay") {
         const t = now();

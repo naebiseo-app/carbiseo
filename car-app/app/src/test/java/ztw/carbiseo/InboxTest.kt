@@ -41,6 +41,13 @@ class InboxTest {
         assertNull(speechFor(listOf(ev), Room.DRIVE_WORK))
     }
 
+    @Test fun 서버가_비면_카드도_비우고_모르면_그대로() {
+        val cards = listOf(item(5), item(3))
+        assertEquals(emptyList<InboxItem>(), pruneGone(cards, Long.MAX_VALUE)) // 관리자 inbox 비우기 뒤
+        assertEquals(listOf(5L), pruneGone(cards, 4).map { it.id })          // 오래된 쪽만 지워짐
+        assertEquals(cards, pruneGone(cards, null))                          // 옛 서버: min_id 없음
+    }
+
     @Test fun since는_최대_id로_갱신_되돌아가지_않는다() {
         assertEquals(7L, nextSince(3, listOf(item(7), item(5))))
         assertEquals(9L, nextSince(9, listOf(item(7))))

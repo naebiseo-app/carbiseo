@@ -69,7 +69,7 @@ class RoomService : Service() {
             net.execute {
                 val r = Server.fetchInbox(since)
                 ui.post {
-                    offline = r == null; r?.let(::onInbox) // 15초마다 다시 시도한다
+                    offline = r == null; r?.let { (items, minId) -> inbox = pruneGone(inbox, minId); onInbox(items) } // 15초마다 다시 시도한다
                     // 오프라인 중 상태 전송이 다 실패했으면 서버가 옛 방에 멈춰 있다 → 연결되면 지금 상태를 다시 올린다
                     val cur = machine.room?.let { it.name to sentEta }
                     if (r != null && cur != null && cur != okState) { Log.i("ROOM", "state resync $cur (server had $okState)"); sendState(cur.first, ++stateGen, false) }

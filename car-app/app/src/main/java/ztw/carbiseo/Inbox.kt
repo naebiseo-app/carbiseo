@@ -64,6 +64,9 @@ fun taskDraft(text: String): Pair<String, String> {
     return num to body.trim()
 }
 
+/** 서버에서 지워진 카드(관리자 inbox 비우기·30일 삭제)는 차에서도 뺀다. minId: 서버 최소 id(비었으면 Long.MAX_VALUE), null = 모름 → 그대로. */
+fun pruneGone(items: List<InboxItem>, minId: Long?): List<InboxItem> = if (minId == null) items else items.filter { it.id >= minId }
+
 /** 마지막으로 본 id. 항목이 없으면 그대로. */
 fun nextSince(since: Long, items: List<InboxItem>): Long = maxOf(since, items.maxOfOrNull { it.id } ?: since)
 
