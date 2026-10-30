@@ -1,4 +1,4 @@
-import { cleanName, parseEta, parseRoom, pickScript } from "./script.ts";
+import { callerNumber, cleanName, nextEventAt, ownerScript, parseEta, parseMode, parseRoom, pickScript, sameNumber, type Mode, type Recent } from "./script.ts";
 import { adminPage, basicOk, demoSchedule, parseFakeCall, REPLAY_SAID, replayCards } from "./admin.ts";
 
 interface Env {
@@ -9,6 +9,8 @@ interface Env {
   ADMIN_TOKEN?: string; // 없으면 /admin 전부 401
   CLAWOPS_ACCOUNT_ID?: string;
   CLAWOPS_API_KEY?: string;
+  CLAWOPS_NUMBER?: string; // 문자 발신 070
+  OWNER_NUMBER?: string; // 주인 휴대폰: 이 번호로 오면 주인 모드
 }
 
 const json = (o: unknown, status = 200) =>
@@ -64,6 +66,26 @@ export function summaryCard(raw: string) {
   return { call_id: f.get("CallId") ?? "", from_label: from.length >= 4 ? `끝번호 ${from.slice(-4)}` : "", summary, urgent };
 }
 
+/** 주인 모드 통화 요약 → 할 일 카드 본문: 핵심 요약 + 후속 조치. */
+export function taskText(raw: string): string {
+  let j: { coreSummary?: string; followUps?: string[] } = {};
+  try { j = JSON.parse(new URLSearchParams(raw).get("SummaryJson") ?? "{}"); } catch { /* 빈 요약 */ }
+  return [j.coreSummary ?? "", ...(j.followUps ?? [])].filter(Boolean).join(" / ").slice(0, 500);
+}
+
+/** /car/send 본문 검증. 수신번호 숫자 9~11자리, 내용 1~2000자, confirmed=true 필수. */
+export function parseSend(b: Record<string, unknown>) {
+  const to = String(b.to_number ?? "").replace(/-/g, "");
+  const body = typeof b.body === "string" ? b.body.trim() : "";
+  if (b.confirmed !== true) return { error: "confirmed must be true" };
+  if (!/^\d{9,11}$/.test(to)) return { error: "bad to_number" };
+  if (body.length < 1 || body.length > 2000) return { error: "bad body" };
+  return { to, body, label: cleanName(b.to_label) ?? `끝번호 ${to.slice(-4)}` };
+}
+
+// SMS 90byte(한글 2byte) 넘으면 lms — 'sms' 강제 시 body_too_long 400 방지
+export const msgType = (body: string) => ([...body].reduce((n, c) => n + (c.charCodeAt(0) < 128 ? 1 : 2), 0) <= 90 ? "sms" : "lms");
+
 /** 받은 전화의 AI 통화가 끝났으면 그 CallId. */
 export function transcriptTarget(raw: string) {
   const f = new URLSearchParams(raw);
@@ -98,6 +120,11 @@ export default {
       if (!authed) return json({ error: "unauthorized" }, 401);
       const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
       const cur = (await kvGet(env.DB, "settings")) ?? {};
+      if ("mode" in b) {
+        const v = parseMode(b.mode);
+        if (!v) return json({ error: "mode must be ai|ment|off" }, 400);
+        cur.mode = v;
+      }
       for (const k of ["owner_label", "assistant_name"] as const) {
         if (!(k in b)) continue;
         const v = cleanName(b[k]);
@@ -123,6 +150,10 @@ export default {
       let owner: string | undefined;
       let name: string | undefined;
       let eta: number | null = null;
+      let mode: Mode = "ai";
+      let schedule = null;
+      const isOwner = sameNumber(callerNumber(raw), env.OWNER_NUMBER);
+      let recent: Recent[] = [];
       try {
         const cc = await kvGet(env.DB, "car_context");
         room = cc?.room ?? null;
@@ -130,11 +161,18 @@ export default {
         const st = await kvGet(env.DB, "settings");
         owner = st?.owner_label;
         name = st?.assistant_name;
-        await saveInbox(env.DB, "ring", "ringing", room, raw, { ct: req.headers.get("content-type") });
+        mode = parseMode(st?.mode) ?? "ai";
+        schedule = await kvGet(env.DB, "schedule");
+        if (isOwner) recent = (await env.DB.prepare("SELECT from_label,summary,urgent FROM inbox WHERE kind='call' AND summary IS NOT NULL ORDER BY id DESC LIMIT 5").all<Recent>()).results;
+        await saveInbox(env.DB, "ring", "ringing", room, raw, { ct: req.headers.get("content-type"), owner: isOwner });
       } catch (e) {
         console.log("call-context db error", String(e));
       }
-      const s = pickScript(room, owner, name, eta);
+      if (isOwner) {
+        const instruction = ownerScript({ owner, name, room, eta, schedule, recent, nowMs: now() });
+        return json({ CallContext: { Instruction: instruction, Variables: { room: room ?? "DRIVE_WORK", owner_mode: "1" } } });
+      }
+      const s = pickScript(room, owner, name, eta, mode, nextEventAt(schedule, now()));
       return json({ CallContext: { Instruction: s.instruction, Variables: { room: s.room } } });
     }
 
@@ -151,13 +189,36 @@ export default {
         console.log("transcript request", callId, r.status); // 202 접수, 409 이미 요청됨
       }
       const card = sig === "ok" ? summaryCard(raw) : null;
-      if (card) {
+      if (card && sameNumber(new URLSearchParams(raw).get("From") ?? "", env.OWNER_NUMBER)) {
+        // 주인 모드 통화 → 할 일 카드(문자 초안 등). 재전송 대비 1장만
+        const cc = await kvGet(env.DB, "car_context");
+        await env.DB.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,summary,created_at) SELECT 'task','open',?,?,'주인',?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='task' AND call_id=?)")
+          .bind(parseRoom(cc?.room) ?? null, card.call_id, taskText(raw), now(), card.call_id).run();
+      } else if (card) {
         const cc = await kvGet(env.DB, "car_context");
         // 웹훅 재전송 대비: 같은 통화의 카드는 1장만
         await env.DB.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,summary,urgent,created_at) SELECT 'call','summarized',?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='call' AND call_id=?)")
           .bind(parseRoom(cc?.room) ?? null, card.call_id, card.from_label, card.summary, card.urgent, now(), card.call_id).run();
       }
       return json({ ok: true });
+    }
+
+    // 차 앱 '보내기' 버튼: 확인된 문자만 ClawOps로 발송, 결과를 inbox kind='sent'로 기록
+    if (m === "POST" && pathname === "/car/send") {
+      if (!authed) return json({ error: "unauthorized" }, 401);
+      const p = parseSend((await req.json().catch(() => ({}))) as Record<string, unknown>);
+      if ("error" in p) return json({ error: p.error }, 400);
+      const r = await fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/messages`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}`, "content-type": "application/json" },
+        body: JSON.stringify({ From: env.CLAWOPS_NUMBER, To: p.to, Body: p.body, Type: msgType(p.body) }),
+      });
+      const j = (await r.json().catch(() => ({}))) as { messageId?: string; status?: string; code?: string };
+      const ok = r.ok;
+      const code = ok ? j.status ?? "queued" : j.code ?? `http_${r.status}`; // 국외 IP면 overseas_ip_blocked
+      await env.DB.prepare("INSERT INTO inbox(kind,status,message_id,from_label,summary,created_at,meta) VALUES('sent',?,?,?,?,?,?)")
+        .bind(ok ? "sent" : "failed", j.messageId ?? null, p.label, p.body, now(), JSON.stringify({ http: r.status, code })).run();
+      return json({ ok, code, http: r.status, message_id: j.messageId ?? null }, ok ? 200 : 502);
     }
 
     if (m === "GET" && pathname === "/car/schedule") {
