@@ -1,5 +1,5 @@
 import { cleanName, parseEta, parseRoom, pickScript } from "./script.ts";
-import { adminPage, basicOk, demoSchedule, parseFakeCall } from "./admin.ts";
+import { adminPage, basicOk, demoSchedule, parseFakeCall, REPLAY_SAID, replayCards } from "./admin.ts";
 
 interface Env {
   DB: D1Database;
@@ -111,7 +111,7 @@ export default {
     if (m === "GET" && pathname === "/car/inbox") {
       if (!authed) return json({ error: "unauthorized" }, 401);
       const since = Number(new URL(req.url).searchParams.get("since") ?? 0) || 0;
-      const { results } = await env.DB.prepare("SELECT * FROM inbox WHERE id>? ORDER BY id DESC LIMIT 50").bind(since).all();
+      const { results } = await env.DB.prepare("SELECT * FROM inbox WHERE id>? AND created_at<=? ORDER BY id DESC LIMIT 50").bind(since, now()).all();
       return json({ items: results });
     }
 
@@ -183,6 +183,15 @@ export default {
         const s = demoSchedule(now());
         await env.DB.prepare("INSERT OR REPLACE INTO kv(key,value,updated_at) VALUES('schedule',?,?)").bind(JSON.stringify(s), now()).run();
         return html(`일정 ${s.length}건으로 초기화했습니다`);
+      }
+      if (m === "POST" && pathname === "/admin/replay") {
+        const t = now();
+        const s = (await kvGet(env.DB, "schedule")) ?? demoSchedule(t);
+        const room = (await kvGet(env.DB, "car_context"))?.room ?? null;
+        const cards = replayCards(s, t);
+        await env.DB.batch(cards.map((c) => env.DB.prepare("INSERT INTO inbox(kind,status,room,from_label,summary,created_at,meta) VALUES('hint','replay',?,?,?,?,?)")
+          .bind(room, c.label, c.text, c.created_at, JSON.stringify({ step: c.step, said: REPLAY_SAID }))));
+        return html(`재현 카드 ${cards.length}장을 넣었습니다(8초 간격)`);
       }
     }
 

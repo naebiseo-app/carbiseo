@@ -35,6 +35,42 @@ export function demoSchedule(nowMs: number): DemoEvent[] {
   ];
 }
 
+// 재현 통화(원문③④⑤)용 가상 견적 데이터
+export const DEMO_QUOTE = { client: "새봄상사", item: "사무용 의자 50개", amount: "1,150만 원" };
+export const REPLAY_SAID = "다음 주 화요일 2시 미팅 가능하세요? 지난번 견적 1,200만 원 맞죠?";
+
+// 장소 간 이동(분): 직선거리 ÷ 평균 30km/h. ponytail: 도로·정체 무시, 실제 경로가 필요하면 내비 ETA로 교체
+export function travelMin(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const r = Math.PI / 180;
+  const h = Math.sin(((b.lat - a.lat) * r) / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(((b.lng - a.lng) * r) / 2) ** 2;
+  const km = 2 * 6371 * Math.asin(Math.sqrt(h));
+  return Math.ceil((km / 30) * 60);
+}
+
+// 일정 사이 첫 빈 시간. 다음 장소까지 이동시간을 빼고 30분 이상 남는 구간.
+// ponytail: 일정에 끝 시각이 없어 각 30분으로 가정. 끝 시각이 생기면 그것으로
+export function freeSlot(s: DemoEvent[], nowMs: number, durMs = 30 * 60_000) {
+  const ev = s.filter((e) => e.start + durMs > nowMs).sort((a, b) => a.start - b.start);
+  for (let i = 0; i + 1 < ev.length; i++) {
+    const move = travelMin(ev[i], ev[i + 1]);
+    const from = Math.max(ev[i].start + durMs, nowMs), to = ev[i + 1].start - move * 60_000;
+    if (to - from >= 30 * 60_000) return { from, to, move };
+  }
+  return null;
+}
+
+const hm = (ms: number) => new Date(ms + 9 * 3_600_000).toISOString().slice(11, 16);
+
+// 거래처 통화 재현 카드 3장(+0·+8·+16초)
+export function replayCards(s: DemoEvent[], nowMs: number) {
+  const f = freeSlot(s, nowMs);
+  return [
+    { label: "추천 답변", text: "화요일 2시는 판교 미팅과 겹쳐요. 4시 가능하다고 답하세요" },
+    { label: "사실 정정", text: `견적은 ${DEMO_QUOTE.amount}입니다 (${DEMO_QUOTE.client} ${DEMO_QUOTE.item})` },
+    { label: "빈 시간", text: f ? `${hm(f.from)}~${hm(f.to)} 비어요(이동 ${f.move}분 포함)` : "오늘 남은 빈 시간이 없어요" },
+  ].map((c, i) => ({ ...c, step: i + 3, created_at: nowMs + i * 8000 }));
+}
+
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
 export function adminPage(msg = ""): string {
@@ -49,5 +85,6 @@ form{background:#FFFDF8;padding:16px;border-radius:14px;margin:16px 0}.m{font-we
 <input name="summary" placeholder="용건 (120자 이내)" maxlength="120" required>
 <label><input type="checkbox" name="urgent" style="width:auto"> 급함</label>
 <button>넣기</button></form>
-<form method="post" action="/admin/reset-schedule"><h2>데모 일정 초기화</h2><p>오늘 일정 3건(지금부터 1·3·5시간 뒤)으로 덮어씁니다.</p><button>초기화</button></form>`;
+<form method="post" action="/admin/reset-schedule"><h2>데모 일정 초기화</h2><p>오늘 일정 3건(지금부터 1·3·5시간 뒤)으로 덮어씁니다.</p><button>초기화</button></form>
+<form method="post" action="/admin/replay"><h2>재현 통화 시작</h2><p>거래처 통화("${esc(REPLAY_SAID)}")에 맞춰 차에 카드 3장을 8초 간격으로 띄웁니다.</p><button>재현 통화 시작</button></form>`;
 }
