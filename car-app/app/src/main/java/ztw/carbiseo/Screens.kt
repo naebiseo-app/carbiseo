@@ -313,8 +313,9 @@ private fun FirstRun() {
         if (RoomService.forwardOk) body("착신 설정 확인됨")
         else OutlinedButton({ RoomService.confirmForward(ctx) }, Tall) { Text("착신 설정 했어요", color = ParkInk, fontSize = 20.sp) }
         body("실제 착신 전화가 한 번 들어오면 자동으로 확인돼요.")
-        step("③", "운전 중 방해 금지 자동 켜기 + 반복 전화 허용")
-        body("폰 설정 > 방해 금지(운전 모드) > 차 블루투스 연결 시 자동 켜기, '반복 전화 허용' 켜기. 첫 전화는 AI가 받고, 급한 분이 바로 다시 걸면 폰이 직접 울려요.")
+        step("③", "운전 중 방해 금지 자동 켜기 + 가족·반복 전화 허용")
+        body("폰 설정 > 방해 금지(운전 모드) > 차 블루투스 연결 시 자동 켜기, '즐겨찾기 허용'에 가족 번호, '반복 전화 허용' 켜기. 가족과 바로 다시 건 급한 분은 폰이 직접 울리고, 나머지는 AI가 받아요.")
+        body("벨은 폰에서 먼저 울려요. 앱이 막을 수는 없어서, 통신사 착신 '응답 없을 때' 대기 시간을 가장 짧게 해 두세요.")
         Button({ RoomService.finishSetup(ctx) }, Tall, colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
             Text("다 했어요", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
