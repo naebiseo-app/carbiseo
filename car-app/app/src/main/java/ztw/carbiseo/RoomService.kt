@@ -156,7 +156,7 @@ class RoomService : Service() {
         if (intent?.action == ACTION_GO) intent.run {
             val lat = getDoubleExtra("lat", 0.0); val lng = getDoubleExtra("lng", 0.0); val name = getStringExtra("name") ?: ""
             Log.i("ROOM", "go $name $lat,$lng")
-            adapters.navi?.requestRoute(RouteInfo(lat, lng, null, null, name, "", "", "", RouteOption.RECOMMENDED, "", false))
+            route(LatLng(lat, lng), name)
         }
         return START_STICKY
     }
@@ -169,7 +169,18 @@ class RoomService : Service() {
         Log.i("ROOM", "rest stop ${stop.name} dest=${s.destination}")
         val n = adapters.navi ?: return
         if (s.destination != null) n.addWaypoint(RequestWaypointInfo(stop.at.lat, stop.at.lng, stop.name, WaypointIndex.FIRST, "", "", "", ""))
-        else n.requestRoute(RouteInfo(stop.at.lat, stop.at.lng, null, null, stop.name, "", "", "", RouteOption.RECOMMENDED, "", false))
+        else route(stop.at, stop.name)
+    }
+
+    /** 부팅 직후 내비가 준비 전이면 요청이 조용히 버려진다(에뮬 실측 'navi not ready'). 4초 뒤 목적지가 안 잡혔으면 1회 재시도, 그래도 안 되면 알린다. */
+    private fun route(to: LatLng, name: String, retry: Boolean = true) {
+        val n = adapters.navi ?: return
+        n.requestRoute(RouteInfo(to.lat, to.lng, null, null, name, "", "", "", RouteOption.RECOMMENDED, "", false))
+        ui.postDelayed({
+            if (machine.signals.destination?.let { distanceM(it, to) < 300 } == true) return@postDelayed
+            Log.w("ROOM", "route not set: $name retry=$retry")
+            if (retry) route(to, name, false) else say("내비가 아직 준비 중이에요. 잠시 뒤 다시 눌러 주세요")
+        }, 4000)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
