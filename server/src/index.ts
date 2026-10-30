@@ -7,6 +7,8 @@ interface Env {
   CALL_CONTEXT_SECRET: string;
   CLAWOPS_SIGNING_KEY?: string; // 아직 없으면 서명 검증은 'nokey'로 기록만
   ADMIN_TOKEN?: string; // 없으면 /admin 전부 401
+  CLAWOPS_ACCOUNT_ID?: string;
+  CLAWOPS_API_KEY?: string;
 }
 
 const json = (o: unknown, status = 200) =>
@@ -46,6 +48,26 @@ async function checkSig(env: Env, url: string, ct: string | null, raw: string, s
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.CLAWOPS_SIGNING_KEY), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signData(url, ct, raw)));
   return sig.trim() === b64(mac) ? "ok" : "fail";
+}
+
+/** summary.completed 웹훅(폼) → 차 카드. 받은 전화(inbound)만. 번호는 끝 4자리만 남긴다. */
+export function summaryCard(raw: string) {
+  const f = new URLSearchParams(raw);
+  if (f.get("Event") !== "summary.completed" || f.get("Direction") !== "inbound") return null;
+  let j: { coreSummary?: string; decisions?: string[]; followUps?: string[] } = {};
+  try { j = JSON.parse(f.get("SummaryJson") ?? "{}"); } catch { /* 빈 요약 */ }
+  const summary = (j.coreSummary ?? "").slice(0, 300);
+  const from = (f.get("From") ?? "").replace(/\D/g, "");
+  // ponytail: 기본 요약 스키마엔 급함 필드가 없어 낱말로 판정. 오판이 잦으면 조직 스키마에 urgent 필드 추가
+  const text = [summary, ...(j.decisions ?? []), ...(j.followUps ?? [])].join(" ");
+  const urgent = /급하|긴급|바로 연락|즉시/.test(text) && !/급하지 않|긴급하지 않/.test(text) ? 1 : 0;
+  return { call_id: f.get("CallId") ?? "", from_label: from.length >= 4 ? `끝번호 ${from.slice(-4)}` : "", summary, urgent };
+}
+
+/** 받은 전화의 AI 통화가 끝났으면 그 CallId. */
+export function transcriptTarget(raw: string) {
+  const f = new URLSearchParams(raw);
+  return f.get("Event") === "agent.disconnected" && f.get("Direction") !== "outbound" ? f.get("CallId") || null : null;
 }
 
 const DAY = 86_400_000;
@@ -108,7 +130,7 @@ export default {
         const st = await kvGet(env.DB, "settings");
         owner = st?.owner_label;
         name = st?.assistant_name;
-        await saveInbox(env.DB, "call", "ringing", room, raw, { ct: req.headers.get("content-type") });
+        await saveInbox(env.DB, "ring", "ringing", room, raw, { ct: req.headers.get("content-type") });
       } catch (e) {
         console.log("call-context db error", String(e));
       }
@@ -121,6 +143,19 @@ export default {
       const sig = await checkSig(env, req.url, req.headers.get("content-type"), raw, req.headers.get("x-signature"));
       console.log("clawops webhook sig=" + sig, "ct=" + req.headers.get("content-type"));
       await saveInbox(env.DB, "event", "received", null, raw, { ct: req.headers.get("content-type"), sig, sig_header: req.headers.get("x-signature") });
+      // 계정 '통화 받아쓰기'가 꺼져 있어 통화가 끝나면 받아쓰기를 직접 요청한다 → transcript.completed → summary.completed(아래 카드)
+      const callId = sig === "ok" ? transcriptTarget(raw) : null;
+      if (callId && env.CLAWOPS_API_KEY) {
+        const r = await fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls/${callId}/transcript`,
+          { method: "POST", headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}` } });
+        console.log("transcript request", callId, r.status); // 202 접수, 409 이미 요청됨
+      }
+      const card = sig === "ok" ? summaryCard(raw) : null;
+      if (card) {
+        const cc = await kvGet(env.DB, "car_context");
+        await env.DB.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,summary,urgent,created_at) VALUES('call','summarized',?,?,?,?,?,?)")
+          .bind(parseRoom(cc?.room) ?? null, card.call_id, card.from_label, card.summary, card.urgent, now()).run();
+      }
       return json({ ok: true });
     }
 

@@ -48,7 +48,8 @@ class RoomService : Service() {
     private val poller = object : Runnable {
         override fun run() {
             net.execute {
-                Server.fetchInbox(since)?.let { r -> ui.post { onInbox(r) } }
+                val r = Server.fetchInbox(since)
+                ui.post { offline = r == null; r?.let(::onInbox) } // 15초마다 다시 시도한다
                 Server.fetchSchedule()?.let { r -> ui.post { schedule = r } }
             }
             ui.postDelayed(this, 15_000)
@@ -201,5 +202,6 @@ class RoomService : Service() {
         var inbox by mutableStateOf(listOf<InboxItem>()); private set // id 내림차순
         var alert by mutableStateOf(Alert.NONE); private set
         var schedule by mutableStateOf(listOf<Event>()); private set // F6 데모 일정
+        var offline by mutableStateOf(false); private set // #23 서버 폴링 실패
     }
 }

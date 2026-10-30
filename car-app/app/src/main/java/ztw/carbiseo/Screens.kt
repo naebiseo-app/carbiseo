@@ -180,6 +180,8 @@ private fun Park(onImage: Boolean, onSettings: () -> Unit) {
         val calls = todayCalls(items, java.time.LocalDate.now())
         if (calls > 0) Text("오늘 AI가 대신 받은 전화 ${calls}통 = 운전 중 통화 ${calls}번 줄임",
             Modifier.padding(top = 6.dp), color = if (onImage) Color.White else ParkBody, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        if (RoomService.offline) Text("서버 연결 끊김 — 다시 연결하는 중. 그동안 전화는 통화 서비스가 기본 안내로 받아요",
+            Modifier.padding(top = 6.dp), color = if (onImage) Color.White else ParkAcc, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         nextEvent(RoomService.schedule, System.currentTimeMillis())?.let { NextEvent(it) }
         LazyColumn(Modifier.weight(1f).padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
             items(items, key = { it.id }) { i ->
@@ -201,7 +203,7 @@ private fun Note(i: InboxItem, selected: Boolean, onTap: () -> Unit) {
             if (i.urgent) Text("급함", Modifier.padding(start = 8.dp).background(ParkAcc, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 2.dp),
                 color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         }
-        Text(i.summary.ifBlank { i.raw.take(80) }, color = ParkBody, fontSize = 18.sp, lineHeight = 26.sp)
+        Text(i.summary.ifBlank { "AI가 통화 내용을 정리하고 있어요" }, color = ParkBody, fontSize = 18.sp, lineHeight = 26.sp)
     }
 }
 
