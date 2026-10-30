@@ -1,6 +1,8 @@
 package ztw.carbiseo
 
 import java.time.Clock
+import java.time.DayOfWeek
+import java.time.LocalDateTime
 import java.time.LocalTime
 import kotlin.math.asin
 import kotlin.math.cos
@@ -18,7 +20,6 @@ data class RoomSettings(
     val workStart: LocalTime = LocalTime.of(7, 0),
     val workEnd: LocalTime = LocalTime.of(18, 0),
     val homeDestRadiusM: Double = 300.0,   // 목적지가 "집"으로 인정되는 반경
-    val homeNearRadiusM: Double = 2000.0,  // 목적지 없을 때 현재 위치가 "집 근처"인 반경
     val destGraceMs: Long = 10_000,         // 목적지 해제 유예
     val debounceMs: Long = 300,            // 전환 직후 되돌림 무시 시간
     val parkHoldMs: Long = 2000,           // 주행 -> PARK는 PARK 판정이 이만큼 이어져야(P↔D 빠른 반복 흡수)
@@ -39,6 +40,13 @@ fun distanceM(a: LatLng, b: LatLng): Double {
     val h = sin(dLat / 2).pow(2) + cos(Math.toRadians(a.lat)) * cos(Math.toRadians(b.lat)) * sin(dLng / 2).pow(2)
     return 2 * r * asin(sqrt(h))
 }
+
+/** 새벽 이 시각 전까지는 '전날 저녁'으로 본다(밤샘 귀가). */
+val NIGHT_END: LocalTime = LocalTime.of(4, 0)
+
+/** 업무 시간 밖: 토·일 또는 workStart 전·workEnd 이후. ponytail: 공휴일 목록 없음 — 필요하면 날짜 집합을 settings에 */
+fun offDuty(at: LocalDateTime, s: RoomSettings): Boolean =
+    at.dayOfWeek == DayOfWeek.SATURDAY || at.dayOfWeek == DayOfWeek.SUNDAY || at.toLocalTime() < s.workStart || at.toLocalTime() >= s.workEnd
 
 /**
  * 순수 Kotlin 방 판정기. 스레드 안전하지 않음 -> 호출은 한 스레드(메인)에서만.
@@ -78,12 +86,14 @@ class RoomStateMachine(
         val dest = effectiveDestination(now) // 정차 중에도 호출해야 유예 시계가 돈다
         val driving = (s.gear != Gear.PARK && s.gear != Gear.UNKNOWN) || s.distractionOptimized
         if (s.charging || !driving) return Room.PARK
-        val t = clock.instant().atZone(clock.zone).toLocalTime()
-        val afterWork = t.isBefore(settings.workStart) || !t.isBefore(settings.workEnd) // 업무 시간 밖(새벽 포함)
-        val rest = when {
-            dest != null -> distanceM(dest, settings.home) <= settings.homeDestRadiusM || afterWork
-            else -> afterWork || (s.location?.let { distanceM(it, settings.home) <= settings.homeNearRadiusM } ?: false)
-        }
+        val at = clock.instant().atZone(clock.zone).toLocalDateTime()
+        val t = at.toLocalTime()
+        // 쉼 = 주말 | 저녁~새벽(workEnd~04시) | 이른 아침(04시~workStart)인데 목적지가 집.
+        // 이른 아침 집 근처 출발·업무 시간 중 집 목적지(점심 등)는 업무(H3·M16): 거래처에 '업무 마치셨습니다'를 말하지 않게.
+        val weekend = at.dayOfWeek == DayOfWeek.SATURDAY || at.dayOfWeek == DayOfWeek.SUNDAY
+        val evening = t >= settings.workEnd || t < NIGHT_END
+        val toHome = dest != null && distanceM(dest, settings.home) <= settings.homeDestRadiusM
+        val rest = weekend || evening || (t < settings.workStart && toHome)
         return if (rest) Room.DRIVE_REST else Room.DRIVE_WORK
     }
 

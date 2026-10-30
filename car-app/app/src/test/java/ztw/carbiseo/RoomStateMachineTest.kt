@@ -27,6 +27,8 @@ class RoomStateMachineTest {
 
     private fun drive() = m.update { copy(gear = Gear.DRIVE, distractionOptimized = true) }
     private fun settle() { clock.ms += 400; m.tick() }     // 디바운스 창 통과
+    private fun at(h: Int, min: Int = 0, day: Int = 0) { clock.ms = day * 86_400_000L + LocalTime.of(h, min).toSecondOfDay() * 1000L } // day 0 = 1970-01-01 목요일
+    private fun early() = at(6)                            // 이른 아침: 목적지가 집이면 쉼, 아니면 업무
 
     @Test fun 정차_P이고_DO없으면_PARK() {
         m.update { copy(gear = Gear.PARK, distractionOptimized = false) }
@@ -43,12 +45,19 @@ class RoomStateMachineTest {
         assertEquals(Room.DRIVE_WORK, m.room)
     }
 
-    @Test fun 주행_목적지_집이면_REST() {
-        m.update { copy(destination = home) }; drive()
+    @Test fun 저녁_목적지_집이면_REST() {
+        at(18, 30); m.update { copy(destination = home) }; drive()
         assertEquals(Room.DRIVE_REST, m.room)
     }
 
+    // M16: 업무 시간 중 집 목적지(점심·서류 가지러)는 업무. 거래처가 정오에 '오늘 업무 마치셨습니다'를 듣지 않게.
+    @Test fun 업무시간_목적지_집이어도_WORK() {
+        m.update { copy(destination = home) }; drive()
+        assertEquals(Room.DRIVE_WORK, m.room)
+    }
+
     @Test fun 목적지_집_반경_경계() {
+        early()
         m.update { copy(destination = north(290.0)) }; drive()
         assertEquals(Room.DRIVE_REST, m.room)
         m.update { copy(destination = north(310.0)) }; settle()
@@ -70,22 +79,45 @@ class RoomStateMachineTest {
         assertEquals(Room.DRIVE_REST, m.room)
     }
 
-    @Test fun 업무시작_전_새벽은_REST_7시부터_WORK() {
-        clock.ms = LocalTime.of(6, 59, 59).toSecondOfDay() * 1000L
-        m.update { copy(destination = far) }; drive()
+    // H3: 이른 출근(06:50, 목적지 회사)은 업무. 04시 전 새벽은 전날 저녁(쉼).
+    @Test fun 이른_출근은_WORK_새벽4시_전은_REST() {
+        at(6, 50); m.update { copy(destination = far) }; drive()
+        assertEquals(Room.DRIVE_WORK, m.room)
+        at(3, 59); m.tick(); settle()
         assertEquals(Room.DRIVE_REST, m.room)
-        clock.ms += 1000; m.tick(); clock.ms += 400; m.tick()          // 07:00:00
+        at(4, 0); m.tick(); settle()
         assertEquals(Room.DRIVE_WORK, m.room)
     }
 
-    @Test fun 목적지없음_집2km_이내면_REST() {
-        m.update { copy(location = north(1990.0)) }; drive()
+    // H4: 토·일은 업무 아님(쉼). day 2 = 토, 3 = 일, 4 = 월
+    @Test fun 주말은_REST_월요일은_WORK() {
+        at(10, 0, day = 2); m.update { copy(destination = far) }; drive()
         assertEquals(Room.DRIVE_REST, m.room)
+        at(10, 0, day = 3); m.tick(); settle()
+        assertEquals(Room.DRIVE_REST, m.room)
+        at(10, 0, day = 4); m.tick(); settle()
+        assertEquals(Room.DRIVE_WORK, m.room)
     }
 
-    @Test fun 목적지없음_집2km_밖이면_WORK() {
-        m.update { copy(location = north(2010.0)) }; drive()
+    @Test fun 업무시간밖_판정() {
+        val s = RoomSettings()
+        val d = { day: Int, h: Int -> java.time.LocalDateTime.of(2026, 11, day, h, 0) } // 2026-11-02 월
+        assertEquals(false, offDuty(d(2, 9), s))
+        assertEquals(true, offDuty(d(2, 18), s))
+        assertEquals(true, offDuty(d(2, 6), s))
+        assertEquals(true, offDuty(d(7, 10), s))   // 토
+        assertEquals(true, offDuty(d(8, 10), s))   // 일
+    }
+
+    // H3: 아침 집 앞 출발(목적지 없음)은 업무. 예전엔 집 2km 안이면 시각과 무관하게 '퇴근길'이었다.
+    @Test fun 아침_집앞_출발_목적지없음은_WORK() {
+        at(8, 30); m.update { copy(location = north(300.0)) }; drive()
         assertEquals(Room.DRIVE_WORK, m.room)
+    }
+
+    @Test fun 저녁_목적지없음은_REST() {
+        at(18, 30); m.update { copy(location = far) }; drive()
+        assertEquals(Room.DRIVE_REST, m.room)
     }
 
     @Test fun 목적지없음_위치모르면_WORK() {
@@ -153,6 +185,7 @@ class RoomStateMachineTest {
     }
 
     @Test fun 목적지_해제는_유예_후_반영() {
+        early()
         m.update { copy(destination = home) }; drive()
         assertEquals(Room.DRIVE_REST, m.room)
         settle()
@@ -164,6 +197,7 @@ class RoomStateMachineTest {
     }
 
     @Test fun 경유지_추가_취소_잠깐후_복귀면_방_안_바뀜() {
+        early()
         m.update { copy(destination = home) }; drive(); settle()
         val before = events.size
         m.update { copy(destination = null) }                      // onRouteCancelled + FREE_DRIVE
@@ -175,6 +209,7 @@ class RoomStateMachineTest {
     }
 
     @Test fun 정차중_해제된_목적지는_운전_시작때_유령으로_안_남는다() {
+        early()
         m.update { copy(destination = home, gear = Gear.PARK) }
         m.update { copy(destination = null) }
         clock.ms += m.settings.destGraceMs + 1000; m.tick()
@@ -183,6 +218,7 @@ class RoomStateMachineTest {
     }
 
     @Test fun 유예_시간은_설정으로_늘릴_수_있다() {
+        early()
         m.settings = m.settings.copy(destGraceMs = 10_000)
         m.update { copy(destination = home) }; drive(); settle()
         m.update { copy(destination = null) }
