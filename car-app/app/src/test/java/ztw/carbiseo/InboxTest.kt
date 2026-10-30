@@ -70,4 +70,21 @@ class InboxTest {
         val l = parkOrder(listOf(item(1), item(2, urgent = true), item(3), item(4, urgent = true)))
         assertEquals(listOf(4L, 2L, 3L, 1L), l.map { it.id })
     }
+
+    @Test fun 할일_본문에서_번호와_내용() {
+        assertEquals("01012345678" to "3시 도착", taskDraft("박 대리 010-1234-5678에게 문자 / 내용: 3시 도착"))
+        assertEquals("" to "박 대리에게 문자", taskDraft("박 대리에게 문자"))
+    }
+
+    @Test fun 보낸문자_상태_IP차단은_정직하게() {
+        val s = InboxItem(1, "x", "y", false, 0L, "", kind = "sent")
+        assertEquals("보냄", sentStatus(s.copy(status = "sent")))
+        assertEquals("발송 실패(서버 IP 제한)", sentStatus(s.copy(status = "failed", code = "overseas_ip_blocked")))
+        assertEquals("발송 실패(http_500)", sentStatus(s.copy(status = "failed", code = "http_500")))
+    }
+
+    @Test fun 확인할_건수는_안_연_카드만_보낸문자_제외() {
+        val l = listOf(item(1), item(2), InboxItem(3, "", "", false, 0L, "", kind = "sent"), InboxItem(4, "", "", false, 0L, "", kind = "hint"))
+        assertEquals(2, todo(l, setOf(1L)))
+    }
 }

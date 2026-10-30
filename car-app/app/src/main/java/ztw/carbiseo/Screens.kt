@@ -85,7 +85,11 @@ private var seenIds by mutableStateOf(setOf<Long>())
 private fun roomName(r: String) = when (r) { "PARK" -> "5분 사무실"; "DRIVE_WORK" -> "업무 운전"; "DRIVE_REST" -> "퇴근길"; else -> "판정 전" }
 private fun accent(r: String) = when (r) { "PARK" -> ParkAcc; "DRIVE_REST" -> RestAcc; else -> WorkAcc }
 private fun toast(c: Context, s: String) = Toast.makeText(c, s, Toast.LENGTH_SHORT).show()
-private fun label(i: InboxItem) = i.fromLabel.ifBlank { "모르는 번호" }
+private fun label(i: InboxItem) = when (i.kind) {
+    "task" -> "할 일"
+    "sent" -> "보낸 문자 · ${i.fromLabel}"
+    else -> i.fromLabel.ifBlank { "모르는 번호" }
+}
 
 @Composable
 fun App() {
@@ -179,7 +183,7 @@ private fun Park(onImage: Boolean, onSettings: () -> Unit) {
             PassengerToggle(ink)
             TextButton(onSettings, Tall) { Text("꾸미기", color = ink, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
         }
-        val unseen = items.count { it.id !in seenIds }
+        val unseen = todo(items, seenIds)
         Text(if (unseen == 0) "세워 둔 동안, 볼 건 없어요" else "확인할 게 ${unseen}건 있어요",
             color = ink, fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Black)
         val calls = todayCalls(items, java.time.LocalDate.now())
@@ -194,7 +198,7 @@ private fun Park(onImage: Boolean, onSettings: () -> Unit) {
                 Note(i, i.id == sel) { sel = if (sel == i.id) null else i.id; seenIds = seenIds + i.id }
             }
         }
-        items.firstOrNull { it.id == sel }?.let { Sheet(it) { sel = null } }
+        items.firstOrNull { it.id == sel && it.kind in setOf("call", "task") }?.let { Sheet(it) { sel = null } }
     }
 }
 
@@ -206,10 +210,19 @@ private fun Note(i: InboxItem, selected: Boolean, onTap: () -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(label(i), Modifier.weight(1f), color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
             Text(hhmm.format(Instant.ofEpochMilli(i.createdAt).atZone(ZoneId.systemDefault())), color = ParkBody, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            if (i.kind == "hint") Text("AI 제안", Modifier.padding(start = 8.dp).background(ParkInk, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 2.dp),
+                color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             if (i.urgent) Text("급함", Modifier.padding(start = 8.dp).background(ParkAcc, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 2.dp),
                 color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         }
         Text(i.summary.ifBlank { "AI가 통화 내용을 정리하고 있어요" }, color = ParkBody, fontSize = 18.sp, lineHeight = 26.sp)
+        if (i.kind == "sent") Text(sentStatus(i), color = if (i.status == "sent") ParkBody else Color(0xFFC62828), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        if (i.car.isNotBlank()) Text("쓴 차량 데이터 · ${i.car}", Modifier.padding(top = 6.dp).background(ParkBg, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 3.dp),
+            color = ParkBody, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        // 카드는 주차 화면에만 있다 = 버튼도 P에서만
+        if (i.kind == "task") Button(onTap, Tall.padding(top = 8.dp), colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
+            Text("문자 보내기", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        }
     }
 }
 
@@ -245,20 +258,35 @@ private fun PassengerToggle(ink: Color) {
     }, Tall) { Text(if (on) "동승자 켜짐" else "동승자 꺼짐", color = if (on) ParkAcc else ink, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
 }
 
-/** 보내기 전 확인. 시연 단계라 실제 발송 없음. */
+/** 보내기 전 확인 1단계: 받는 번호·본문을 보여 주고 누르면 서버가 발송(/car/send). */
 @Composable
 private fun Sheet(i: InboxItem, onDone: () -> Unit) {
     val ctx = LocalContext.current
-    var text by remember(i.id) { mutableStateOf("안녕하세요, ${i.fromLabel.ifBlank { "고객" }}님. 확인하고 다시 연락드리겠습니다.") }
+    val scope = rememberCoroutineScope()
+    val draft = remember(i.id) { if (i.kind == "task") taskDraft(i.summary) else "" to "안녕하세요, ${i.fromLabel.ifBlank { "고객" }}님. 확인하고 다시 연락드리겠습니다." }
+    var number by remember(i.id) { mutableStateOf(draft.first) }
+    var text by remember(i.id) { mutableStateOf(draft.second) }
     var edit by remember(i.id) { mutableStateOf(false) }
+    var busy by remember(i.id) { mutableStateOf(false) }
+    val digits = number.filter { it.isDigit() }
     Column(Modifier.fillMaxWidth().background(SheetBg, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("${label(i)}님께 문자 · 보내기 전 확인", color = SheetInk.copy(alpha = 0.8f), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text("${if (i.kind == "task") "할 일" else "${label(i)}님께"} 문자 · 보내기 전 확인", color = SheetInk.copy(alpha = 0.8f), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        OutlinedTextField(number, { number = it.take(13) }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("받는 번호", fontSize = 16.sp) },
+            textStyle = TextStyle(color = SheetInk, fontSize = 20.sp))
         if (edit) OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), textStyle = TextStyle(color = SheetInk, fontSize = 20.sp))
         else Text("“$text”", color = SheetInk, fontSize = 20.sp, lineHeight = 28.sp)
         Row(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton({ edit = !edit }, Tall) { Text(if (edit) "다 고침" else "고치기", color = SheetInk, fontSize = 20.sp) }
-            Button({ toast(ctx, "시연: 전송은 2차에서"); onDone() }, Tall, colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
+            Button({
+                busy = true
+                scope.launch {
+                    val code = withContext(Dispatchers.IO) { Server.send("", digits, text.trim()) }
+                    busy = false
+                    toast(ctx, when (code) { "ok" -> "보냈어요"; null -> "서버 연결 실패 — 다시 시도해 주세요"; "overseas_ip_blocked" -> "발송 실패(서버 IP 제한)"; else -> "발송 실패($code)" })
+                    if (code == "ok") onDone()
+                }
+            }, Tall, enabled = !busy && digits.length in 9..11 && text.isNotBlank(), colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
                 Text("보내기", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             }
         }
@@ -293,7 +321,7 @@ private fun Work(r: String) {
 
 @Composable
 private fun Rest() {
-    val n = RoomService.inbox.count { it.id !in seenIds }
+    val n = todo(RoomService.inbox, seenIds)
     Column(Modifier.fillMaxSize().padding(24.dp)) {
         Text(roomName("DRIVE_REST"), color = RestAcc, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Text("오늘 일은 여기까지", color = RestInk, fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Black)
@@ -348,6 +376,21 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
                 Button({ RoomService.restMin = min; if (min != 1) prefs.edit().putInt("rest_min", min).apply() }, Tall, // 시연값은 저장 안 함
                     colors = ButtonDefaults.buttonColors(containerColor = if (on) ParkAcc else ParkNote)) {
                     Text(t, color = if (on) Color.White else ParkInk, fontSize = 18.sp)
+                }
+            }
+        }
+        Text("전화 응대", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        var mode by remember { mutableStateOf(prefs.getString("mode", "ai") ?: "ai") }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            for ((m, t) in listOf("ai" to "AI 응대", "ment" to "안내 멘트", "off" to "끔")) {
+                Button({
+                    scope.launch {
+                        val ok = withContext(Dispatchers.IO) { Server.postMode(m) }
+                        if (ok) { mode = m; prefs.edit().putString("mode", m).apply() }
+                        toast(ctx, if (ok) "$t(으)로 바꿨어요" else "저장 실패 — 다시 시도해 주세요")
+                    }
+                }, Tall, colors = ButtonDefaults.buttonColors(containerColor = if (mode == m) ParkAcc else ParkNote)) {
+                    Text(t, color = if (mode == m) Color.White else ParkInk, fontSize = 18.sp)
                 }
             }
         }

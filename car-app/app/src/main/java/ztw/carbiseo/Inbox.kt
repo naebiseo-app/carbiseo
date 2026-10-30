@@ -8,8 +8,30 @@ import java.time.format.DateTimeFormatter
 data class InboxItem(
     val id: Long, val fromLabel: String, val summary: String,
     val urgent: Boolean, val createdAt: Long, val raw: String,
-    val kind: String = "call", // "call" = 통화 1건, "event" = 같은 통화의 웹훅(요약·녹음 완료 등)
+    val kind: String = "call", // call 통화 / hint 추천 답변·정정·빈 시간 / task 할 일 / sent 보낸 문자 / event·ring 웹훅(안 보임)
+    val status: String = "", val code: String = "", // sent: status sent|failed, code = 업체 결과(overseas_ip_blocked 등)
+    val car: String = "", // 서버가 붙인 "쓴 차량 데이터" 칩
 )
+
+/** 차 화면에 보이는 종류. ring은 곧 call 카드가 되고 event는 웹훅 원문이라 숨긴다. */
+val SHOWN_KINDS = setOf("call", "hint", "task", "sent")
+
+/** 확인할 건수: 아직 안 연 카드(보낸 문자 제외). */
+fun todo(items: List<InboxItem>, seen: Set<Long>) = items.count { it.kind != "sent" && it.id !in seen }
+
+/** 보낸 문자 카드 상태 한 줄. 국외 IP 차단은 숨기지 않고 그대로 알린다. */
+fun sentStatus(i: InboxItem) = when {
+    i.status == "sent" -> "보냄"
+    i.code == "overseas_ip_blocked" -> "발송 실패(서버 IP 제한)"
+    else -> "발송 실패(${i.code.ifBlank { "알 수 없음" }})"
+}
+
+/** 할 일 본문 -> (받는 번호, 문자 내용). 번호는 본문에 있으면 채우고, 내용은 "내용:" 뒤(없으면 본문 전체). */
+fun taskDraft(text: String): Pair<String, String> {
+    val num = Regex("""01\d-?\d{3,4}-?\d{4}|0\d{1,2}-\d{3,4}-\d{4}""").find(text)?.value?.replace("-", "") ?: ""
+    val body = text.split(" / ").firstNotNullOfOrNull { Regex("""내용\s*[:：]\s*(.+)""").find(it)?.groupValues?.get(1) } ?: text
+    return num to body.trim()
+}
 
 /** 마지막으로 본 id. 항목이 없으면 그대로. */
 fun nextSince(since: Long, items: List<InboxItem>): Long = maxOf(since, items.maxOfOrNull { it.id } ?: since)
