@@ -153,8 +153,9 @@ export default {
       const card = sig === "ok" ? summaryCard(raw) : null;
       if (card) {
         const cc = await kvGet(env.DB, "car_context");
-        await env.DB.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,summary,urgent,created_at) VALUES('call','summarized',?,?,?,?,?,?)")
-          .bind(parseRoom(cc?.room) ?? null, card.call_id, card.from_label, card.summary, card.urgent, now()).run();
+        // 웹훅 재전송 대비: 같은 통화의 카드는 1장만
+        await env.DB.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,summary,urgent,created_at) SELECT 'call','summarized',?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='call' AND call_id=?)")
+          .bind(parseRoom(cc?.room) ?? null, card.call_id, card.from_label, card.summary, card.urgent, now(), card.call_id).run();
       }
       return json({ ok: true });
     }
