@@ -273,6 +273,11 @@ export default {
         await env.DB.prepare("INSERT OR REPLACE INTO kv(key,value,updated_at) VALUES('owner_as_guest',?,?)").bind(JSON.stringify(on), now()).run();
         return html(on ? "주인 번호를 손님으로 취급합니다(켜짐)" : "주인 번호는 주인 모드입니다(꺼짐)");
       }
+      // 녹화 전 부재중 카드 비우기. id는 AUTOINCREMENT라 차의 since 커서와 어긋나지 않는다.
+      if (m === "POST" && pathname === "/admin/reset-inbox") {
+        const r = await env.DB.prepare("DELETE FROM inbox").run();
+        return html(`inbox ${r.meta.changes ?? 0}건을 비웠습니다(차 화면은 앱을 다시 열면 비워집니다)`);
+      }
       if (m === "POST" && pathname === "/admin/replay") {
         const t = now();
         const s = (await kvGet(env.DB, "schedule")) ?? demoSchedule(t);

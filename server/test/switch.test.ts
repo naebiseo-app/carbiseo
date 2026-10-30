@@ -44,8 +44,18 @@ test("녹화 스위치: 기본 꺼짐 → 주인 대본, 켜면 손님 대본, �
   assert.equal((await ring(env)).Variables.owner_mode, "1");
 });
 
-test("관리자 인증: 비밀번호 틀리면 스위치 401", async () => {
+test("관리자 인증: 비밀번호 틀리면 스위치·inbox 비우기 401", async () => {
   const env = mkEnv();
   assert.equal((await admin(env, "/admin/owner-as-guest", { on: "1" }, "no")).status, 401);
+  assert.equal((await admin(env, "/admin/reset-inbox", {}, "no")).status, 401);
   assert.equal(env.DB.kv.owner_as_guest, undefined);
+  assert.ok(!env.DB.log.includes("DELETE FROM inbox"));
+});
+
+test("/admin/reset-inbox: inbox 전체 삭제", async () => {
+  const env = mkEnv();
+  const r = await admin(env, "/admin/reset-inbox");
+  assert.equal(r.status, 200);
+  assert.ok(env.DB.log.includes("DELETE FROM inbox"));
+  assert.match(await r.text(), /3건을 비웠습니다/);
 });

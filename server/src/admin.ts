@@ -89,5 +89,6 @@ form{background:#FFFDF8;padding:16px;border-radius:14px;margin:16px 0}.m{font-we
 <button>넣기</button></form>
 <form method="post" action="/admin/reset-schedule"><h2>데모 일정 초기화</h2><p>오늘 일정 3건(지금부터 1·3·5시간 뒤)으로 덮어씁니다.</p><button>초기화</button></form>
 <form method="post" action="/admin/owner-as-guest"><h2>녹화용: 주인 번호를 손님으로</h2><p>켜면 주인 번호로 건 전화도 일반 발신자처럼 AI가 응대합니다. 녹화 뒤 꼭 끄세요.</p><button name="on" value="1">켜기</button><button name="on" value="0">끄기</button></form>
+<form method="post" action="/admin/reset-inbox"><h2>부재중 카드 비우기</h2><p>녹화 전에 inbox를 모두 지웁니다.</p><button>비우기</button></form>
 <form method="post" action="/admin/replay"><h2>재현 통화 시작</h2><p>거래처 통화("${esc(REPLAY_SAID)}")에 맞춰 차에 카드 3장을 8초 간격으로 띄웁니다.</p><button>재현 통화 시작</button></form>`;
 }
