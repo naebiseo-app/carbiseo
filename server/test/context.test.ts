@@ -25,7 +25,7 @@ test("차량 맥락: 형식 틀린 값 버림", () => {
 
 test("쓴 차량 데이터 칩", () => {
   const nowMs = Date.UTC(2026, 9, 30, 9, 0); // 18:00 KST
-  assert.equal(carChip({ eta_min: 40, trip_min: 120, passenger: true }, nowMs), "도착 18:40 · 2시간 운전 · 동승자");
+  assert.equal(carChip({ gear: "D", eta_min: 40, trip_min: 120, passenger: true }, nowMs), "기어 D · 도착 18:40 · 2시간 운전 · 동승자");
   assert.equal(carChip({ trip_min: 125, telltale: "Brake", soc: 12 }, nowMs), "2시간 5분 운전 · 경고등 · 배터리 12%");
   assert.equal(carChip({ trip_min: 30 }, nowMs), "30분 운전");
   assert.equal(carChip(null, nowMs), "");

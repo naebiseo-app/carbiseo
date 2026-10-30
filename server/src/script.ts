@@ -157,11 +157,12 @@ export function parseCarCtx(b: Record<string, unknown>): CarCtx {
 
 export const FATIGUE_MIN = 120;
 
-// 통화 카드 "쓴 차량 데이터" 칩. 예: "도착 18:40 · 2시간 운전 · 동승자"
+// 통화 카드 "쓴 차량 데이터" 칩. 예: "기어 D · 도착 18:40 · 2시간 운전 · 동승자"
 export function carChip(cc: Partial<CarCtx> & { eta_min?: number | null } | null, nowMs: number): string {
   if (!cc) return "";
   const t = cc.trip_min ?? 0;
   return [
+    cc.gear ? `기어 ${cc.gear}` : "",
     cc.eta_min != null ? `도착 ${hhmm(nowMs + cc.eta_min * 60_000)}` : "",
     t >= 60 ? `${Math.floor(t / 60)}시간${t % 60 ? ` ${t % 60}분` : ""} 운전` : t > 0 ? `${t}분 운전` : "",
     cc.passenger ? "동승자" : "",
