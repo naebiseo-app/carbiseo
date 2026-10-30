@@ -13,6 +13,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <queries>
         <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
         <package android:name="ai.umos.maps.android.navigation.app" />
@@ -23,6 +24,13 @@
         <service android:name=".RoomService" android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="vehicle-room-state" />
         </service>
+        <!-- H1: 시동(부팅)·앱 업데이트 뒤 앱을 안 열어도 방 판정 서비스가 돈다. AAOS는 사용자(10)가 시작될 때마다 BOOT_COMPLETED를 보낸다(사용자 전환 포함). -->
+        <receiver android:name=".BootReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <activity android:name=".MainActivity" android:exported="true">
             <meta-data android:name="distractionOptimized" android:value="true" />
             <intent-filter>
