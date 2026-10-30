@@ -7,3 +7,4 @@ local.properties
 *.apk
 .idea/
 !apk/*.apk
+sms-relay/.vercel
