@@ -56,6 +56,7 @@ test("쉼 방 약속은 다음 평일 오전(H7: 차가 그 첫 업무 운전에
   const kst = (d: number, h: number) => Date.UTC(2026, 10, d, h - 9, 0); // 2026-11-02 월
   assert.equal(nextWorkMorning(kst(2, 19)), "내일 오전");   // 월 저녁
   assert.equal(nextWorkMorning(kst(4, 2)), "오늘 오전");    // 수 새벽 2시
+  assert.equal(nextWorkMorning(kst(4, 5)), "오늘 오전");    // 수 05시(04~07시도 아직 업무 전)
   assert.equal(nextWorkMorning(kst(6, 19)), "월요일 오전"); // 금 저녁
   assert.equal(nextWorkMorning(kst(7, 10)), "월요일 오전"); // 토
   assert.equal(nextWorkMorning(kst(8, 19)), "내일 오전");   // 일 저녁

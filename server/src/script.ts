@@ -71,11 +71,11 @@ const BY_MODE = {
 const NEUTRAL = "'지금 바로 받기 어려우셔서 제가 대신 받았습니다. 용건 남겨 주시면 전해 드리겠습니다'라고 안내하고 용건을 받습니다. 운전 중인지, 언제 도착하는지는 말하지 않습니다.";
 
 // nextAt = 다음 일정 시각(ms), DRIVE_WORK에만 한 줄.
-// 쉼 방 약속 '{when}에 연락': 다음 평일 오전(KST). 04시 전 새벽이면 오늘, 금 저녁·토·일이면 월요일. 차는 그 첫 업무 운전에 '넘긴 전화'를 알린다(H7).
+// 쉼 방 약속 '{when}에 연락': 다음 평일 오전(KST). 업무 시작(07시) 전 새벽이면 오늘, 금 저녁·토·일이면 월요일. 차는 그 첫 업무 운전에 '넘긴 전화'를 알린다(H7).
 export function nextWorkMorning(nowMs: number): string {
   const kst = new Date(nowMs + 9 * 3_600_000);
   const today = kst.getUTCDay();
-  let ahead = kst.getUTCHours() < 4 ? 0 : 1;
+  let ahead = kst.getUTCHours() < 7 ? 0 : 1;
   while ([0, 6].includes((today + ahead) % 7)) ahead++;
   return ahead === 0 ? "오늘 오전" : ahead === 1 ? "내일 오전" : "월요일 오전";
 }
