@@ -1,4 +1,4 @@
-import { carChip, callerNumber, cleanName, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, sameNumber, type Mode, type Recent } from "./script.ts";
+import { carChip, callerNumber, cleanName, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, sameNumber, type Mode, type Recent } from "./script.ts";
 import { adminPage, basicOk, demoSchedule, parseFakeCall, REPLAY_SAID, replayCards } from "./admin.ts";
 
 interface Env {
@@ -60,9 +60,7 @@ export function summaryCard(raw: string) {
   try { j = JSON.parse(f.get("SummaryJson") ?? "{}"); } catch { /* 빈 요약 */ }
   const summary = (j.coreSummary ?? "").slice(0, 300);
   const from = (f.get("From") ?? "").replace(/\D/g, "");
-  // ponytail: 기본 요약 스키마엔 급함 필드가 없어 낱말로 판정. 오판이 잦으면 조직 스키마에 urgent 필드 추가
-  const text = [summary, ...(j.decisions ?? []), ...(j.followUps ?? [])].join(" ");
-  const urgent = /급하|긴급|바로 연락|즉시/.test(text) && !/급하지 않|긴급하지 않/.test(text) ? 1 : 0;
+  const urgent = isUrgent([summary, ...(j.decisions ?? []), ...(j.followUps ?? [])].join(" ")) ? 1 : 0;
   return { call_id: f.get("CallId") ?? "", from_label: from.length >= 4 ? `끝번호 ${from.slice(-4)}` : "", summary, urgent };
 }
 

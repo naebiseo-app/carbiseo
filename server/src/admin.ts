@@ -1,3 +1,5 @@
+import { isUrgent } from "./script.ts";
+
 // F6 데모 모드: 관리 페이지(/admin)용 순수 함수. 이름·장소는 전부 가상.
 
 // Basic 인증(브라우저 기본 로그인 창). 사용자 이름은 무엇이든, 비밀번호 = ADMIN_TOKEN.
@@ -18,7 +20,7 @@ export function parseFakeCall(f: { get(k: string): unknown }): FakeCall | null {
   const name = String(f.get("from_label") ?? "").trim();
   const summary = String(f.get("summary") ?? "").trim();
   if (!/^[\p{L}\p{N} ]{1,10}$/u.test(name) || summary.length < 1 || summary.length > 120) return null;
-  return { from_label: name, summary, urgent: ["", "0", "false", "off"].includes(String(f.get("urgent") ?? "").trim().toLowerCase()) ? 0 : 1 };
+  return { from_label: name, summary, urgent: !["", "0", "false", "off"].includes(String(f.get("urgent") ?? "").trim().toLowerCase()) || isUrgent(summary) ? 1 : 0 }; // 체크 또는 실제 요약과 같은 낱말 판정
 }
 
 export type DemoEvent = { title: string; start: number; place: string; lat: number; lng: number };

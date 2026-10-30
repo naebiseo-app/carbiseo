@@ -30,3 +30,14 @@ test("AI 통화 종료 → 받아쓰기 요청 대상", () => {
   assert.equal(transcriptTarget("Event=agent.disconnected&CallId=CA9&Direction=outbound"), null);
   assert.equal(transcriptTarget("Event=agent.connected&CallId=CA9"), null);
 });
+
+test("급함 판정: 실제 요약 문장 표현들", () => {
+  const u = (s: string) => summaryCard(body("inbound", { coreSummary: s }))?.urgent;
+  for (const s of ["거래처 김 과장, 납품 일정 관련 급한 건으로 회신 요청", "급합니다, 오늘 안으로 견적서 보내 달라고 함", "급해요 바로 전화 부탁",
+    "빨리 연락 달라고 요청", "당장 확인이 필요하다고 함", "급한 일입니다", "시급합니다, 현장 확인 요청", "급히 통화 원함", "긴급 장애 접수"])
+    assert.equal(u(s), 1, s);
+  for (const s of ["급하지 않으니 내일 연락 달라", "안 급하니 천천히 보셔도 된다고 함", "급한 건은 아니고 견적 문의", "세금계산서 발급해 달라는 요청",
+    "월급 지급 일정 문의", "부품 공급한 업체에서 확인 전화", "지난 회의 때 언급한 자료 요청", "급할 건 없고 시간 될 때 회신"])
+    assert.equal(u(s), 0, s);
+  assert.equal(summaryCard(body("inbound", { coreSummary: "견적 문의", followUps: ["오늘 중 빨리 회신"] }))?.urgent, 1); // 후속 조치도 본다
+});

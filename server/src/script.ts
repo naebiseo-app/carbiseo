@@ -16,6 +16,13 @@ const BY_ROOM: Record<Room, string> = {
   PARK: "지금 {owner}님은 잠시 자리를 비우셨습니다. '잠시 자리를 비우셨습니다. 용건 남겨 주시면 곧 회신드리겠습니다'라고 안내하고 용건을 받습니다.",
 };
 
+// 급함 판정(요약 문장). '급한·급합니다·급해요·급히·빨리·당장·즉시' 등, 부정형('급하지 않·안 급·급한 건 아니')은 제외.
+// '발급·지급·공급·월급·언급'처럼 앞 글자가 붙은 '급'은 급함이 아니다(lookbehind).
+// ponytail: 낱말 판정. 오판이 잦으면 요약 스키마에 urgent 필드를 두고 그 값을 우선
+const URGENT = /(?<![공지발보수배진승특고초중상하월언취파봉급])급(하|한|합|해|히|함|했)|긴급|바로\s*(연락|회신|전화)|즉시|빨리|당장/;
+const NOT_URGENT = /급하지\s*(는\s*)?않|급하진\s*않|안\s*급|급한\s*(건|일|용건|거)?\s*(은|는)?\s*아니|급할\s*(건|거|것|일)?\s*(은|는)?\s*없|빨리\s*(안|않)|서두르지\s*않|천천히/;
+export const isUrgent = (text: string) => URGENT.test(text) && !NOT_URGENT.test(text);
+
 export function parseRoom(v: unknown): Room | null {
   return ROOMS.includes(v as Room) ? (v as Room) : null;
 }

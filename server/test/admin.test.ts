@@ -34,3 +34,9 @@ test("데모 일정은 지금 이후 3건, 좌표 포함, 시간순", () => {
   assert.equal(s[0].start, Date.UTC(2026, 9, 29, 6, 30)); // 05:30 올림 + 1h
   assert.ok(s[0].start < s[1].start && s[1].start < s[2].start);
 });
+
+test("가짜 수신: 체크 안 해도 용건 문장이 급하면 급함(실제 요약과 같은 판정)", () => {
+  const f = (o: Record<string, string>) => new URLSearchParams(o);
+  assert.equal(parseFakeCall(f({ from_label: "한가람", summary: "급한 일입니다" }))!.urgent, 1);
+  assert.equal(parseFakeCall(f({ from_label: "한가람", summary: "급하지 않은 일" }))!.urgent, 0);
+});
