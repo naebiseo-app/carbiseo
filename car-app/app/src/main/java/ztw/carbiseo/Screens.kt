@@ -370,7 +370,7 @@ private fun Sheet(i: InboxItem, onDone: () -> Unit) {
                 scope.launch {
                     val code = withContext(Dispatchers.IO) { Server.send(if (auto) i.fromLabel else "", digits, text.trim()) }
                     busy = false
-                    toast(ctx, when (code) { "ok" -> "보냈어요"; null -> "서버 연결 실패 — 다시 시도해 주세요"; "overseas_ip_blocked" -> "발송 실패(서버 IP 제한)"; else -> "발송 실패($code)" })
+                    toast(ctx, when (code) { "ok" -> "보냈어요"; null -> "서버 연결 실패 — 다시 시도해 주세요"; "overseas_ip_blocked" -> "못 보냄(서버 IP 제한)"; else -> "못 보냄($code)" })
                     if (code == "ok") onDone()
                 }
             }, Tall, enabled = !busy && digits.length in 9..11 && text.isNotBlank(), colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {

@@ -53,8 +53,8 @@ fun todo(items: List<InboxItem>, seen: Set<Long>) = items.count { it.kind != "se
 /** 보낸 문자 카드 상태 한 줄. 국외 IP 차단은 숨기지 않고 그대로 알린다. */
 fun sentStatus(i: InboxItem) = when {
     i.status == "sent" -> "보냄"
-    i.code == "overseas_ip_blocked" -> "발송 실패(서버 IP 제한)"
-    else -> "발송 실패(${i.code.ifBlank { "알 수 없음" }})"
+    i.code == "overseas_ip_blocked" -> "못 보냄(서버 IP 제한)"
+    else -> "못 보냄(${i.code.ifBlank { "알 수 없음" }})"
 }
 
 /** 할 일 본문 -> (받는 번호, 문자 내용). 번호는 본문에 있으면 채우고, 내용은 "내용:" 뒤(없으면 본문 전체). */

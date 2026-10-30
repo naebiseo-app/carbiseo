@@ -11,6 +11,8 @@ interface Env {
   CLAWOPS_API_KEY?: string;
   CLAWOPS_NUMBER?: string; // 문자 발신 070
   OWNER_NUMBER?: string; // 주인 휴대폰: 이 번호로 오면 주인 모드
+  SMS_RELAY_URL?: string; // 문자 중계(Vercel 서울, sms-relay/api/send.js)
+  SMS_RELAY_SECRET?: string;
 }
 
 const json = (o: unknown, status = 200) =>
@@ -72,18 +74,31 @@ export function taskText(raw: string): string {
   return [j.coreSummary ?? "", ...(j.followUps ?? [])].filter(Boolean).join(" / ").slice(0, 500);
 }
 
-/** /car/send 본문 검증. 수신번호 숫자 9~11자리, 내용 1~2000자, confirmed=true 필수. */
+/** /car/send 본문 검증(중계와 같은 한도). 수신번호 숫자 10~11자리, 내용 1~1000자, confirmed=true 필수. */
 export function parseSend(b: Record<string, unknown>) {
   const to = String(b.to_number ?? "").replace(/-/g, "");
   const body = typeof b.body === "string" ? b.body.trim() : "";
   if (b.confirmed !== true) return { error: "confirmed must be true" };
-  if (!/^\d{9,11}$/.test(to)) return { error: "bad to_number" };
-  if (body.length < 1 || body.length > 2000) return { error: "bad body" };
+  if (!/^\d{10,11}$/.test(to)) return { error: "bad to_number" };
+  if (body.length < 1 || body.length > 1000) return { error: "bad body" };
   return { to, body, label: cleanName(b.to_label) ?? `끝번호 ${to.slice(-4)}` };
 }
 
-// SMS 90byte(한글 2byte) 넘으면 lms — 'sms' 강제 시 body_too_long 400 방지
-export const msgType = (body: string) => ([...body].reduce((n, c) => n + (c.charCodeAt(0) < 128 ? 1 : 2), 0) <= 90 ? "sms" : "lms");
+// 문자 발송: Workers는 국외 IP라 ClawOps가 막는다 → 서울 중계로 {to, body}. 중계는 ClawOps 응답을 그대로 돌려준다.
+// 결과 code = ClawOps status(queued 등) | ClawOps code | 중계 error(unauthorized·bad_request) | http_xxx | relay_unreachable
+export async function relaySend(env: Pick<Env, "SMS_RELAY_URL" | "SMS_RELAY_SECRET">, to: string, body: string, f: typeof fetch = fetch) {
+  try {
+    const r = await f(env.SMS_RELAY_URL ?? "", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-relay-secret": env.SMS_RELAY_SECRET ?? "" },
+      body: JSON.stringify({ to, body }),
+    });
+    const j = (await r.json().catch(() => ({}))) as { messageId?: string; status?: string; code?: string; error?: string };
+    return { ok: r.ok, http: r.status, code: r.ok ? j.status ?? "queued" : j.code ?? j.error ?? `http_${r.status}`, message_id: j.messageId ?? null };
+  } catch {
+    return { ok: false, http: 0, code: "relay_unreachable", message_id: null };
+  }
+}
 
 /** 받은 전화의 AI 통화가 끝났으면 그 CallId. */
 export function transcriptTarget(raw: string) {
@@ -209,22 +224,15 @@ export default {
       return json({ ok: true });
     }
 
-    // 차 앱 '보내기' 버튼: 확인된 문자만 ClawOps로 발송, 결과를 inbox kind='sent'로 기록
+    // 차 앱 '보내기' 버튼: 확인된 문자만 중계로 발송, 결과를 inbox kind='sent'로 기록
     if (m === "POST" && pathname === "/car/send") {
       if (!authed) return json({ error: "unauthorized" }, 401);
       const p = parseSend((await req.json().catch(() => ({}))) as Record<string, unknown>);
       if ("error" in p) return json({ error: p.error }, 400);
-      const r = await fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/messages`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}`, "content-type": "application/json" },
-        body: JSON.stringify({ From: env.CLAWOPS_NUMBER, To: p.to, Body: p.body, Type: msgType(p.body) }),
-      });
-      const j = (await r.json().catch(() => ({}))) as { messageId?: string; status?: string; code?: string };
-      const ok = r.ok;
-      const code = ok ? j.status ?? "queued" : j.code ?? `http_${r.status}`; // 국외 IP면 overseas_ip_blocked
+      const r = await relaySend(env, p.to, p.body);
       await env.DB.prepare("INSERT INTO inbox(kind,status,message_id,from_label,summary,created_at,meta) VALUES('sent',?,?,?,?,?,?)")
-        .bind(ok ? "sent" : "failed", j.messageId ?? null, p.label, p.body, now(), JSON.stringify({ http: r.status, code })).run();
-      return json({ ok, code, http: r.status, message_id: j.messageId ?? null }, ok ? 200 : 502);
+        .bind(r.ok ? "sent" : "failed", r.message_id, p.label, p.body, now(), JSON.stringify({ http: r.http, code: r.code })).run();
+      return json(r, r.ok ? 200 : 502);
     }
 
     // H13: 첫 실행 안내용. 착신 받을 서비스 번호(환경값, 코드에 두지 않음)와 실제 착신 통화(ring)를 받은 적 있는지.

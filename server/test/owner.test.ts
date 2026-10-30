@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { callerNumber, hhmm, nextEventAt, ownerScript, parseMode, pickScript, sameNumber } from "../src/script.ts";
-import { msgType, parseSend, taskText } from "../src/index.ts";
+import { parseSend, taskText } from "../src/index.ts";
 
 test("발신번호: 폼·JSON, 키 대소문자 무시, 숫자만 비교", () => {
   assert.equal(callerNumber("from=010-1111-2222&To=070"), "010-1111-2222");
@@ -65,6 +65,5 @@ test("문자 발송 검증: confirmed·번호 9~11자리·내용", () => {
   assert.ok("error" in parseSend({ to_number: "1234", body: "x", confirmed: true }));
   assert.ok("error" in parseSend({ to_number: "010123456789", body: "x", confirmed: true }));
   assert.ok("error" in parseSend({ to_number: "01012345678", body: "  ", confirmed: true }));
-  assert.equal(msgType("가".repeat(45)), "sms");
-  assert.equal(msgType("가".repeat(46)), "lms");
+  assert.ok("error" in parseSend({ to_number: "01012345678", body: "가".repeat(1001), confirmed: true }));
 });
