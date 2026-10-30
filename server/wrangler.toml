@@ -7,3 +7,6 @@ workers_dev = true
 binding = "DB"
 database_name = "carbiseo"
 database_id = "6dba3eaa-571e-41a0-b4d4-96fb5c0fcba1"
+
+[triggers]
+crons = ["0 18 * * *"]  # 매일 03시 KST 보관 정책 실행

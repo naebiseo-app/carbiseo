@@ -48,6 +48,12 @@ async function checkSig(env: Env, url: string, ct: string | null, raw: string, s
   return sig.trim() === b64(mac) ? "ok" : "fail";
 }
 
+const DAY = 86_400_000;
+export const retention = (t: number): [string, number][] => [
+  ["UPDATE inbox SET raw=NULL WHERE raw IS NOT NULL AND created_at < ?", t - 7 * DAY],
+  ["DELETE FROM inbox WHERE created_at < ?", t - 30 * DAY],
+];
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const { pathname } = new URL(req.url);
@@ -145,5 +151,9 @@ export default {
     }
 
     return json({ error: "not found" }, 404);
+  },
+  // 보관 정책: 웹훅 원문(raw)은 7일 뒤 비우고, 행 전체는 30일 뒤 삭제 (wrangler.toml crons, 매일 1회)
+  async scheduled(_e: unknown, env: Env) {
+    for (const [sql, cut] of retention(now())) await env.DB.prepare(sql).bind(cut).run();
   },
 };
