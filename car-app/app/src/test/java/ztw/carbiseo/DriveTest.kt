@@ -105,6 +105,7 @@ class DriveTest {
 
     @Test fun 휴식_문장은_누르라고_하지_않는다() {
         assertFalse(REST_SPEECH.contains("누르"))
+        assertFalse(roomSpeech(Room.DRIVE_REST)!!.contains("퇴근")) // 토요일 운전도 DRIVE_REST
     }
 
     @Test fun 다음_일정은_지금_이후_가장_이른_것() {

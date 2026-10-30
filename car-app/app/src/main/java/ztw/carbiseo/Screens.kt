@@ -80,7 +80,7 @@ private val Tall = Modifier.heightIn(min = 64.dp)
 private val hhmm = DateTimeFormatter.ofPattern("HH:mm")
 
 
-private fun roomName(r: String) = when (r) { "PARK" -> "5분 사무실"; "DRIVE_WORK" -> "업무 운전"; "DRIVE_REST" -> "퇴근길"; else -> "판정 전" }
+private fun roomName(r: String) = when (r) { "PARK" -> "5분 사무실"; "DRIVE_WORK" -> "업무 운전"; "DRIVE_REST" -> "업무 시간 밖"; else -> "판정 전" }
 private fun accent(r: String) = when (r) { "PARK" -> ParkAcc; "DRIVE_REST" -> RestAcc; else -> WorkAcc }
 private fun toast(c: Context, s: String) = Toast.makeText(c, s, Toast.LENGTH_SHORT).show()
 private fun label(i: InboxItem) = when (i.kind) {

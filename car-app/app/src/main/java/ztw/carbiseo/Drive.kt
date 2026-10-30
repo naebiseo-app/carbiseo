@@ -115,7 +115,7 @@ fun nextEvent(events: List<Event>, nowMs: Long): Event? = events.filter { it.sta
 /** 방이 바뀔 때 한 문장. PARK는 무음. */
 fun roomSpeech(r: Room): String? = when (r) {
     Room.DRIVE_WORK -> "업무 운전 모드예요"
-    Room.DRIVE_REST -> "퇴근길이에요, 급한 전화만 알려 드릴게요"
+    Room.DRIVE_REST -> "업무 시간 밖이에요, 급한 전화만 알려 드릴게요" // 저녁·주말·출근 전 귀가 공통
     Room.PARK -> null
 }
 
