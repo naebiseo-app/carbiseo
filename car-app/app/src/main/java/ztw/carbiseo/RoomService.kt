@@ -43,7 +43,7 @@ class RoomService : Service() {
     private var since = 0L
     private var firstPoll = true   // 첫 폴링은 기존 항목을 채우기만 하고 읽지 않는다.
     private lateinit var latch: AlertLatch
-    private val hold = SpeechHold()
+    private val hold = SpeechHold { mode }
     private var forced: Alert? = null // 디버그 브로드캐스트로 강제한 값
     private var forcedTrip: Int? = null // 디버그: 트립 주행시간(분) 강제
 

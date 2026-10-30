@@ -70,8 +70,10 @@ fun pruneGone(items: List<InboxItem>, minId: Long?): List<InboxItem> = if (minId
 /** 마지막으로 본 id. 항목이 없으면 그대로. */
 fun nextSince(since: Long, items: List<InboxItem>): Long = maxOf(since, items.maxOfOrNull { it.id } ?: since)
 
-/** 새 항목 -> 읽을 한 문장. PARK(또는 방 미판정)이거나 항목이 없으면 null. 퇴근길(DRIVE_REST)은 급한 전화만 읽는다. */
-fun speechFor(items: List<InboxItem>, room: Room?): String? {
+/** 새 항목 -> 읽을 한 문장. PARK(또는 방 미판정)이거나 항목이 없으면 null. 퇴근길(DRIVE_REST)은 급한 전화만 읽는다.
+ *  M7: 응대 모드 '끔'은 무음(카드만), '멘트'는 AI가 받았다고 말하지 않는다. */
+fun speechFor(items: List<InboxItem>, room: Room?, mode: String = "ai"): String? {
+    if (mode == "off") return null
     val calls = items.filter { it.kind == "call" }.distinctBy { it.id } // 웹훅 이벤트·힌트·할 일은 세지 않는다
     val newItems = if (room == Room.DRIVE_REST) calls.filter { it.urgent } else calls
     if (newItems.isEmpty() || (room != Room.DRIVE_WORK && room != Room.DRIVE_REST)) return null
@@ -82,7 +84,7 @@ fun speechFor(items: List<InboxItem>, room: Room?): String? {
         u > 0 -> "급한 전화 ${u}건 포함 ${n}건"
         else -> "부재중 전화 ${n}건"
     }
-    return "$head, AI가 용건을 받아 두었습니다."
+    return "$head, ${if (mode == "ment") "안내 멘트로 응대했어요." else "AI가 용건을 받아 두었습니다."}"
 }
 
 private val timeFmt = DateTimeFormatter.ofPattern("MM-dd HH:mm")

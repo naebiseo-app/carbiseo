@@ -14,6 +14,11 @@ class InboxTest {
         assertEquals("부재중 전화 한 건, AI가 용건을 받아 두었습니다.", speechFor(listOf(item(1)), Room.DRIVE_WORK))
     }
 
+    @Test fun 응대_모드별_문장_끔은_무음() {
+        assertEquals("부재중 전화 한 건, 안내 멘트로 응대했어요.", speechFor(listOf(item(1)), Room.DRIVE_WORK, "ment"))
+        assertNull(speechFor(listOf(item(1, urgent = true)), Room.DRIVE_WORK, "off"))
+    }
+
     @Test fun 퇴근길은_급한_전화만_읽는다() {
         assertNull(speechFor(listOf(item(1), item(2)), Room.DRIVE_REST))
         assertEquals("급한 전화 한 건, AI가 용건을 받아 두었습니다.", speechFor(listOf(item(1), item(2, urgent = true)), Room.DRIVE_REST))
