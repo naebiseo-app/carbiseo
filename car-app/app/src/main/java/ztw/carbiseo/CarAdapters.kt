@@ -228,8 +228,10 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
             override fun onCautionPointInfo(p: List<CautionPoint>) { val z = p.any { it.remainDistance in 0..300 }; ui.post { cautionZone = z } }
             // C①: 내비 즐겨찾기 '집'·'회사'로 방 판정. 집이 없으면 최근 목적지에서 찾고, 그래도 없으면 기존 설정 유지.
             override fun onBookmarkInfo(l: List<BookmarkInfo>) {
-                val h = l.firstOrNull { it.category == BookmarkType.HOME }
-                val o = l.firstOrNull { it.category == BookmarkType.OFFICE }
+                // 에뮬 실측: 등록 안 된 HOME/OFFICE도 이름 ""·좌표 (0,0)으로 온다 → 빈 칸으로 본다
+                val ok = l.filter { it.latitude != 0.0 || it.longitude != 0.0 }
+                val h = ok.firstOrNull { it.category == BookmarkType.HOME }
+                val o = ok.firstOrNull { it.category == BookmarkType.OFFICE }
                 Log.i(TAG, "bookmarks n=${l.size} ${l.map { it.category }} home=${h != null} office=${o != null}")
                 ui.post {
                     m.settings = m.settings.copy(home = h?.let { LatLng(it.latitude, it.longitude) } ?: m.settings.home, office = o?.let { LatLng(it.latitude, it.longitude) })
