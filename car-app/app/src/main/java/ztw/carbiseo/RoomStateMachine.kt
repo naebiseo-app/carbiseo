@@ -17,6 +17,7 @@ data class LatLng(val lat: Double, val lng: Double)
 /** 나중에 설정 화면이 통째로 덮어쓴다(machine.settings = ...). */
 data class RoomSettings(
     val home: LatLng = LatLng(37.4979, 127.0276),
+    val office: LatLng? = null,             // 내비 즐겨찾기 '회사'. 목적지가 여기면 시간·요일과 무관하게 업무(야근·주말 출근)
     val workStart: LocalTime = LocalTime.of(7, 0),
     val workEnd: LocalTime = LocalTime.of(18, 0),
     val homeDestRadiusM: Double = 300.0,   // 목적지가 "집"으로 인정되는 반경
@@ -93,7 +94,8 @@ class RoomStateMachine(
         val weekend = at.dayOfWeek == DayOfWeek.SATURDAY || at.dayOfWeek == DayOfWeek.SUNDAY
         val evening = t >= settings.workEnd || t < NIGHT_END
         val toHome = dest != null && distanceM(dest, settings.home) <= settings.homeDestRadiusM
-        val rest = weekend || evening || (t < settings.workStart && toHome)
+        val toOffice = dest != null && settings.office?.let { distanceM(dest, it) <= settings.homeDestRadiusM } == true
+        val rest = !toOffice && (weekend || evening || (t < settings.workStart && toHome))
         return if (rest) Room.DRIVE_REST else Room.DRIVE_WORK
     }
 

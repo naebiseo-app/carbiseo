@@ -192,6 +192,7 @@ class RoomService : Service() {
             getSystemService(NotificationManager::class.java).notify(1, notification(room))
         }
         adapters = CarAdapters(applicationContext, machine).also { it.start() }
+        addHomeFavorite = { runCatching { adapters.navi?.requestNavigationScreen(NavigationScreenRequest.AddHomeFavorite) }.onFailure { Log.w("ROOM", "add home FAIL $it") } }
         adapters.onNaviReady = { pendingRoute?.let { pendingRoute = null; Log.i("ROOM", "navi ready -> route"); it() } }
         speaker = Speaker(applicationContext).also { it.start() }
         ui.post(ticker)
@@ -359,5 +360,7 @@ class RoomService : Service() {
         var offline by mutableStateOf(false); private set // #23 서버 폴링 실패
         var passengerOffer by mutableStateOf(false) // C⑤ 조수석 착석 감지 → "동승자 모드로 바꿀까요?"
         var telltale by mutableStateOf<String?>(null); private set // C⑦ 빨간 경고등
+        var homeSrc by mutableStateOf("기본값(내비 즐겨찾기 없음)") // C① 집 좌표 출처(설정 화면 표시)
+        var addHomeFavorite: (() -> Unit)? = null // C① 설정 화면 버튼 → 내비 '집 즐겨찾기 추가' 화면
     }
 }

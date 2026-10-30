@@ -10,6 +10,7 @@ import ai.pleos.playground.navi.helper.NaviHelper
 import ai.pleos.playground.navi.helper.listener.NaviHelperEventListener
 import ai.pleos.playground.navi.constants.BookmarkType
 import ai.pleos.playground.navi.data.BookmarkInfo
+import ai.pleos.playground.navi.data.RecentDestinationInfo
 import ai.pleos.playground.vehicle.Vehicle
 import ai.pleos.playground.vehicle.api.model.area.SeatArea
 import ai.pleos.playground.vehicle.constant.area.SeatValue
@@ -225,11 +226,21 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
             override fun onCameraAlert(a: List<CameraAlert>) { val o = a.any { it.isOverSpeed || it.isOverSectionAvrSpeed }; ui.post { cameraOverspeed = o } }
             // ponytail: 남은 거리 단위를 m로 가정(문서 미확인), 에뮬 실측으로 조정
             override fun onCautionPointInfo(p: List<CautionPoint>) { val z = p.any { it.remainDistance in 0..300 }; ui.post { cautionZone = z } }
-            // C①: 내비 즐겨찾기 '집'이 있으면 그 좌표로 방 판정. 없으면 기존 설정 유지.
+            // C①: 내비 즐겨찾기 '집'·'회사'로 방 판정. 집이 없으면 최근 목적지에서 찾고, 그래도 없으면 기존 설정 유지.
             override fun onBookmarkInfo(l: List<BookmarkInfo>) {
                 val h = l.firstOrNull { it.category == BookmarkType.HOME }
-                Log.i(TAG, "bookmarks n=${l.size} home=${h != null} office=${l.any { it.category == BookmarkType.OFFICE }}")
-                if (h != null) ui.post { m.settings = m.settings.copy(home = LatLng(h.latitude, h.longitude)) }
+                val o = l.firstOrNull { it.category == BookmarkType.OFFICE }
+                Log.i(TAG, "bookmarks n=${l.size} ${l.map { it.category }} home=${h != null} office=${o != null}")
+                ui.post {
+                    m.settings = m.settings.copy(home = h?.let { LatLng(it.latitude, it.longitude) } ?: m.settings.home, office = o?.let { LatLng(it.latitude, it.longitude) })
+                    if (h != null) RoomService.homeSrc = "내비 즐겨찾기 '집'"
+                }
+                if (h == null) runCatching { n.getRecentDestinationInfo() }.onFailure { Log.w(TAG, "recent FAIL $it") }
+            }
+            override fun onRecentDestinationInfo(l: List<RecentDestinationInfo>) {
+                val h = homeFromRecent(l.map { it.name to LatLng(it.latitude, it.longitude) })
+                Log.i(TAG, "recent n=${l.size} home=${h != null}")
+                if (h != null) ui.post { m.settings = m.settings.copy(home = h); RoomService.homeSrc = "최근 목적지 '집'" }
             }
             override fun onBookMarkChanged() { n.getBookmarkInfo() }
             override fun onNavigationStatus(s: NavigationStatus) { Log.i(TAG, "navStatus $s"); if (s == NavigationStatus.ROUTE_DRIVE) n.getDestinationInfo() }

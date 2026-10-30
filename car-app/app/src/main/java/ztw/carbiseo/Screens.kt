@@ -475,6 +475,8 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
                 }
             }
         }
+        Text("집 위치: ${RoomService.homeSrc}", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        OutlinedButton({ RoomService.addHomeFavorite?.invoke() }, Tall) { Text("내비 즐겨찾기에 집 추가", color = ParkInk, fontSize = 18.sp) }
         Text("전화 응대", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         ModeButtons()
         OutlinedButton({ RoomService.reopenSetup(ctx); onClose() }, Tall) { Text("처음 설정(착신·방해 금지) 다시 보기", color = ParkInk, fontSize = 18.sp) }

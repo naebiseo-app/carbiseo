@@ -132,4 +132,11 @@ class DriveTest {
         assertFalse(fatigued(Room.PARK, 300))
         assertFalse(fatigued(Room.DRIVE_WORK, null))
     }
+
+    @Test fun 최근_목적지에서_집_찾기() {
+        val h = LatLng(37.1, 127.1)
+        assertEquals(h, homeFromRecent(listOf("꽃집" to far, null to far, " 우리집 " to h)))
+        assertEquals(h, homeFromRecent(listOf("Home" to h)))
+        assertEquals(null, homeFromRecent(listOf("집합 장소" to far)))
+    }
 }

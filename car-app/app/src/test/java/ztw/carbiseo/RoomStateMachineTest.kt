@@ -51,6 +51,13 @@ class RoomStateMachineTest {
     }
 
     // M16: 업무 시간 중 집 목적지(점심·서류 가지러)는 업무. 거래처가 정오에 '오늘 업무 마치셨습니다'를 듣지 않게.
+    // C①: 내비 즐겨찾기 '회사'가 목적지면 저녁·주말이어도 업무(야근·주말 출근)
+    @Test fun 저녁_주말_목적지_회사면_WORK() {
+        m.settings = m.settings.copy(office = far)
+        at(20, day = 2); m.update { copy(destination = far) }; drive() // 토요일 20시
+        assertEquals(Room.DRIVE_WORK, m.room)
+    }
+
     @Test fun 업무시간_목적지_집이어도_WORK() {
         m.update { copy(destination = home) }; drive()
         assertEquals(Room.DRIVE_WORK, m.room)

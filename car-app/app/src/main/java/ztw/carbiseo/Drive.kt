@@ -131,5 +131,9 @@ fun fatigued(room: Room?, tripMin: Int?): Boolean = room != null && room != Room
 
 const val TELLTALE_SPEECH = "계기판에 빨간 경고등이 켜졌어요. 안전한 곳에 세운 뒤 확인해 주세요"
 
+/** C① 내비 즐겨찾기 '집'이 없을 때: 최근 목적지 중 이름이 '집'·'우리집'·'home'인 곳(꽃집·옷집 같은 가게는 제외). */
+private val HOME_NAME = Regex("""^\s*((우리\s*)?집|(my\s*)?home)\s*$""", RegexOption.IGNORE_CASE)
+fun homeFromRecent(recents: List<Pair<String?, LatLng>>): LatLng? = recents.firstOrNull { HOME_NAME.matches(it.first.orEmpty()) }?.second
+
 /** 서버 car_context용 기어 한 글자. */
 fun gearCode(g: Gear): String? = when (g) { Gear.PARK -> "P"; Gear.DRIVE -> "D"; Gear.REVERSE -> "R"; Gear.NEUTRAL -> "N"; Gear.UNKNOWN -> null }
