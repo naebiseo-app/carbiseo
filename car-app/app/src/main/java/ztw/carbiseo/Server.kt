@@ -51,10 +51,14 @@ object Server {
                 val meta = runCatching { JSONObject(it.str("meta")) }.getOrNull()
                 InboxItem(it.getLong("id"), it.str("from_label"), it.str("summary"),
                     it.optInt("urgent") != 0, it.optLong("created_at"), it.str("raw"), it.str("kind").ifEmpty { "call" },
-                    it.str("status"), meta?.str("code") ?: "", meta?.str("car") ?: "", it.str("room"), it.str("from_number"))
+                    it.str("status"), meta?.str("code") ?: "", meta?.str("car") ?: "", it.str("room"), it.str("from_number"),
+                    meta?.str("app") ?: "", meta?.optBoolean("replyable") == true)
             } to minId
         } finally { c.disconnect() }
     }.getOrNull()
+
+    /** 음성으로 확인된 알림 답장 → 서버 대기열(폰 연결 앱이 가져가 보낸다). */
+    fun reply(notifId: Long, text: String) = post("/car/reply", JSONObject().put("notif_id", notifId).put("text", text).put("confirmed", true))
 
     /** H13: 착신 서비스 번호(서버 환경값, 화면 안내용)와 실제 착신 통화를 받은 적 있는지. */
     fun fetchConfig(): Pair<String, Boolean>? = runCatching {

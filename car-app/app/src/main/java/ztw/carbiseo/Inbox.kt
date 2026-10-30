@@ -8,11 +8,12 @@ import java.time.format.DateTimeFormatter
 data class InboxItem(
     val id: Long, val fromLabel: String, val summary: String,
     val urgent: Boolean, val createdAt: Long, val raw: String,
-    val kind: String = "call", // call 통화 / hint 추천 답변·정정·빈 시간 / task 할 일 / sent 보낸 문자 / event·ring 웹훅(안 보임)
+    val kind: String = "call", // call 통화 / hint 추천 답변·정정·빈 시간 / task 할 일 / sent 보낸 문자 / notif 폰 알림 / event·ring 웹훅·reply 답장 대기열(안 보임)
     val status: String = "", val code: String = "", // sent: status sent|failed, code = 업체 결과(overseas_ip_blocked 등)
     val car: String = "", // 서버가 붙인 "쓴 차량 데이터" 칩
     val room: String = "", // 서버가 받을 때의 차 방(PARK|DRIVE_WORK|DRIVE_REST|"")
     val fromNumber: String = "", // H15 회신용 전체 번호(화면엔 끝 4자리만). 30일 보관 후 행째 삭제
+    val app: String = "", val replyable: Boolean = false, // notif: 폰 알림 앱 이름·답장 가능
 )
 
 /**
@@ -45,7 +46,7 @@ fun decodeDeferred(s: String?): Map<Long, Long> =
     s.orEmpty().split(",").mapNotNull { e -> e.split(":").takeIf { it.size == 2 }?.let { (a, b) -> a.toLongOrNull()?.let { k -> b.toLongOrNull()?.let { k to it } } } }.toMap()
 
 /** 차 화면에 보이는 종류. ring은 곧 call 카드가 되고 event는 웹훅 원문이라 숨긴다. */
-val SHOWN_KINDS = setOf("call", "hint", "task", "sent")
+val SHOWN_KINDS = setOf("call", "hint", "task", "sent", "notif")
 
 /** 확인할 건수: 아직 안 연 카드(보낸 문자 제외). */
 fun todo(items: List<InboxItem>, seen: Set<Long>) = items.count { it.kind != "sent" && it.id !in seen }
