@@ -12,7 +12,7 @@ const BY_ROOM: Record<Room, string> = {
   DRIVE_WORK:
     "지금 {owner}님은 운전 중입니다. '지금 운전 중이라 정차 후 직접 연락드리겠습니다'라고 안내하고, 용건과 회신 희망 시각을 받은 뒤 마무리합니다.",
   DRIVE_REST:
-    "오늘 업무는 마치셨습니다. '오늘 업무는 마치셨습니다. 내일 오전에 연락드리도록 전해 드리겠습니다'라고 안내합니다. 상대가 급하다고 하면 '급한 건으로 표시해 두겠습니다'라고 말합니다.",
+    "오늘 업무는 마치셨습니다. '오늘 업무는 마치셨습니다. {when}에 연락드리도록 전해 드리겠습니다'라고 안내합니다. 상대가 급하다고 하면 '급한 건으로 표시해 두겠습니다'라고 말합니다.",
   PARK: "지금 {owner}님은 잠시 자리를 비우셨습니다. '잠시 자리를 비우셨습니다. 용건 남겨 주시면 곧 회신드리겠습니다'라고 안내하고 용건을 받습니다.",
 };
 
@@ -51,7 +51,7 @@ const ETA_BY_ROOM: Record<"DRIVE_WORK" | "DRIVE_REST", string> = {
   DRIVE_WORK:
     "지금 {owner}님은 운전 중입니다. '지금 운전 중이라 약 {eta}분 뒤 도착 예정입니다. 도착 후 연락드리도록 전해 드리겠습니다'라고 안내하고, 용건을 받은 뒤 마무리합니다. 상대가 급하다고 하면 '급한 건으로 표시해 두겠습니다'라고 말합니다.",
   DRIVE_REST:
-    "오늘 업무는 마치셨습니다. '오늘 업무는 마치셨고, 지금 운전 중이라 약 {eta}분 뒤 도착 예정입니다. 내일 오전에 연락드리도록 전해 드리겠습니다'라고 안내합니다. 상대가 급하다고 하면 '급한 건으로 표시해 두고 도착하시면 바로 보시도록 하겠습니다'라고 말합니다.",
+    "오늘 업무는 마치셨습니다. '오늘 업무는 마치셨고, 지금 운전 중이라 약 {eta}분 뒤 도착 예정입니다. {when}에 연락드리도록 전해 드리겠습니다'라고 안내합니다. 상대가 급하다고 하면 '급한 건으로 표시해 두고 도착하시면 바로 보시도록 하겠습니다'라고 말합니다.",
 };
 
 // 차 앱이 보낸 남은 분. 0~1440 정수만, 그 밖은 없음.
@@ -71,11 +71,20 @@ const BY_MODE = {
 const NEUTRAL = "'지금 바로 받기 어려우셔서 제가 대신 받았습니다. 용건 남겨 주시면 전해 드리겠습니다'라고 안내하고 용건을 받습니다. 운전 중인지, 언제 도착하는지는 말하지 않습니다.";
 
 // nextAt = 다음 일정 시각(ms), DRIVE_WORK에만 한 줄.
-export function pickScript(room: Room | null, owner?: string, name?: string, eta?: number | null, mode: Mode = "ai", nextAt?: number | null, cc: Partial<CarCtx> | null = null): { room: Room | null; instruction: string } {
+// 쉼 방 약속 '{when}에 연락': 다음 평일 오전(KST). 04시 전 새벽이면 오늘, 금 저녁·토·일이면 월요일. 차는 그 첫 업무 운전에 '넘긴 전화'를 알린다(H7).
+export function nextWorkMorning(nowMs: number): string {
+  const kst = new Date(nowMs + 9 * 3_600_000);
+  const today = kst.getUTCDay();
+  let ahead = kst.getUTCHours() < 4 ? 0 : 1;
+  while ([0, 6].includes((today + ahead) % 7)) ahead++;
+  return ahead === 0 ? "오늘 오전" : ahead === 1 ? "내일 오전" : "월요일 오전";
+}
+
+export function pickScript(room: Room | null, owner?: string, name?: string, eta?: number | null, mode: Mode = "ai", nextAt?: number | null, cc: Partial<CarCtx> | null = null, nowMs = Date.now()): { room: Room | null; instruction: string } {
   const r = room;
   if (mode !== "ai") return { room: r, instruction: BY_MODE[mode] };
   if (!r) return { room: null, instruction: fillOwner(`${greeting(owner, name)} ${COMMON} ${NEUTRAL}`, owner) };
-  const byRoom = r !== "PARK" && eta != null ? ETA_BY_ROOM[r].replace("{eta}", String(eta)) : BY_ROOM[r];
+  const byRoom = (r !== "PARK" && eta != null ? ETA_BY_ROOM[r].replace("{eta}", String(eta)) : BY_ROOM[r]).replace("{when}", nextWorkMorning(nowMs));
   const next = r === "DRIVE_WORK" && nextAt != null ? ` 다음 일정 ${hhmm(nextAt)} 이후 연락 가능.` : "";
   return { room: r, instruction: fillOwner(`${greeting(owner, name)} ${COMMON} ${byRoom}${next}${ctxLine(cc, r)}`, owner) };
 }

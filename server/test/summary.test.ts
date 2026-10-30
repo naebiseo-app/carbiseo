@@ -10,7 +10,8 @@ const body = (dir: string, sum: object) => new URLSearchParams({
 
 test("받은 전화 요약 → 카드, 번호는 끝 4자리", () => {
   const c = summaryCard(body("inbound", { coreSummary: "김 과장, 견적 회신 요청", decisions: [], followUps: ["내일 오전 회신"] }));
-  assert.deepEqual(c, { call_id: "CA1", from_label: "끝번호 5678", summary: "김 과장, 견적 회신 요청", urgent: 0 });
+  assert.deepEqual(c, { call_id: "CA1", from_label: "끝번호 5678", from_number: "01012345678", summary: "김 과장, 견적 회신 요청", urgent: 0 });
+  assert.equal(summaryCard(body("inbound", { coreSummary: "x" }).replace("From=01012345678", "From=anonymous"))?.from_number, null); // 번호 없음
 });
 
 test("급함 낱말 판정, 부정은 제외", () => {

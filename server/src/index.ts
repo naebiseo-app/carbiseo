@@ -61,7 +61,8 @@ export function summaryCard(raw: string) {
   const summary = (j.coreSummary ?? "").slice(0, 300);
   const from = (f.get("From") ?? "").replace(/\D/g, "");
   const urgent = isUrgent([summary, ...(j.decisions ?? []), ...(j.followUps ?? [])].join(" ")) ? 1 : 0;
-  return { call_id: f.get("CallId") ?? "", from_label: from.length >= 4 ? `끝번호 ${from.slice(-4)}` : "", summary, urgent };
+  // H15: 회신용 전체 번호도 보관(행은 30일 뒤 삭제, retention). 화면·라벨엔 끝 4자리만.
+  return { call_id: f.get("CallId") ?? "", from_label: from.length >= 4 ? `끝번호 ${from.slice(-4)}` : "", from_number: /^\d{9,11}$/.test(from) ? from : null, summary, urgent };
 }
 
 /** 주인 모드 통화 요약 → 할 일 카드 본문: 핵심 요약 + 후속 조치. */
@@ -202,8 +203,8 @@ export default {
         const cc = await kvGet(env.DB, "car_context");
         // 웹훅 재전송 대비: 같은 통화의 카드는 1장만
         // ponytail: 칩은 요약 도착 시점의 차량 맥락(통화 후 수십 초 차이). 정확히 하려면 call-context 때 값을 ring meta에 남겨 call_id로 잇기
-        await env.DB.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,summary,urgent,created_at,meta) SELECT 'call','summarized',?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='call' AND call_id=?)")
-          .bind(parseRoom(cc?.room) ?? null, card.call_id, card.from_label, card.summary, card.urgent, now(), JSON.stringify({ car: carChip(cc, now()) }), card.call_id).run();
+        await env.DB.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,from_number,summary,urgent,created_at,meta) SELECT 'call','summarized',?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='call' AND call_id=?)")
+          .bind(parseRoom(cc?.room) ?? null, card.call_id, card.from_label, card.from_number, card.summary, card.urgent, now(), JSON.stringify({ car: carChip(cc, now()) }), card.call_id).run();
       }
       return json({ ok: true });
     }
@@ -224,6 +225,13 @@ export default {
       await env.DB.prepare("INSERT INTO inbox(kind,status,message_id,from_label,summary,created_at,meta) VALUES('sent',?,?,?,?,?,?)")
         .bind(ok ? "sent" : "failed", j.messageId ?? null, p.label, p.body, now(), JSON.stringify({ http: r.status, code })).run();
       return json({ ok, code, http: r.status, message_id: j.messageId ?? null }, ok ? 200 : 502);
+    }
+
+    // H13: 첫 실행 안내용. 착신 받을 서비스 번호(환경값, 코드에 두지 않음)와 실제 착신 통화(ring)를 받은 적 있는지.
+    if (m === "GET" && pathname === "/car/config") {
+      if (!authed) return json({ error: "unauthorized" }, 401);
+      const ring = await env.DB.prepare("SELECT 1 FROM inbox WHERE kind='ring' LIMIT 1").first();
+      return json({ service_number: env.CLAWOPS_NUMBER ?? "", forwarded: !!ring });
     }
 
     if (m === "GET" && pathname === "/car/schedule") {

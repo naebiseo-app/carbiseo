@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { pickScript, parseRoom, cleanName, parseEta } from "../src/script.ts";
+import { pickScript, parseRoom, cleanName, parseEta, nextWorkMorning } from "../src/script.ts";
+
+const WED_19 = Date.UTC(2026, 10, 4, 10, 0); // 2026-11-04(수) 19:00 KST
 
 test("방별 대본 선택", () => {
   assert.match(pickScript("DRIVE_WORK").instruction, /운전 중/);
-  assert.match(pickScript("DRIVE_REST").instruction, /내일 오전/);
+  assert.match(pickScript("DRIVE_REST", undefined, undefined, null, "ai", null, null, WED_19).instruction, /내일 오전/);
   assert.match(pickScript("PARK").instruction, /자리를 비우/);
   assert.equal(pickScript(null).room, null);
   assert.equal(parseRoom("FLY"), null);
@@ -29,7 +31,7 @@ test("주행 방 + ETA면 도착 예정 분을 넣고, PARK·ETA 없음은 그�
     assert.equal(pickScript(r, "주인", "하루", null).instruction, pickScript(r, "주인", "하루").instruction);
   }
   assert.match(pickScript("DRIVE_WORK", "주인", undefined, 23).instruction, /도착 후 연락드리도록/);
-  const rest = pickScript("DRIVE_REST", "주인", undefined, 23).instruction;
+  const rest = pickScript("DRIVE_REST", "주인", undefined, 23, "ai", null, null, WED_19).instruction;
   assert.match(rest, /오늘 업무는 마치셨고/);                  // 쉼 방은 업무 마침·내일 연락 유지
   assert.match(rest, /내일 오전에 연락드리도록/);
   assert.equal(pickScript("PARK", "주인", undefined, 23).instruction, pickScript("PARK", "주인").instruction);
@@ -48,4 +50,16 @@ test("호칭 미설정이면 '주인님' 없이 호칭 없는 인사", () => {
   }
   assert.match(pickScript("PARK", undefined, "하루").instruction, /대신 전화 받는 AI 비서 하루입니다/);
   assert.match(pickScript("DRIVE_WORK").instruction, /당신은 휴대폰을 대신 받는 AI 비서입니다.*지금 운전 중입니다/);
+});
+
+test("쉼 방 약속은 다음 평일 오전(H7: 차가 그 첫 업무 운전에 넘긴 전화를 알림)", () => {
+  const kst = (d: number, h: number) => Date.UTC(2026, 10, d, h - 9, 0); // 2026-11-02 월
+  assert.equal(nextWorkMorning(kst(2, 19)), "내일 오전");   // 월 저녁
+  assert.equal(nextWorkMorning(kst(4, 2)), "오늘 오전");    // 수 새벽 2시
+  assert.equal(nextWorkMorning(kst(6, 19)), "월요일 오전"); // 금 저녁
+  assert.equal(nextWorkMorning(kst(7, 10)), "월요일 오전"); // 토
+  assert.equal(nextWorkMorning(kst(8, 19)), "내일 오전");   // 일 저녁
+  assert.equal(nextWorkMorning(kst(8, 2)), "내일 오전");    // 일 새벽 → 월
+  assert.match(pickScript("DRIVE_REST", "김민수", undefined, null, "ai", null, null, kst(6, 19)).instruction, /월요일 오전에 연락드리도록/);
+  assert.doesNotMatch(pickScript("DRIVE_REST", "김민수", undefined, 5, "ai", null, null, kst(6, 19)).instruction, /\{when\}/);
 });
