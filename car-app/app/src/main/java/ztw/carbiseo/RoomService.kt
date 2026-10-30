@@ -237,12 +237,13 @@ class RoomService : Service() {
         val tr = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { forcedTrip = i.getIntExtra("min", -1).takeIf { it >= 0 }; Log.i("ROOM", "debug trip force=$forcedTrip") }
         }
-        // adb shell am broadcast -a ztw.carbiseo.LOC --ef lat 37.41 --ef lng 127.09 (lat 0 = 해제, 내비 실제 위치로)
+        // adb shell am broadcast -a ztw.carbiseo.LOC --ef lat 37.41 --ef lng 127.09 [--ez home true = 그 좌표를 집으로] (lat 0 = 해제, 내비 실제 위치로)
         val loc = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
                 val p = LatLng(i.getFloatExtra("lat", 0f).toDouble(), i.getFloatExtra("lng", 0f).toDouble()).takeIf { it.lat != 0.0 }
-                adapters.forcedLocation = p; p?.let { machine.update { copy(location = it) } }
-                Log.i("ROOM", "debug loc force=$p")
+                if (i.getBooleanExtra("home", false)) p?.let { machine.settings = machine.settings.copy(home = it) }
+                else { adapters.forcedLocation = p; p?.let { machine.update { copy(location = it) } } }
+                Log.i("ROOM", "debug loc force=$p home=${machine.settings.home}")
             }
         }
         // adb shell am broadcast -a ztw.carbiseo.TIME --es at 2026-11-02T08:30 (none = 실제 시각으로). 요일·시각 시뮬
