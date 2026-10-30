@@ -15,6 +15,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.pm.ServiceInfo
+import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -36,6 +37,7 @@ class RoomService : Service() {
     private lateinit var adapters: CarAdapters
     private val receivers = mutableListOf<BroadcastReceiver>()
     private lateinit var speaker: Speaker
+    private val audio by lazy { getSystemService(AudioManager::class.java) }
     private val net = Executors.newSingleThreadExecutor() // 서버 호출은 여기서만(순서 보장, 메인 차단 방지)
     private var stateGen = 0       // 방 변경마다 +1. 재시도는 최신 방일 때만.
     private var sentEta: Int? = null // 마지막으로 올린 남은 분. 분이 바뀔 때만 다시 올린다.
@@ -129,7 +131,9 @@ class RoomService : Service() {
             sig = t
             val a = latch.update(adapters.speedKmh, adapters.limitKmh, adapters.cameraOverspeed, adapters.cautionZone).let { forced ?: it }
             if (a != alert) { alert = a; Log.i("ROOM", "alert $a") }
-            val q = a != Alert.NONE || busyManeuver(adapters.turnOn, machine.signals.gear, adapters.steerDeg)
+            // M9: 블루투스 통화 중이면 차 스피커 낭독이 상대에게 들린다 → 통화 끝날 때까지 보류. ponytail: AAOS HFP가 mode에 반영되는지 실차 미확인
+            val inCall = audio.mode == AudioManager.MODE_IN_CALL || audio.mode == AudioManager.MODE_IN_COMMUNICATION
+            val q = a != Alert.NONE || busyManeuver(adapters.turnOn, machine.signals.gear, adapters.steerDeg) || inCall
             if (q != quiet) { quiet = q; Log.i("ROOM", "quiet $q"); hold.release(q, machine.room)?.let { speaker.speak(it) } }
             if (passenger) hold.clear() // 동승자 모드면 보류분도 버린다
             // 정수 분이라 != 가 곧 "1분 이상 변화". 방 판정 전이면 첫 방 변경이 같이 올린다.
