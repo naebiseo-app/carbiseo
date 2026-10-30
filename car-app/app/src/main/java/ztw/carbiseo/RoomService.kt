@@ -50,7 +50,7 @@ class RoomService : Service() {
     private val restOnce = Once()
     private val fatigueOnce = Once()
     private var quiet = false            // 경고·깜빡이·후진·큰 조향 중
-    private var lastSeat: Boolean? = null
+    private val seat = SeatEdge()
     private var lastTell: String? = null
     private var ctxSent = ""; private var ctxAt = 0L // 차량 맥락: 바뀌면 올리되 10초에 한 번까지
     private var driveStart: Long? = null // 이번 운전 시작(PARK에서 나온 시각). 정차 중 null.
@@ -88,7 +88,7 @@ class RoomService : Service() {
     /** 서버 대본 변수·카드 칩용 SDK 값. */
     private fun carCtx(): Map<String, Any?> = mapOf(
         "gear" to gearCode(machine.signals.gear), "trip_min" to tripMin(), "soc" to adapters.soc,
-        "turn" to adapters.turnOn, "passenger" to (passenger || adapters.passengerSeat == true), "telltale" to adapters.telltale,
+        "turn" to adapters.turnOn, "passenger" to (passenger || seat.occupied), "telltale" to adapters.telltale,
     )
 
     private fun sendState(r: String, gen: Int, retry: Boolean, eta: Int? = sentEta) {
@@ -120,7 +120,7 @@ class RoomService : Service() {
             if (e != sentEta) machine.room?.let { sentEta = e; sendState(it.name, ++stateGen, true) }
             if (restOnce.fire(restDue(driveStart, System.currentTimeMillis(), restMin))) { restOffer = true; say(REST_SPEECH) }
             if (fatigueOnce.fire(fatigued(machine.room, tripMin()))) say(FATIGUE_SPEECH) // 안전 안내라 동승자 모드에서도
-            adapters.passengerSeat.let { s -> if (s != lastSeat) { lastSeat = s; passengerOffer = s == true && !passenger } }
+            seat.update(adapters.passengerSeat)?.let { passengerOffer = it && !passenger }
             if (passenger) passengerOffer = false
             adapters.telltale.let { t -> if (t != lastTell) { lastTell = t; telltale = t; if (t != null && machine.room != Room.PARK) say(TELLTALE_SPEECH) } }
             if (carCtx().toString() != ctxSent && System.currentTimeMillis() - ctxAt >= 10_000) machine.room?.let { sendState(it.name, ++stateGen, false) }
@@ -135,7 +135,11 @@ class RoomService : Service() {
             .createNotificationChannel(NotificationChannel(CH, "내비서", NotificationManager.IMPORTANCE_LOW))
         val n = notification(room)
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(1, n)
-        getSharedPreferences("car_ui", MODE_PRIVATE).let { restMin = it.getInt("rest_min", REST_DEFAULT_MIN).takeIf { m -> m != 1 } ?: REST_DEFAULT_MIN; passenger = it.getBoolean("passenger", false) }
+        net.execute { // 첫 SharedPreferences 로드는 디스크 읽기 → 메인 밖에서
+            val p = getSharedPreferences("car_ui", MODE_PRIVATE)
+            val r = p.getInt("rest_min", REST_DEFAULT_MIN).takeIf { m -> m != 1 } ?: REST_DEFAULT_MIN; val ps = p.getBoolean("passenger", false)
+            ui.post { restMin = r; passenger = ps }
+        }
         latch = AlertLatch(Clock.systemDefaultZone())
         machine = RoomStateMachine(Clock.systemDefaultZone()) // settings = 기본 상수. 설정 화면이 machine.settings를 덮어쓴다.
         machine.onChange = { from, to ->
@@ -149,6 +153,7 @@ class RoomService : Service() {
             getSystemService(NotificationManager::class.java).notify(1, notification(room))
         }
         adapters = CarAdapters(applicationContext, machine).also { it.start() }
+        adapters.onNaviReady = { pendingRoute?.let { pendingRoute = null; Log.i("ROOM", "navi ready -> route"); it() } }
         speaker = Speaker(applicationContext).also { it.start() }
         ui.post(ticker)
         ui.post(poller)
@@ -217,13 +222,24 @@ class RoomService : Service() {
     /** 경로 계산에 12~15초 걸린다(에뮬 실측). 재요청은 진행 중 경로를 취소시키므로(onRouteCancelled) 확인만 하고, 20초 뒤에도 안 잡혔으면 알린다. */
     private fun route(to: LatLng, name: String) {
         val n = adapters.navi ?: return
-        n.requestRoute(RouteInfo(to.lat, to.lng, null, null, name, "", "", "", RouteOption.RECOMMENDED, "", false))
-        ui.postDelayed({
-            if (machine.signals.destination?.let { distanceM(it, to) < 300 } == true) return@postDelayed
-            Log.w("ROOM", "route not set: $name")
-            say("내비가 아직 준비 중이에요. 잠시 뒤 다시 눌러 주세요")
-        }, 20_000)
+        val send = {
+            n.requestRoute(RouteInfo(to.lat, to.lng, null, null, name, "", "", "", RouteOption.RECOMMENDED, "", false))
+            ui.postDelayed({
+                if (machine.signals.destination?.let { distanceM(it, to) < 300 } == true) return@postDelayed
+                Log.w("ROOM", "route not set: $name")
+                say("내비가 아직 준비 중이에요. 잠시 뒤 다시 눌러 주세요")
+            }, 20_000); Unit
+        }
+        val wake = packageManager.getLaunchIntentForPackage(NAVI_PKG)
+        if (adapters.naviReady || wake == null) return send()
+        // 부팅 후 내비 화면을 한 번도 안 열었으면 내비가 요청을 버린다 → 내비를 앞으로 띄워 깨우고, 첫 응답(준비)이 오면 보낸다.
+        // 출발 탭 직후라 우리 창이 보이는 중이어서 서비스에서 띄워도 백그라운드 실행 제한에 안 걸린다.
+        Log.i("ROOM", "navi not ready -> wake $NAVI_PKG")
+        pendingRoute = send
+        startActivity(wake.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        ui.postDelayed({ if (pendingRoute === send) { pendingRoute = null; Log.w("ROOM", "navi wake timeout: $name"); say("내비가 아직 준비 중이에요. 잠시 뒤 다시 눌러 주세요") } }, 60_000)
     }
+    private var pendingRoute: (() -> Unit)? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -235,6 +251,7 @@ class RoomService : Service() {
         private const val CH = "room"
         const val ACTION_REST = "ztw.carbiseo.REST"
         const val ACTION_GO = "ztw.carbiseo.GO" // F7: extras lat, lng, name
+        private const val NAVI_PKG = "ai.umos.maps.android.navigation.app" // Pleos 내비 앱(26 실측)
         var restOffer by mutableStateOf(false); private set // S2: 화면에 휴게소 버튼
         var restMin by mutableIntStateOf(REST_DEFAULT_MIN) // 연속 주행 기준(분). 설정 화면이 바꾼다.
         var passenger by mutableStateOf(false) // H3: 켜면 업무 TTS(부재중 낭독)·쉼 방 선언(H1)을 끈다. 휴식 제안(S2)은 안전이라 유지.

@@ -20,6 +20,12 @@ test("가짜 수신 입력 검증", () => {
   assert.equal(parseFakeCall(f({ from_label: "한가람", summary: "가".repeat(121) })), null);
 });
 
+test("가짜 수신 urgent: 0·false·빈 값은 급함 아님", () => {
+  const f = (o: Record<string, string>) => new URLSearchParams(o);
+  for (const v of ["0", "false", "", "off"]) assert.equal(parseFakeCall(f({ from_label: "한가람", summary: "x", urgent: v }))!.urgent, 0, v);
+  for (const v of ["1", "true"]) assert.equal(parseFakeCall(f({ from_label: "한가람", summary: "x", urgent: v }))!.urgent, 1, v);
+});
+
 test("데모 일정은 지금 이후 3건, 좌표 포함, 시간순", () => {
   const now = Date.UTC(2026, 9, 29, 5, 10);
   const s = demoSchedule(now);

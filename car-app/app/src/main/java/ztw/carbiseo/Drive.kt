@@ -14,6 +14,24 @@ class Once {
     fun reset() { fired = false }
 }
 
+/**
+ * C⑤ 조수석 착석: 서비스 시작 때 처음 온 값을 기준선(빈 좌석)으로 잡고, 기준선과 달라지면 "탔다"로 본다.
+ * 그래서 값이 반전돼 오는 에뮬(빈 좌석 = true)에서도 시작 즉시 띠가 뜨지 않고, 콘솔로 바꾸는 순간에만 뜬다.
+ * ponytail: 시동 직후 이미 앉아 있던 동승자는 못 잡는다(그 사람이 내리면 띠가 한 번 잘못 뜸). 실차 값 방향이 확인되면 기준선 대신 그 값을 쓴다.
+ */
+class SeatEdge {
+    private var base: Boolean? = null
+    private var last: Boolean? = null
+    val occupied get() = base != null && last != base
+    /** 값이 바뀌었으면 지금 occupied, 아니면(첫 값 포함) null. */
+    fun update(s: Boolean?): Boolean? {
+        if (s == null || s == last) return null
+        last = s
+        if (base == null) { base = s; return null }
+        return occupied
+    }
+}
+
 const val REST_DEFAULT_MIN = 120
 const val REST_SPEECH = "오래 운전하셨어요. 쉬어 가실래요? 화면의 휴게소 버튼을 누르세요."
 

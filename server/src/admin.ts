@@ -18,7 +18,7 @@ export function parseFakeCall(f: { get(k: string): unknown }): FakeCall | null {
   const name = String(f.get("from_label") ?? "").trim();
   const summary = String(f.get("summary") ?? "").trim();
   if (!/^[\p{L}\p{N} ]{1,10}$/u.test(name) || summary.length < 1 || summary.length > 120) return null;
-  return { from_label: name, summary, urgent: f.get("urgent") ? 1 : 0 };
+  return { from_label: name, summary, urgent: ["", "0", "false", "off"].includes(String(f.get("urgent") ?? "").trim().toLowerCase()) ? 0 : 1 };
 }
 
 export type DemoEvent = { title: string; start: number; place: string; lat: number; lng: number };

@@ -18,6 +18,20 @@ class DriveTest {
         assertFalse(homeSoon(Room.DRIVE_REST, null, s, 3))
     }
 
+    @Test fun 조수석_기준선에서_바뀔때만() {
+        for (empty in listOf(false, true)) { // true = 에뮬처럼 반전된 값
+            val e = SeatEdge()
+            assertEquals(null, e.update(null))
+            assertEquals(null, e.update(empty)) // 시작 값 = 기준선, 띠 없음
+            assertFalse(e.occupied)
+            assertEquals(null, e.update(empty))
+            assertEquals(true, e.update(!empty)) // 탔다
+            assertTrue(e.occupied)
+            assertEquals(false, e.update(empty)) // 내렸다
+            assertFalse(e.occupied)
+        }
+    }
+
     @Test fun 운전_1회당_한번() {
         val o = Once()
         assertFalse(o.fire(false))

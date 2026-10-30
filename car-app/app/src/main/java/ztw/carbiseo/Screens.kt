@@ -94,18 +94,19 @@ private fun label(i: InboxItem) = when (i.kind) {
 @Composable
 fun App() {
     val ctx = LocalContext.current
-    val prefs = remember { ctx.getSharedPreferences("car_ui", Context.MODE_PRIVATE) }
+    // 첫 로드는 디스크 읽기라 IO에서. 로드 전엔 배경 없음·설정 안 열림(수십 ms).
+    val prefs = produceState<SharedPreferences?>(null) { value = withContext(Dispatchers.IO) { ctx.getSharedPreferences("car_ui", Context.MODE_PRIVATE).also { it.all } } }.value
     var ver by remember { mutableIntStateOf(0) } // 배경 바뀌면 +1 -> 다시 디코드
     var settings by rememberSaveable { mutableStateOf(false) }
     val room = RoomService.room
     LaunchedEffect(room) { if (room != "PARK") settings = false } // 운전 시작하면 설정 닫음
-    if (settings && room == "PARK") { Settings(prefs, { ver++ }) { settings = false }; return }
+    if (settings && room == "PARK" && prefs != null) { Settings(prefs, { ver++ }) { settings = false }; return }
 
     // 방 전환: 우리 창 안에서만 대각선 와이프 300ms 1회
     var prev by remember { mutableStateOf(room) }
     val p = remember { Animatable(1f) }
     LaunchedEffect(room) { if (room != prev) { p.snapTo(0f); p.animateTo(1f, tween(300)); prev = room } }
-    val bg = { r: String -> prefs.getString(r, null)?.let(::File)?.takeIf { it.exists() } }
+    val bg = { r: String -> prefs?.getString(r, null)?.let(::File) } // 없는 파일은 loadBg(IO)가 null로 처리
     Column(Modifier.fillMaxSize()) {
     AlertBanner(RoomService.alert)
     Box(Modifier.fillMaxSize()) {
@@ -381,7 +382,7 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button({ target = r; pick.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly)) }, Tall,
                     colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) { Text("사진/GIF 고르기", fontSize = 18.sp) }
-                OutlinedButton({ prefs.edit().remove(r).apply(); File(ctx.filesDir, "bg_$r").delete(); onBg() }, Tall) {
+                OutlinedButton({ prefs.edit().remove(r).apply(); scope.launch(Dispatchers.IO) { File(ctx.filesDir, "bg_$r").delete() }; onBg() }, Tall) {
                     Text("기본으로", color = ParkInk, fontSize = 18.sp)
                 }
             }

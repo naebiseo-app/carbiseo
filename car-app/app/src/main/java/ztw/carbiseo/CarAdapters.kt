@@ -29,6 +29,7 @@ import android.car.hardware.CarPropertyValue
 import android.car.hardware.property.CarPropertyManager
 import android.content.Context
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.util.Log
 import java.lang.reflect.Proxy
@@ -40,6 +41,8 @@ import java.lang.reflect.Proxy
  */
 class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
     private val ui = Handler(Looper.getMainLooper())
+    private val bgThread = HandlerThread("vehicle").apply { start() }
+    private val bg = Handler(bgThread.looper)
     private var vehicle: Vehicle? = null
     var navi: NaviHelper? = null
         private set
@@ -56,8 +59,12 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
     var steerDeg: Float? = null; private set
     var tripMin: Int? = null; private set
     var soc: Int? = null; private set
-    var passengerSeat: Boolean? = null; private set // 조수석 착석. 에뮬은 콘솔 값과 반대로 온다(26 실측) — 앱에서 뒤집지 않는다
+    var passengerSeat: Boolean? = null; private set // 조수석 착석 원값. 에뮬은 콘솔 값과 반대로 온다(26 실측) — 뒤집지 않고 RoomService가 SeatEdge 기준선으로 해석
     var telltale: String? = null; private set // 빨간색·켜짐 경고등 종류
+    // 내비 앱은 부팅 후 자기 화면(지도)을 한 번 그리기 전까지 SDK 요청을 전부 버린다("navi not ready", 에뮬 실측). 첫 응답이 오면 준비된 것.
+    var naviReady = false; private set
+    var onNaviReady: (() -> Unit)? = null
+    private fun naviAnswered() = ui.post { if (!naviReady) { naviReady = true; Log.i(TAG, "navi ready"); onNaviReady?.invoke() } }
 
     private fun fail(what: String): (Exception) -> Unit = { e -> Log.w(TAG, "$what FAIL $e") }
 
@@ -69,14 +76,15 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
     }
 
     fun stop() {
-        runCatching { navi?.release(); vehicle?.release() }
+        runCatching { navi?.release(); vehicle?.release() }; bgThread.quitSafely()
     }
 
     // ---- 기어(Pleos) + DO(android.car, 컴파일 스텁이 없어 리플렉션) ----
     private fun initGearAndUx() {
         val v = Vehicle(ctx).also { vehicle = it }
         v.initialize()
-        ui.postDelayed({
+        // SDK가 첫 호출 때 kotlin-reflect로 클래스 메타데이터를 디스크에서 읽어 메인을 1.3초 막는다(StrictMode 실측) → 붙이기는 루퍼 있는 백그라운드 스레드에서(맨 Thread면 SDK 응답이 안 온다, 에뮬 실측). 콜백은 전부 ui.post.
+        bg.postDelayed({
             runCatching {
                 v.getGear().registerGearSelection(object : GearSelectionListener {
                     override fun onSelected(g: VehicleGear?) = set { copy(gear = g.toGear()) }
@@ -199,12 +207,13 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
             override fun onError(c: ai.pleos.playground.navi.constants.NaviErrorCode) { Log.w(TAG, "navi onError $c") }
             // 경로가 없을 때 SDK가 (0,0)을 주므로 목적지 없음으로 취급한다.
             override fun onDestinationInfo(i: DestinationInfo) {
+                naviAnswered()
                 val none = i.latitude == 0.0 && i.longitude == 0.0
                 val e = if (none) null else etaMinutes(i.remainTime)
                 ui.post { etaMin = e }
                 set { copy(destination = if (none) null else LatLng(i.latitude, i.longitude)) }
             }
-            override fun onCurrentLocationInfo(i: CurrentLocationInfo) = set { copy(location = LatLng(i.latitude, i.longitude)) }
+            override fun onCurrentLocationInfo(i: CurrentLocationInfo) { naviAnswered(); set { copy(location = LatLng(i.latitude, i.longitude)) } }
             // 취소/종료만 목적지 해제로 본다. 경유지 추가 직후의 취소->재개 깜빡임은 상태머신 2초 유예가 흡수한다.
             override fun onRouteCancelled() { Log.i(TAG, "onRouteCancelled"); ui.post { etaMin = null }; set { copy(destination = null) } }
             override fun onRouteEnded() { ui.post { etaMin = null }; set { copy(destination = null) } }
