@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { INBOX_SQL } from "../src/index.ts";
-import { carChip, parseCarCtx, pickScript } from "../src/script.ts";
+import { carChip, freshCtx, parseCarCtx, pickScript } from "../src/script.ts";
 
 test("폴링: 시각 안 된 hint보다 뒤 행은 hint가 보일 때까지 기다린다(건너뛰기 방지)", () => {
   const db = new DatabaseSync(":memory:");
@@ -36,4 +36,18 @@ test("두 시간 넘게 운전 중이면 대본이 바뀐다(주행 방만)", ()
   assert.equal(pickScript("DRIVE_WORK", "주인", undefined, null, "ai", null, { trip_min: 119 }).instruction, base);
   assert.match(pickScript("DRIVE_WORK", "주인", undefined, null, "ai", null, { trip_min: 120 }).instruction, /두 시간 넘게 운전 중이셔서, 급한 건이라도 메모로/);
   assert.doesNotMatch(pickScript("PARK", "주인", undefined, null, "ai", null, { trip_min: 300 }).instruction, /두 시간/);
+});
+
+test("차 상태가 10분 넘게 오래되면 방을 모름 → 중립 대본", () => {
+  const t = 1_800_000_000_000;
+  const row = (agoMin: number) => ({ value: JSON.stringify({ room: "DRIVE_WORK", eta_min: 12 }), updated_at: t - agoMin * 60_000 });
+  assert.equal(freshCtx(row(9), t)?.room, "DRIVE_WORK");
+  assert.equal(freshCtx(row(10), t)?.room, "DRIVE_WORK");
+  assert.equal(freshCtx(row(11), t), null);
+  assert.equal(freshCtx(null, t), null);
+  assert.equal(freshCtx({ value: "{깨짐", updated_at: t }, t), null);
+  const s = pickScript(null, "김민수", undefined, null);
+  assert.equal(s.room, null);
+  assert.match(s.instruction, /지금 바로 받기 어려우셔서 제가 대신 받았습니다/);
+  assert.doesNotMatch(s.instruction, /운전 중이라|도착 예정|자리를 비우|업무는 마치/);
 });

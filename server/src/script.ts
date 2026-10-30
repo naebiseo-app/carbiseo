@@ -23,6 +23,13 @@ const URGENT = /(?<![공지발보수배진승특고초중상하월언취파봉�
 const NOT_URGENT = /급하지\s*(는\s*)?않|급하진\s*않|안\s*급|급한\s*(건|일|용건|거)?\s*(은|는)?\s*아니|급할\s*(건|거|것|일)?\s*(은|는)?\s*없|빨리\s*(안|않)|서두르지\s*않|천천히/;
 export const isUrgent = (text: string) => URGENT.test(text) && !NOT_URGENT.test(text);
 
+// car_context가 이만큼 넘게 갱신되지 않았으면 믿지 않는다(차는 5분마다 다시 올린다).
+export const STALE_MS = 10 * 60_000;
+export function freshCtx(row: { value: string; updated_at: number } | null, nowMs: number): Record<string, any> | null {
+  if (!row || !(nowMs - row.updated_at <= STALE_MS)) return null;
+  try { return JSON.parse(row.value); } catch { return null; }
+}
+
 export function parseRoom(v: unknown): Room | null {
   return ROOMS.includes(v as Room) ? (v as Room) : null;
 }
@@ -60,10 +67,14 @@ const BY_MODE = {
   off: "전화가 연결되면 '지금은 받을 수 없습니다.' 한 문장만 말하고 즉시 통화를 종료합니다.",
 };
 
-// 방 상태가 없으면 가장 보수적인 DRIVE_WORK 대본. nextAt = 다음 일정 시각(ms), DRIVE_WORK에만 한 줄.
-export function pickScript(room: Room | null, owner?: string, name?: string, eta?: number | null, mode: Mode = "ai", nextAt?: number | null, cc: Partial<CarCtx> | null = null): { room: Room; instruction: string } {
-  const r = room ?? "DRIVE_WORK";
+// 방을 모르면(차 상태 없음·10분 넘게 갱신 없음) 위치·도착 시각·운전 여부를 말하지 않는 중립 대본.
+const NEUTRAL = "'지금 바로 받기 어려우셔서 제가 대신 받았습니다. 용건 남겨 주시면 전해 드리겠습니다'라고 안내하고 용건을 받습니다. 운전 중인지, 언제 도착하는지는 말하지 않습니다.";
+
+// nextAt = 다음 일정 시각(ms), DRIVE_WORK에만 한 줄.
+export function pickScript(room: Room | null, owner?: string, name?: string, eta?: number | null, mode: Mode = "ai", nextAt?: number | null, cc: Partial<CarCtx> | null = null): { room: Room | null; instruction: string } {
+  const r = room;
   if (mode !== "ai") return { room: r, instruction: BY_MODE[mode] };
+  if (!r) return { room: null, instruction: fillOwner(`${greeting(owner, name)} ${COMMON} ${NEUTRAL}`, owner) };
   const byRoom = r !== "PARK" && eta != null ? ETA_BY_ROOM[r].replace("{eta}", String(eta)) : BY_ROOM[r];
   const next = r === "DRIVE_WORK" && nextAt != null ? ` 다음 일정 ${hhmm(nextAt)} 이후 연락 가능.` : "";
   return { room: r, instruction: fillOwner(`${greeting(owner, name)} ${COMMON} ${byRoom}${next}${ctxLine(cc, r)}`, owner) };
@@ -97,7 +108,7 @@ export function ownerScript(o: { owner?: string; name?: string; room: Room | nul
   const sch = (o.schedule ?? []).filter((e) => e.start > o.nowMs).sort((a, b) => a.start - b.start)
     .map((e) => `${hhmm(e.start)} ${e.title}${e.place ? `(${e.place})` : ""}`).join("; ") || "없음";
   const rec = o.recent.map((c, i) => `${i + 1}) ${c.from_label || "모르는 번호"}: ${c.summary ?? ""}${c.urgent ? " [급함]" : ""}`).join(" ") || "없음";
-  const state = { PARK: "정차 중", DRIVE_WORK: "업무 중 운전", DRIVE_REST: "퇴근길 운전" }[o.room ?? "DRIVE_WORK"] + (o.eta != null ? `, 도착까지 약 ${o.eta}분` : "");
+  const state = o.room ? { PARK: "정차 중", DRIVE_WORK: "업무 중 운전", DRIVE_REST: "퇴근길 운전" }[o.room] + (o.eta != null ? `, 도착까지 약 ${o.eta}분` : "") : "차 상태 모름(차 앱 연결 끊김)";
   const s = `지금 전화한 사람은 ${owner}님 본인입니다. 당신은 ${owner}님의 AI 비서${o.name ? ` ${o.name}` : ""}이고, 비서로서 존댓말로 업무 대화를 합니다. ` +
     `첫 마디로 '네, ${owner}님. 무엇을 도와드릴까요?'라고 말합니다. ` +
     (driving ? "지금 운전 중이시니 한두 문장으로 짧게 답합니다. " : "") +

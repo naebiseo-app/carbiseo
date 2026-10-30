@@ -1,4 +1,4 @@
-import { carChip, callerNumber, cleanName, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, sameNumber, type Mode, type Recent } from "./script.ts";
+import { carChip, callerNumber, cleanName, freshCtx, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, sameNumber, type Mode, type Recent } from "./script.ts";
 import { adminPage, basicOk, demoSchedule, parseFakeCall, REPLAY_SAID, replayCards } from "./admin.ts";
 
 interface Env {
@@ -159,7 +159,7 @@ export default {
       const isOwner = sameNumber(callerNumber(raw), env.OWNER_NUMBER);
       let recent: Recent[] = [];
       try {
-        cc = await kvGet(env.DB, "car_context");
+        cc = freshCtx(await env.DB.prepare("SELECT value,updated_at FROM kv WHERE key='car_context'").first<{ value: string; updated_at: number }>(), now());
         room = parseRoom(cc?.room);
         eta = parseEta(cc?.eta_min);
         const st = await kvGet(env.DB, "settings");
@@ -174,10 +174,10 @@ export default {
       }
       if (isOwner) {
         const instruction = ownerScript({ owner, name, room, eta, schedule, recent, nowMs: now() });
-        return json({ CallContext: { Instruction: instruction, Variables: { room: room ?? "DRIVE_WORK", owner_mode: "1" } } });
+        return json({ CallContext: { Instruction: instruction, Variables: { room: room ?? "UNKNOWN", owner_mode: "1" } } });
       }
       const s = pickScript(room, owner, name, eta, mode, nextEventAt(schedule, now()), cc);
-      return json({ CallContext: { Instruction: s.instruction, Variables: { room: s.room, car: carChip(cc, now()) } } });
+      return json({ CallContext: { Instruction: s.instruction, Variables: { room: s.room ?? "UNKNOWN", car: carChip(cc, now()) } } });
     }
 
     if (m === "POST" && pathname === "/clawops/events") {

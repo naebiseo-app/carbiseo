@@ -123,7 +123,9 @@ class RoomService : Service() {
             seat.update(adapters.passengerSeat)?.let { passengerOffer = it && !passenger }
             if (passenger) passengerOffer = false
             adapters.telltale.let { t -> if (t != lastTell) { lastTell = t; telltale = t; if (t != null && machine.room != Room.PARK) say(TELLTALE_SPEECH) } }
-            if (carCtx().toString() != ctxSent && System.currentTimeMillis() - ctxAt >= 10_000) machine.room?.let { sendState(it.name, ++stateGen, false) }
+            // 바뀌면 10초에 한 번까지, 안 바뀌어도 5분마다 하트비트(서버는 10분 넘게 갱신이 없으면 방을 모른다고 본다)
+            val ago = System.currentTimeMillis() - ctxAt
+            if ((carCtx().toString() != ctxSent && ago >= 10_000) || ago >= HEARTBEAT_MS) machine.room?.let { sendState(it.name, ++stateGen, false) }
             if (homeOnce.fire(homeSoon(machine.room, machine.signals.destination, machine.settings, e)) && !passenger) say(HOME_SOON_SPEECH)
             ui.postDelayed(this, 200)
         }
@@ -249,6 +251,7 @@ class RoomService : Service() {
 
     companion object {
         private const val CH = "room"
+        private const val HEARTBEAT_MS = 5 * 60_000L
         const val ACTION_REST = "ztw.carbiseo.REST"
         const val ACTION_GO = "ztw.carbiseo.GO" // F7: extras lat, lng, name
         private const val NAVI_PKG = "ai.umos.maps.android.navigation.app" // Pleos 내비 앱(26 실측)
