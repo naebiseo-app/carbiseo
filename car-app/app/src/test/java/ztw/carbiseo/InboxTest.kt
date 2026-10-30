@@ -19,6 +19,12 @@ class InboxTest {
         assertNull(speechFor(listOf(item(1, urgent = true)), Room.DRIVE_WORK, "off"))
     }
 
+    @Test fun 정차_때_안_본_급한_통화만_알린다() {
+        val items = listOf(item(1, urgent = true), item(2, urgent = true), item(3))
+        assertEquals("급한 전화 1건, 아직 안 보셨어요.", parkReminder(items, setOf(1L)))
+        assertNull(parkReminder(items, setOf(1L, 2L)))
+    }
+
     @Test fun 퇴근길은_급한_전화만_읽는다() {
         assertNull(speechFor(listOf(item(1), item(2)), Room.DRIVE_REST))
         assertEquals("급한 전화 한 건, AI가 용건을 받아 두었습니다.", speechFor(listOf(item(1), item(2, urgent = true)), Room.DRIVE_REST))

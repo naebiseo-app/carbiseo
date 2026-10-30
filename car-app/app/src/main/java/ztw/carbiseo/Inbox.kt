@@ -87,6 +87,11 @@ fun speechFor(items: List<InboxItem>, room: Room?, mode: String = "ai"): String?
     return "$head, ${if (mode == "ment") "안내 멘트로 응대했어요." else "AI가 용건을 받아 두었습니다."}"
 }
 
+/** M12: 세운 지 30초 뒤, 안 본 급한 통화가 남았으면 정차마다 한 문장. */
+const val PARK_REMIND_MS = 30_000L
+fun parkReminder(items: List<InboxItem>, seen: Set<Long>): String? =
+    items.count { it.kind == "call" && it.urgent && it.id !in seen }.takeIf { it > 0 }?.let { "급한 전화 ${it}건, 아직 안 보셨어요." }
+
 private val timeFmt = DateTimeFormatter.ofPattern("MM-dd HH:mm")
 
 /** 화면용 한 줄. from_label/summary가 비면 raw 앞 80자. */

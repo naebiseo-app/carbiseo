@@ -58,6 +58,7 @@ class RoomService : Service() {
     private val homeOnce = Once()
     private val restOnce = Once()
     private val fatigueOnce = Once()
+    private val parkRemind = Once() // M12: 정차마다 1회
     private var quiet = false            // 경고·깜빡이·후진·큰 조향 중
     private val seat = SeatEdge()
     private var lastTell: String? = null
@@ -144,6 +145,7 @@ class RoomService : Service() {
             // 바뀌면 10초에 한 번까지, 안 바뀌어도 5분마다 하트비트(서버는 10분 넘게 갱신이 없으면 방을 모른다고 본다)
             val ago = System.currentTimeMillis() - ctxAt
             if ((carCtx().toString() != ctxSent && ago >= 10_000) || ago >= HEARTBEAT_MS) machine.room?.let { sendState(it.name, ++stateGen, false) }
+            if (parkRemind.fire(machine.room == Room.PARK && parkedAt?.let { clock.millis() - it >= PARK_REMIND_MS } == true) && !passenger) parkReminder(inbox, seen)?.let(::say)
             if (homeOnce.fire(homeSoon(machine.room, machine.signals.destination, machine.settings, e)) && !passenger) say(HOME_SOON_SPEECH)
             ui.postDelayed(this, 200)
         }
@@ -170,7 +172,7 @@ class RoomService : Service() {
             Log.i("ROOM", "$from -> $to at ${LocalDateTime.now(clock).withNano(0)}")
             room = to.name
             val now = clock.millis()
-            if (to == Room.PARK) { parkedAt = now; restOffer = false; hold.clear() }
+            if (to == Room.PARK) { parkedAt = now; restOffer = false; hold.clear(); parkRemind.reset() }
             else {
                 val parked = parkedAt?.let { now - it }; parkedAt = null
                 // M4: 2분 미만 P는 같은 운전 — 휴식·피로·집 문턱 1회 안내와 운전 시작 시각을 유지
