@@ -83,12 +83,16 @@ export function nextWorkMorning(nowMs: number): string {
 // 토·일(KST, 차 offDuty와 같은 기준)엔 쉼 방 문구를 '업무 마침' 대신 '쉬는 날'로. ponytail: 공휴일 없음 — 차 settings에 날짜가 생기면 /car/state로
 export const restDay = (nowMs: number) => [0, 6].includes(new Date(nowMs + 9 * 3_600_000).getUTCDay());
 
+// M17: 저녁(18시~)·새벽(07시 전)·주말 정차는 '곧 회신' 대신 쉼 방 약속(차 업무시간 07~18과 같은 기준).
+export const offHours = (nowMs: number) => { const h = new Date(nowMs + 9 * 3_600_000).getUTCHours(); return h < 7 || h >= 18 || restDay(nowMs); };
+
 export function pickScript(room: Room | null, owner?: string, name?: string, eta?: number | null, mode: Mode = "ai", nextAt?: number | null, cc: Partial<CarCtx> | null = null, nowMs = Date.now()): { room: Room | null; instruction: string } {
   const r = room;
   if (mode !== "ai") return { room: r, instruction: BY_MODE[mode] };
   if (!r) return { room: null, instruction: fillOwner(`${greeting(owner, name)} ${COMMON} ${NEUTRAL}`, owner) };
-  let byRoom = (r !== "PARK" && eta != null ? ETA_BY_ROOM[r].replace("{eta}", String(eta)) : BY_ROOM[r]).replace("{when}", nextWorkMorning(nowMs));
-  if (r === "DRIVE_REST" && restDay(nowMs)) byRoom = byRoom.replaceAll("오늘 업무는 마치셨습니다", "오늘은 쉬는 날입니다").replaceAll("오늘 업무는 마치셨고", "오늘은 쉬는 날이고");
+  const s = r === "PARK" && offHours(nowMs) ? "DRIVE_REST" : r;
+  let byRoom = (r !== "PARK" && eta != null ? ETA_BY_ROOM[r].replace("{eta}", String(eta)) : BY_ROOM[s]).replace("{when}", nextWorkMorning(nowMs));
+  if (s === "DRIVE_REST" && restDay(nowMs)) byRoom = byRoom.replaceAll("오늘 업무는 마치셨습니다", "오늘은 쉬는 날입니다").replaceAll("오늘 업무는 마치셨고", "오늘은 쉬는 날이고");
   const next = r === "DRIVE_WORK" && nextAt != null ? ` 다음 일정 ${hhmm(nextAt)} 이후 연락 가능.` : "";
   return { room: r, instruction: fillOwner(`${greeting(owner, name)} ${COMMON} ${byRoom}${next}${ctxLine(cc, r)}`, owner) };
 }

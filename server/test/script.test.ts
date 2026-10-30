@@ -7,7 +7,7 @@ const WED_19 = Date.UTC(2026, 10, 4, 10, 0); // 2026-11-04(수) 19:00 KST
 test("방별 대본 선택", () => {
   assert.match(pickScript("DRIVE_WORK").instruction, /운전 중/);
   assert.match(pickScript("DRIVE_REST", undefined, undefined, null, "ai", null, null, WED_19).instruction, /내일 오전/);
-  assert.match(pickScript("PARK").instruction, /자리를 비우/);
+  assert.match(pickScript("PARK", undefined, undefined, null, "ai", null, null, WED_19 - 5 * 3_600_000).instruction, /자리를 비우/); // 수 14:00
   assert.equal(pickScript(null).room, null);
   assert.equal(parseRoom("FLY"), null);
   for (const r of ["PARK", "DRIVE_WORK", "DRIVE_REST"] as const)
@@ -74,4 +74,14 @@ test("쉼 방 문구: 토·일(KST)은 '쉬는 날', 평일은 '업무 마침'. 
   assert.match(rest(Date.UTC(2026, 10, 6, 16, 0)), /쉬는 날/);             // 토 01:00 KST(UTC로는 금)
   assert.doesNotMatch(pickScript("DRIVE_WORK", "주인", undefined, null, "ai", null, null, kst(7, 14)).instruction, /쉬는 날/);
   assert.match(ownerScript({ room: "DRIVE_REST", eta: null, schedule: null, recent: [], nowMs: 0 }), /업무 시간 밖 운전/);
+});
+
+test("밤·새벽·주말 정차는 '곧 회신' 대신 다음 평일 오전 약속(M17)", () => {
+  const kst = (d: number, h: number) => Date.UTC(2026, 10, d, h - 9, 0); // 2026-11-02 월
+  const park = (t: number) => pickScript("PARK", "주인", undefined, null, "ai", null, null, t).instruction;
+  assert.match(park(kst(4, 14)), /자리를 비우/);                     // 수 14시
+  assert.match(park(kst(4, 23)), /오늘 업무는 마치셨습니다. 내일 오전에/); // 수 23시
+  assert.match(park(kst(5, 3)), /오늘 오전에/);                       // 목 03시
+  assert.match(park(kst(7, 14)), /오늘은 쉬는 날입니다. 월요일 오전에/);  // 토
+  assert.doesNotMatch(park(kst(4, 23)), /곧 회신|운전 중/);
 });
