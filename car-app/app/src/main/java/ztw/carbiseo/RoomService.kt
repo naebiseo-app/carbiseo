@@ -142,7 +142,8 @@ class RoomService : Service() {
             // 짧은 P 동안은 driveStart가 남아 있으니 주행 중일 때만 센다(M4). 휴식·피로가 같은 순간이면 한 문장만(H10).
             val restNow = restOnce.fire(restDue(driveStart.takeIf { machine.room != Room.PARK }, clock.millis(), restMin))
             if (restNow) { restOffer = true; say(REST_SPEECH) }
-            if (fatigueOnce.fire(fatigued(machine.room, tripMin())) && !restNow) say(FATIGUE_SPEECH) // 안전 안내라 동승자 모드에서도
+            // 안전 안내라 동승자 모드에서도. 피로 보관이 켜지면 휴게소 버튼도 같이 띄운다(휴식 기준을 더 길게 잡았어도).
+            if (fatigueOnce.fire(fatigued(machine.room, tripMin()))) { restOffer = true; if (!restNow) say(FATIGUE_SPEECH) }
             seat.update(adapters.passengerSeat)?.let { passengerOffer = it && !passenger }
             if (passenger) passengerOffer = false
             adapters.telltale.let { t -> if (t != lastTell) { lastTell = t; telltale = t; if (t != null && machine.room != Room.PARK) say(TELLTALE_SPEECH) } }
