@@ -80,11 +80,15 @@ export function nextWorkMorning(nowMs: number): string {
   return ahead === 0 ? "오늘 오전" : ahead === 1 ? "내일 오전" : "월요일 오전";
 }
 
+// 토·일(KST, 차 offDuty와 같은 기준)엔 쉼 방 문구를 '업무 마침' 대신 '쉬는 날'로. ponytail: 공휴일 없음 — 차 settings에 날짜가 생기면 /car/state로
+export const restDay = (nowMs: number) => [0, 6].includes(new Date(nowMs + 9 * 3_600_000).getUTCDay());
+
 export function pickScript(room: Room | null, owner?: string, name?: string, eta?: number | null, mode: Mode = "ai", nextAt?: number | null, cc: Partial<CarCtx> | null = null, nowMs = Date.now()): { room: Room | null; instruction: string } {
   const r = room;
   if (mode !== "ai") return { room: r, instruction: BY_MODE[mode] };
   if (!r) return { room: null, instruction: fillOwner(`${greeting(owner, name)} ${COMMON} ${NEUTRAL}`, owner) };
-  const byRoom = (r !== "PARK" && eta != null ? ETA_BY_ROOM[r].replace("{eta}", String(eta)) : BY_ROOM[r]).replace("{when}", nextWorkMorning(nowMs));
+  let byRoom = (r !== "PARK" && eta != null ? ETA_BY_ROOM[r].replace("{eta}", String(eta)) : BY_ROOM[r]).replace("{when}", nextWorkMorning(nowMs));
+  if (r === "DRIVE_REST" && restDay(nowMs)) byRoom = byRoom.replaceAll("오늘 업무는 마치셨습니다", "오늘은 쉬는 날입니다").replaceAll("오늘 업무는 마치셨고", "오늘은 쉬는 날이고");
   const next = r === "DRIVE_WORK" && nextAt != null ? ` 다음 일정 ${hhmm(nextAt)} 이후 연락 가능.` : "";
   return { room: r, instruction: fillOwner(`${greeting(owner, name)} ${COMMON} ${byRoom}${next}${ctxLine(cc, r)}`, owner) };
 }
@@ -117,7 +121,7 @@ export function ownerScript(o: { owner?: string; name?: string; room: Room | nul
   const sch = (o.schedule ?? []).filter((e) => e.start > o.nowMs).sort((a, b) => a.start - b.start)
     .map((e) => `${hhmm(e.start)} ${e.title}${e.place ? `(${e.place})` : ""}`).join("; ") || "없음";
   const rec = o.recent.map((c, i) => `${i + 1}) ${c.from_label || "모르는 번호"}: ${c.summary ?? ""}${c.urgent ? " [급함]" : ""}`).join(" ") || "없음";
-  const state = o.room ? { PARK: "정차 중", DRIVE_WORK: "업무 중 운전", DRIVE_REST: "퇴근길 운전" }[o.room] + (o.eta != null ? `, 도착까지 약 ${o.eta}분` : "") : "차 상태 모름(차 앱 연결 끊김)";
+  const state = o.room ? { PARK: "정차 중", DRIVE_WORK: "업무 중 운전", DRIVE_REST: "업무 시간 밖 운전" }[o.room] + (o.eta != null ? `, 도착까지 약 ${o.eta}분` : "") : "차 상태 모름(차 앱 연결 끊김)";
   const s = `지금 전화한 사람은 ${owner}님 본인입니다. 당신은 ${owner}님의 AI 비서${o.name ? ` ${o.name}` : ""}이고, 비서로서 존댓말로 업무 대화를 합니다. ` +
     `첫 마디로 '네, ${owner}님. 무엇을 도와드릴까요?'라고 말합니다. ` +
     (driving ? "지금 운전 중이시니 한두 문장으로 짧게 답합니다. " : "") +

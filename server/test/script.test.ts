@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { pickScript, parseRoom, cleanName, parseEta, nextWorkMorning } from "../src/script.ts";
+import { pickScript, parseRoom, cleanName, parseEta, nextWorkMorning, ownerScript } from "../src/script.ts";
 
 const WED_19 = Date.UTC(2026, 10, 4, 10, 0); // 2026-11-04(수) 19:00 KST
 
@@ -62,4 +62,16 @@ test("쉼 방 약속은 다음 평일 오전(H7: 차가 그 첫 업무 운전에
   assert.equal(nextWorkMorning(kst(8, 2)), "내일 오전");    // 일 새벽 → 월
   assert.match(pickScript("DRIVE_REST", "김민수", undefined, null, "ai", null, null, kst(6, 19)).instruction, /월요일 오전에 연락드리도록/);
   assert.doesNotMatch(pickScript("DRIVE_REST", "김민수", undefined, 5, "ai", null, null, kst(6, 19)).instruction, /\{when\}/);
+});
+
+test("쉼 방 문구: 토·일(KST)은 '쉬는 날', 평일은 '업무 마침'. 주인 대본은 '업무 시간 밖 운전'", () => {
+  const kst = (d: number, h: number) => Date.UTC(2026, 10, d, h - 9, 0); // 2026-11-02 월
+  const rest = (t: number, eta: number | null = null) => pickScript("DRIVE_REST", "주인", undefined, eta, "ai", null, null, t).instruction;
+  assert.match(rest(kst(7, 14)), /'오늘은 쉬는 날입니다. 월요일 오전에/);  // 토
+  assert.match(rest(kst(8, 23), 9), /오늘은 쉬는 날이고, 지금 운전 중이라 약 9분/); // 일 밤 23시 = KST 일요일(UTC로는 같은 날)
+  assert.doesNotMatch(rest(kst(7, 14)), /마치셨/);
+  assert.match(rest(kst(6, 19)), /오늘 업무는 마치셨습니다/);              // 금 저녁
+  assert.match(rest(Date.UTC(2026, 10, 6, 16, 0)), /쉬는 날/);             // 토 01:00 KST(UTC로는 금)
+  assert.doesNotMatch(pickScript("DRIVE_WORK", "주인", undefined, null, "ai", null, null, kst(7, 14)).instruction, /쉬는 날/);
+  assert.match(ownerScript({ room: "DRIVE_REST", eta: null, schedule: null, recent: [], nowMs: 0 }), /업무 시간 밖 운전/);
 });
