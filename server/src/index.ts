@@ -1,4 +1,4 @@
-import { callerNumber, cleanName, nextEventAt, ownerScript, parseEta, parseMode, parseRoom, pickScript, sameNumber, type Mode, type Recent } from "./script.ts";
+import { carChip, callerNumber, cleanName, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, sameNumber, type Mode, type Recent } from "./script.ts";
 import { adminPage, basicOk, demoSchedule, parseFakeCall, REPLAY_SAID, replayCards } from "./admin.ts";
 
 interface Env {
@@ -92,6 +92,11 @@ export function transcriptTarget(raw: string) {
   return f.get("Event") === "agent.disconnected" && f.get("Direction") !== "outbound" ? f.get("CallId") || null : null;
 }
 
+// 차 폴링: since 뒤 행 중, 아직 시각이 안 된(created_at 미래) 첫 행 앞까지만 준다.
+// 미래 행보다 id가 큰 행을 먼저 주면 차가 since를 넘겨 버려 미래 행(재현 hint)을 영영 못 받는다.
+export const INBOX_SQL =
+  "SELECT * FROM inbox WHERE id>?1 AND id < COALESCE((SELECT MIN(id) FROM inbox WHERE id>?1 AND created_at>?2), 9e18) ORDER BY id DESC LIMIT 50";
+
 const DAY = 86_400_000;
 export const retention = (t: number): [string, number][] => [
   ["UPDATE inbox SET raw=NULL WHERE raw IS NOT NULL AND created_at < ?", t - 7 * DAY],
@@ -106,12 +111,12 @@ export default {
 
     if (m === "POST" && pathname === "/car/state") {
       if (!authed) return json({ error: "unauthorized" }, 401);
-      const b = (await req.json().catch(() => ({}))) as { room?: unknown; eta_min?: unknown };
+      const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
       const room = parseRoom(b.room);
       if (!room) return json({ error: "room must be PARK|DRIVE_WORK|DRIVE_REST" }, 400);
       const eta_min = parseEta(b.eta_min);
       await env.DB.prepare("INSERT INTO kv(key,value,updated_at) VALUES('car_context',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
-        .bind(JSON.stringify({ room, eta_min }), now()).run();
+        .bind(JSON.stringify({ room, eta_min, ...parseCarCtx(b) }), now()).run();
       return json({ ok: true, room, eta_min });
     }
 
@@ -138,7 +143,7 @@ export default {
     if (m === "GET" && pathname === "/car/inbox") {
       if (!authed) return json({ error: "unauthorized" }, 401);
       const since = Number(new URL(req.url).searchParams.get("since") ?? 0) || 0;
-      const { results } = await env.DB.prepare("SELECT * FROM inbox WHERE id>? AND created_at<=? ORDER BY id DESC LIMIT 50").bind(since, now()).all();
+      const { results } = await env.DB.prepare(INBOX_SQL).bind(since, now()).all();
       return json({ items: results });
     }
 
@@ -152,11 +157,12 @@ export default {
       let eta: number | null = null;
       let mode: Mode = "ai";
       let schedule = null;
+      let cc: Record<string, any> | null = null; // car_context: 방·ETA·차량 맥락
       const isOwner = sameNumber(callerNumber(raw), env.OWNER_NUMBER);
       let recent: Recent[] = [];
       try {
-        const cc = await kvGet(env.DB, "car_context");
-        room = cc?.room ?? null;
+        cc = await kvGet(env.DB, "car_context");
+        room = parseRoom(cc?.room);
         eta = parseEta(cc?.eta_min);
         const st = await kvGet(env.DB, "settings");
         owner = st?.owner_label;
@@ -172,8 +178,8 @@ export default {
         const instruction = ownerScript({ owner, name, room, eta, schedule, recent, nowMs: now() });
         return json({ CallContext: { Instruction: instruction, Variables: { room: room ?? "DRIVE_WORK", owner_mode: "1" } } });
       }
-      const s = pickScript(room, owner, name, eta, mode, nextEventAt(schedule, now()));
-      return json({ CallContext: { Instruction: s.instruction, Variables: { room: s.room } } });
+      const s = pickScript(room, owner, name, eta, mode, nextEventAt(schedule, now()), cc);
+      return json({ CallContext: { Instruction: s.instruction, Variables: { room: s.room, car: carChip(cc, now()) } } });
     }
 
     if (m === "POST" && pathname === "/clawops/events") {
@@ -197,8 +203,9 @@ export default {
       } else if (card) {
         const cc = await kvGet(env.DB, "car_context");
         // 웹훅 재전송 대비: 같은 통화의 카드는 1장만
-        await env.DB.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,summary,urgent,created_at) SELECT 'call','summarized',?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='call' AND call_id=?)")
-          .bind(parseRoom(cc?.room) ?? null, card.call_id, card.from_label, card.summary, card.urgent, now(), card.call_id).run();
+        // ponytail: 칩은 요약 도착 시점의 차량 맥락(통화 후 수십 초 차이). 정확히 하려면 call-context 때 값을 ring meta에 남겨 call_id로 잇기
+        await env.DB.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,summary,urgent,created_at,meta) SELECT 'call','summarized',?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='call' AND call_id=?)")
+          .bind(parseRoom(cc?.room) ?? null, card.call_id, card.from_label, card.summary, card.urgent, now(), JSON.stringify({ car: carChip(cc, now()) }), card.call_id).run();
       }
       return json({ ok: true });
     }
@@ -235,9 +242,9 @@ export default {
       if (m === "POST" && pathname === "/admin/fake-call") {
         const c = parseFakeCall(await req.formData());
         if (!c) return html("입력 확인: 이름 1~10자(글자·숫자·공백), 용건 1~120자", 400);
-        const room = (await kvGet(env.DB, "car_context"))?.room ?? null;
+        const cc = await kvGet(env.DB, "car_context");
         await env.DB.prepare("INSERT INTO inbox(kind,status,room,from_label,summary,urgent,created_at,raw,meta) VALUES('call','demo',?,?,?,?,?,?,?)")
-          .bind(room, c.from_label, c.summary, c.urgent, now(), JSON.stringify(c), JSON.stringify({ demo: true })).run();
+          .bind(cc?.room ?? null, c.from_label, c.summary, c.urgent, now(), JSON.stringify(c), JSON.stringify({ demo: true, car: carChip(cc, now()) })).run();
         return html(`넣었습니다: ${c.from_label} / ${c.summary}`);
       }
       if (m === "POST" && pathname === "/admin/reset-schedule") {

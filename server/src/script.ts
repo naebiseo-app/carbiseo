@@ -48,12 +48,12 @@ const BY_MODE = {
 };
 
 // 방 상태가 없으면 가장 보수적인 DRIVE_WORK 대본. nextAt = 다음 일정 시각(ms), DRIVE_WORK에만 한 줄.
-export function pickScript(room: Room | null, owner = "주인", name?: string, eta?: number | null, mode: Mode = "ai", nextAt?: number | null): { room: Room; instruction: string } {
+export function pickScript(room: Room | null, owner = "주인", name?: string, eta?: number | null, mode: Mode = "ai", nextAt?: number | null, cc: Partial<CarCtx> | null = null): { room: Room; instruction: string } {
   const r = room ?? "DRIVE_WORK";
   if (mode !== "ai") return { room: r, instruction: BY_MODE[mode] };
   const byRoom = r !== "PARK" && eta != null ? ETA_BY_ROOM[r].replace("{eta}", String(eta)) : BY_ROOM[r];
   const next = r === "DRIVE_WORK" && nextAt != null ? ` 다음 일정 ${hhmm(nextAt)} 이후 연락 가능.` : "";
-  return { room: r, instruction: `${greeting(owner, name)} ${COMMON} ${byRoom}${next}`.replaceAll("{owner}", owner) };
+  return { room: r, instruction: `${greeting(owner, name)} ${COMMON} ${byRoom}${next}${ctxLine(cc, r)}`.replaceAll("{owner}", owner) };
 }
 
 // KST HH:mm
@@ -100,4 +100,38 @@ export function cleanName(v: unknown): string | null {
   if (typeof v !== "string") return null;
   const t = v.trim();
   return /^[\p{L}\p{N} ]{1,10}$/u.test(t) ? t : null;
+}
+
+// 차가 /car/state에 함께 올리는 차량 맥락(SDK 값). 형식이 틀린 값은 버린다(대본 주입 방지).
+export type CarCtx = { gear: string | null; trip_min: number | null; soc: number | null; turn: boolean; passenger: boolean; telltale: string | null };
+const intIn = (v: unknown, max: number) => (Number.isInteger(v) && (v as number) >= 0 && (v as number) <= max ? (v as number) : null);
+export function parseCarCtx(b: Record<string, unknown>): CarCtx {
+  return {
+    gear: ["P", "D", "R", "N"].includes(b.gear as string) ? (b.gear as string) : null,
+    trip_min: intIn(b.trip_min, 100_000), soc: intIn(b.soc, 100), turn: b.turn === true, passenger: b.passenger === true,
+    telltale: typeof b.telltale === "string" && /^[A-Za-z]{1,40}$/.test(b.telltale) ? b.telltale : null,
+  };
+}
+
+export const FATIGUE_MIN = 120;
+
+// 통화 카드 "쓴 차량 데이터" 칩. 예: "도착 18:40 · 2시간 운전 · 동승자"
+export function carChip(cc: Partial<CarCtx> & { eta_min?: number | null } | null, nowMs: number): string {
+  if (!cc) return "";
+  const t = cc.trip_min ?? 0;
+  return [
+    cc.eta_min != null ? `도착 ${hhmm(nowMs + cc.eta_min * 60_000)}` : "",
+    t >= 60 ? `${Math.floor(t / 60)}시간${t % 60 ? ` ${t % 60}분` : ""} 운전` : t > 0 ? `${t}분 운전` : "",
+    cc.passenger ? "동승자" : "",
+    cc.telltale ? "경고등" : "",
+    cc.soc != null && cc.soc < 20 ? `배터리 ${cc.soc}%` : "",
+  ].filter(Boolean).join(" · ");
+}
+
+// SDK 값이 응대를 바꾼다: 오래 운전 중이면 급한 건도 메모로만(운전자에게 안 넘김).
+export function ctxLine(cc: Partial<CarCtx> | null, room: Room): string {
+  if (room === "PARK" || !cc) return "";
+  return (cc.trip_min ?? 0) >= FATIGUE_MIN
+    ? " {owner}님이 두 시간 넘게 운전 중이셔서, 급한 건이라도 메모로 받아 두고 쉬실 때 연락드리도록 전해 드린다고 안내합니다."
+    : "";
 }
