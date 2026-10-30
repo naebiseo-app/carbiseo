@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { INBOX_SQL } from "../src/index.ts";
-import { carChip, freshCtx, parseCarCtx, pickScript } from "../src/script.ts";
+import { carChip, freshCtx, ownerScript, parseCarCtx, pickScript } from "../src/script.ts";
 
 test("폴링: 시각 안 된 hint보다 뒤 행은 hint가 보일 때까지 기다린다(건너뛰기 방지)", () => {
   const db = new DatabaseSync(":memory:");
@@ -50,4 +50,18 @@ test("차 상태가 10분 넘게 오래되면 방을 모름 → 중립 대본", 
   assert.equal(s.room, null);
   assert.match(s.instruction, /지금 바로 받기 어려우셔서 제가 대신 받았습니다/);
   assert.doesNotMatch(s.instruction, /운전 중이라|도착 예정|자리를 비우|업무는 마치/);
+});
+
+test("동승자가 있으면 짧게 받고 개인정보는 말하지 않는다(주행 방만, 주인 대본도)", () => {
+  const s = pickScript("DRIVE_WORK", "김민수", undefined, 12, "ai", null, { passenger: true }).instruction;
+  assert.match(s, /동승하신 분이 있어 용건은 짧게/);
+  assert.match(s, /김민수님의 개인정보는 말하지 않습니다/);
+  assert.match(s, /약 12분 뒤 도착/);
+  assert.match(pickScript("DRIVE_WORK", "주인", undefined, null, "ai", null, { passenger: true, trip_min: 130 }).instruction, /두 시간.*동승/);
+  assert.doesNotMatch(pickScript("DRIVE_WORK", "주인", undefined, null, "ai", null, { passenger: false }).instruction, /동승/);
+  assert.doesNotMatch(pickScript("PARK", "주인", undefined, null, "ai", null, { passenger: true }).instruction, /동승/);
+  assert.doesNotMatch(pickScript("DRIVE_WORK", undefined, undefined, null, "ai", null, { passenger: true }).instruction, /\{owner\}/);
+  const o = { room: "DRIVE_WORK" as const, eta: null, schedule: null, recent: [], nowMs: 0 };
+  assert.match(ownerScript({ ...o, passenger: true }), /세부 없이 건수와 용건 한 줄로만/);
+  assert.doesNotMatch(ownerScript(o), /동승자/);
 });
