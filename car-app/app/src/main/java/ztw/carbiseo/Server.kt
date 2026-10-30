@@ -48,8 +48,17 @@ object Server {
                 val meta = runCatching { JSONObject(it.str("meta")) }.getOrNull()
                 InboxItem(it.getLong("id"), it.str("from_label"), it.str("summary"),
                     it.optInt("urgent") != 0, it.optLong("created_at"), it.str("raw"), it.str("kind").ifEmpty { "call" },
-                    it.str("status"), meta?.str("code") ?: "", meta?.str("car") ?: "")
+                    it.str("status"), meta?.str("code") ?: "", meta?.str("car") ?: "", it.str("room"), it.str("from_number"))
             }
+        } finally { c.disconnect() }
+    }.getOrNull()
+
+    /** H13: 착신 서비스 번호(서버 환경값, 화면 안내용)와 실제 착신 통화를 받은 적 있는지. */
+    fun fetchConfig(): Pair<String, Boolean>? = runCatching {
+        val c = open("/car/config", "GET")
+        try {
+            if (c.responseCode !in 200..299) return@runCatching null
+            JSONObject(c.inputStream.bufferedReader().readText()).let { it.str("service_number") to it.optBoolean("forwarded") }
         } finally { c.disconnect() }
     }.getOrNull()
 

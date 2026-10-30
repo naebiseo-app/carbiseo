@@ -11,7 +11,38 @@ data class InboxItem(
     val kind: String = "call", // call 통화 / hint 추천 답변·정정·빈 시간 / task 할 일 / sent 보낸 문자 / event·ring 웹훅(안 보임)
     val status: String = "", val code: String = "", // sent: status sent|failed, code = 업체 결과(overseas_ip_blocked 등)
     val car: String = "", // 서버가 붙인 "쓴 차량 데이터" 칩
+    val room: String = "", // 서버가 받을 때의 차 방(PARK|DRIVE_WORK|DRIVE_REST|"")
+    val fromNumber: String = "", // H15 회신용 전체 번호(화면엔 끝 4자리만). 30일 보관 후 행째 삭제
 )
+
+/**
+ * H7: 업무 외(퇴근길·저녁·주말)에 받은 통화 = 다음 업무 운전으로 넘긴 건. 반환 id -> 넘긴 날(epochDay).
+ * 실시간 항목은 지금 상태(offNow = 쉼 방이거나 업무 시간 밖)로, 재시작 직후 첫 폴링 항목은 받은 시각·서버 방으로 판정한다(어제·오늘 것만).
+ */
+fun deferNew(fresh: List<InboxItem>, initial: Boolean, offNow: Boolean, today: Long, s: RoomSettings, zone: ZoneId = ZoneId.systemDefault()): Map<Long, Long> {
+    val calls = fresh.filter { it.kind == "call" }
+    if (!initial) return if (offNow) calls.associate { it.id to today } else emptyMap()
+    return calls.mapNotNull { i ->
+        val at = Instant.ofEpochMilli(i.createdAt).atZone(zone).toLocalDateTime()
+        (i.id to at.toLocalDate().toEpochDay()).takeIf { (i.room == Room.DRIVE_REST.name || offDuty(at, s)) && it.second >= today - 1 }
+    }.toMap()
+}
+
+/** H7: 오늘 이전에 넘겼고 아직 안 본 통화. */
+fun carryOver(items: List<InboxItem>, deferred: Map<Long, Long>, seen: Set<Long>, today: Long): List<InboxItem> =
+    items.filter { i -> deferred[i.id]?.let { it < today } == true && i.id !in seen }
+
+/** H7: 첫 업무 운전 때 한 문장. 넘긴 날이 모두 어제면 '어제', 아니면(주말 넘김 등) '지난번에'. */
+fun carrySpeech(items: List<InboxItem>, deferred: Map<Long, Long>, today: Long): String? {
+    if (items.isEmpty()) return null
+    val y = items.all { deferred[it.id] == today - 1 }
+    return "${if (y) "어제" else "지난번에"} 넘긴 전화 ${items.size}건 있어요. 차 세우면 보여 드릴게요."
+}
+
+/** "id:day,id:day" <-> map. 최근 300개만 남긴다. */
+fun encodeDeferred(m: Map<Long, Long>): String = m.entries.sortedBy { it.key }.takeLast(300).joinToString(",") { "${it.key}:${it.value}" }
+fun decodeDeferred(s: String?): Map<Long, Long> =
+    s.orEmpty().split(",").mapNotNull { e -> e.split(":").takeIf { it.size == 2 }?.let { (a, b) -> a.toLongOrNull()?.let { k -> b.toLongOrNull()?.let { k to it } } } }.toMap()
 
 /** 차 화면에 보이는 종류. ring은 곧 call 카드가 되고 event는 웹훅 원문이라 숨긴다. */
 val SHOWN_KINDS = setOf("call", "hint", "task", "sent")

@@ -63,6 +63,7 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
     var telltale: String? = null; private set // 빨간색·켜짐 경고등 종류
     // 내비 앱은 부팅 후 자기 화면(지도)을 한 번 그리기 전까지 SDK 요청을 전부 버린다("navi not ready", 에뮬 실측). 첫 응답이 오면 준비된 것.
     var naviReady = false; private set
+    var forcedLocation: LatLng? = null // 디버그 브로드캐스트 LOC로 주입한 위치(에뮬 위치가 고정이라)
     var onNaviReady: (() -> Unit)? = null
     private fun naviAnswered() = ui.post { if (!naviReady) { naviReady = true; Log.i(TAG, "navi ready"); onNaviReady?.invoke() } }
 
@@ -213,7 +214,7 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
                 ui.post { etaMin = e }
                 set { copy(destination = if (none) null else LatLng(i.latitude, i.longitude)) }
             }
-            override fun onCurrentLocationInfo(i: CurrentLocationInfo) { naviAnswered(); set { copy(location = LatLng(i.latitude, i.longitude)) } }
+            override fun onCurrentLocationInfo(i: CurrentLocationInfo) { naviAnswered(); set { copy(location = forcedLocation ?: LatLng(i.latitude, i.longitude)) } }
             // 취소/종료만 목적지 해제로 본다. 경유지 추가 직후의 취소->재개 깜빡임은 상태머신 2초 유예가 흡수한다.
             override fun onRouteCancelled() { Log.i(TAG, "onRouteCancelled"); ui.post { etaMin = null }; set { copy(destination = null) } }
             override fun onRouteEnded() { ui.post { etaMin = null }; set { copy(destination = null) } }

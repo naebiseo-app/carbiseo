@@ -33,7 +33,8 @@ class SeatEdge {
 }
 
 const val REST_DEFAULT_MIN = 120
-const val REST_SPEECH = "오래 운전하셨어요. 쉬어 가실래요? 화면의 휴게소 버튼을 누르세요."
+// H10: 음성으로 '누르라'고 지시하지 않는다. 버튼은 화면에 그대로 둔다.
+const val REST_SPEECH = "오래 운전하셨어요. 쉬어 가실래요? 전화는 제가 받아 둘게요."
 
 /** S2: 이번 운전(PARK에서 나온 뒤) 연속 주행이 설정 분 이상. startMs = null이면 정차 중. */
 fun restDue(startMs: Long?, nowMs: Long, thresholdMin: Int): Boolean = startMs != null && nowMs - startMs >= thresholdMin * 60_000L
@@ -49,11 +50,60 @@ val REST_STOPS = listOf(
     RestStop("안성휴게소", LatLng(37.0098, 127.2091)),
 )
 
-/** 경로상 앞쪽 = 지금보다 목적지에 가까운 곳. 그중 지금 위치에서 가장 가까운 것, 없으면 전체에서 가장 가까운 것. */
+const val REST_STOP_MAX_M = 40_000.0
+
+/**
+ * H11: 앞쪽(지금보다 목적지에 가까운 곳)이고 40km 안인 휴게소 중 가장 가까운 것. 지나온 곳은 절대 고르지 않는다(유턴 경로 방지).
+ * 목적지가 없으면 진행 방향을 몰라 null. null이면 호출자가 내비 장소 검색 화면을 연다.
+ */
 fun nearestRestStop(loc: LatLng?, dest: LatLng?, stops: List<RestStop> = REST_STOPS): RestStop? {
-    loc ?: return null
-    val ahead = if (dest == null) stops else stops.filter { distanceM(it.at, dest) < distanceM(loc, dest) }
-    return ahead.ifEmpty { stops }.minByOrNull { distanceM(loc, it.at) }
+    if (loc == null || dest == null) return null
+    return stops.filter { distanceM(it.at, dest) < distanceM(loc, dest) && distanceM(loc, it.at) <= REST_STOP_MAX_M }.minByOrNull { distanceM(loc, it.at) }
+}
+
+/** M4: 이보다 짧은 P(신호대기·드라이브스루)는 같은 운전으로 본다 — 방 선언·휴식/피로 타이머를 리셋하지 않는다. */
+const val SHORT_PARK_MS = 2 * 60_000L
+/** H9: 이만큼 넘게 세워 두면 다음 출발은 '다른 운전' — 그 전에 켠 동승자 모드는 자동 해제. */
+const val PASSENGER_RESET_PARK_MS = 30 * 60_000L
+
+/** 직전 P 길이(ms, null = 서비스 시작 후 첫 운전)로 새 운전인지. */
+fun newDrive(parkedMs: Long?): Boolean = parkedMs == null || parkedMs >= SHORT_PARK_MS
+
+/** M4: 방 선언은 하루에 방 성격이 바뀔 때만(같은 날 같은 방이면 다시 말하지 않는다). */
+class DayRoom {
+    private var last: Pair<Long, Room>? = null
+    fun shouldSay(day: Long, r: Room): Boolean = (day to r != last).also { if (it) last = day to r }
+}
+
+/**
+ * H12: SDK 트립 주행시간은 운전 시작 때 값을 기준으로 차이만 쓴다. 누적값이 와도 시동 직후 '두 시간째'가 나오지 않는다.
+ * 값이 줄면(차가 트립을 초기화) 기준을 다시 잡고, 24시간을 넘는 차이는 버린다.
+ */
+class TripDelta {
+    private var base: Int? = null
+    fun reset() { base = null }
+    fun of(raw: Int?): Int? {
+        raw ?: return null
+        val b = base?.takeIf { raw >= it } ?: raw.also { base = it }
+        return (raw - b).takeIf { it <= 24 * 60 }
+    }
+}
+
+/** 시스템 시각 + offsetMs. offset은 디버그 브로드캐스트만 바꾼다(요일·시각 시뮬). release에선 늘 0. */
+class ShiftClock(@Volatile var offsetMs: Long = 0, private val base: java.time.Clock = java.time.Clock.systemDefaultZone()) : java.time.Clock() {
+    override fun getZone(): java.time.ZoneId = base.zone
+    override fun withZone(z: java.time.ZoneId?): java.time.Clock = this
+    override fun instant(): java.time.Instant = base.instant().plusMillis(offsetMs)
+    override fun millis(): Long = base.millis() + offsetMs
+}
+
+/** H13: 화면 상단 상태 — 거짓으로 '받는 중'이라고 하지 않는다. */
+fun readiness(offline: Boolean, forwardOk: Boolean, mode: String): String = when {
+    offline -> "서버 연결 끊김 · 알림이 늦어져요"
+    !forwardOk -> "AI 응대 준비 안 됨(착신 설정 필요)"
+    mode == "ment" -> "안내 멘트로 응대 중"
+    mode == "off" -> "응대 꺼짐"
+    else -> "AI가 대신 받는 중"
 }
 
 /** F6 데모 일정 1건(서버 /car/schedule). start = epoch ms. */

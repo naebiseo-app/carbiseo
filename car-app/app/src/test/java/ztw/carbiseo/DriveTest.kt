@@ -56,9 +56,55 @@ class DriveTest {
         val loc = LatLng(37.25, 127.0)
         assertEquals("B", nearestRestStop(loc, LatLng(36.5, 127.0), stops)!!.name) // 남쪽으로 가는 중: A는 뒤
         assertEquals("A", nearestRestStop(loc, LatLng(37.6, 127.0), stops)!!.name) // 북쪽으로 가는 중
-        assertEquals("B", nearestRestStop(LatLng(37.21, 127.0), null, stops)!!.name) // 목적지 없음: 그냥 최근접
-        assertEquals("C", nearestRestStop(LatLng(36.9, 127.0), LatLng(36.8, 127.0), stops)!!.name) // 앞쪽에 없으면 전체 최근접
         assertEquals(null, nearestRestStop(null, null, stops))
+    }
+
+    // H11: 지나온 휴게소로 유턴시키지 않는다. 앞쪽이 없거나 40km 밖이거나 방향을 모르면 null(내비 검색 화면).
+    @Test fun 휴게소_앞쪽에_없으면_null() {
+        val stops = listOf(RestStop("A", LatLng(37.30, 127.0)), RestStop("C", LatLng(37.00, 127.0)))
+        assertEquals(null, nearestRestStop(LatLng(36.9, 127.0), LatLng(36.0, 127.0), stops))     // 둘 다 지나옴
+        assertEquals(null, nearestRestStop(LatLng(37.5, 127.0), LatLng(36.0, 127.0), listOf(stops[1]))) // 앞쪽이지만 55km
+        assertEquals(null, nearestRestStop(LatLng(37.21, 127.0), null, stops))                   // 목적지 없음 = 방향 모름
+        assertEquals(null, nearestRestStop(LatLng(36.35, 127.38), LatLng(35.18, 129.08)))        // 대전 → 부산: 데모 4곳 모두 뒤
+    }
+
+    @Test fun 짧은_P는_같은_운전() {
+        assertTrue(newDrive(null))
+        assertFalse(newDrive(30_000))
+        assertFalse(newDrive(SHORT_PARK_MS - 1))
+        assertTrue(newDrive(SHORT_PARK_MS))
+    }
+
+    @Test fun 방_선언은_하루에_방이_바뀔때만() {
+        val d = DayRoom()
+        assertTrue(d.shouldSay(1, Room.DRIVE_WORK))
+        assertFalse(d.shouldSay(1, Room.DRIVE_WORK))   // 같은 날 다시 업무 운전
+        assertTrue(d.shouldSay(1, Room.DRIVE_REST))    // 퇴근길로 바뀜
+        assertTrue(d.shouldSay(2, Room.DRIVE_REST))    // 다음 날
+    }
+
+    // H12: SDK가 누적값(300분)을 줘도 시동 직후엔 0분. 줄면 기준 재설정, 24시간 초과 차이는 버림.
+    @Test fun 트립시간은_운전시작_기준_차이만() {
+        val t = TripDelta()
+        assertEquals(null, t.of(null))
+        assertEquals(0, t.of(300))
+        assertEquals(125, t.of(425))
+        assertFalse(fatigued(Room.DRIVE_WORK, TripDelta().of(300)))
+        assertEquals(0, t.of(5))        // 차가 트립을 초기화
+        assertEquals(10, t.of(15))
+        t.reset(); assertEquals(0, t.of(900))
+        assertEquals(null, t.of(900 + 24 * 60 + 1))
+    }
+
+    @Test fun 상태는_정직하게() {
+        assertEquals("서버 연결 끊김 · 알림이 늦어져요", readiness(true, true, "ai"))
+        assertEquals("AI 응대 준비 안 됨(착신 설정 필요)", readiness(false, false, "ai"))
+        assertEquals("AI가 대신 받는 중", readiness(false, true, "ai"))
+        assertEquals("안내 멘트로 응대 중", readiness(false, true, "ment"))
+    }
+
+    @Test fun 휴식_문장은_누르라고_하지_않는다() {
+        assertFalse(REST_SPEECH.contains("누르"))
     }
 
     @Test fun 다음_일정은_지금_이후_가장_이른_것() {

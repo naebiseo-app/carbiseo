@@ -2,6 +2,7 @@ package ztw.carbiseo
 
 import ai.pleos.playground.navi.constants.RouteOption
 import ai.pleos.playground.navi.constants.WaypointIndex
+import ai.pleos.playground.navi.data.NavigationScreenRequest
 import ai.pleos.playground.navi.data.RequestWaypointInfo
 import ai.pleos.playground.navi.data.RouteInfo
 import android.app.Notification
@@ -24,6 +25,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.time.Clock
+import java.time.LocalDate
+import java.time.LocalDateTime
 import java.util.concurrent.Executors
 
 /** 방 판정 본체. 내비가 앞에 와도 Activity와 무관하게 돈다. 화면은 companion의 room/sig를 읽는다(같은 프로세스). */
@@ -44,8 +47,14 @@ class RoomService : Service() {
     private var forced: Alert? = null // 디버그 브로드캐스트로 강제한 값
     private var forcedTrip: Int? = null // 디버그: 트립 주행시간(분) 강제
 
-    /** 트립 주행시간(분): SDK 값, 없으면(에뮬은 3종 모두 ERROR_NOT_SUPPORTED_PROPERTY) 이번 운전을 앱이 잰 분. */
-    private fun tripMin(): Int? = forcedTrip ?: adapters.tripMin ?: driveStart?.let { ((System.currentTimeMillis() - it) / 60_000).toInt() }
+    /** 트립 주행시간(분): SDK 값(이번 운전 시작 때 값과의 차이, H12), 없으면(에뮬은 3종 모두 ERROR_NOT_SUPPORTED_PROPERTY) 이번 운전을 앱이 잰 분. */
+    private fun tripMin(): Int? = forcedTrip ?: trip.of(adapters.tripMin) ?: driveStart?.let { ((clock.millis() - it) / 60_000).toInt() }
+    private val trip = TripDelta()
+    private var parkedAt: Long? = null // 이번 P 시작(시뮬 시각). null = 주행 중이거나 서비스 시작 후 아직 P 아님
+    private val declared = DayRoom()
+    private fun today() = LocalDate.now(clock).toEpochDay()
+    private val prefs by lazy { getSharedPreferences("car_ui", MODE_PRIVATE) } // 첫 로드는 onCreate의 net 스레드에서
+    private var briefDay = -1L // '어제 넘긴 건' 문장을 말한 날
     private val homeOnce = Once()
     private val restOnce = Once()
     private val fatigueOnce = Once()
@@ -66,6 +75,7 @@ class RoomService : Service() {
                     if (r != null && cur != null && cur != okState) { Log.i("ROOM", "state resync $cur (server had $okState)"); sendState(cur.first, ++stateGen, false) }
                 }
                 Server.fetchSchedule()?.let { r -> ui.post { schedule = r } }
+                if (!forwardOk || serviceNumber.isEmpty()) Server.fetchConfig()?.let { (n, fw) -> ui.post { serviceNumber = n; if (fw) markForwarded() } }
             }
             ui.postDelayed(this, 15_000)
         }
@@ -76,6 +86,12 @@ class RoomService : Service() {
         val initial = firstPoll; firstPoll = false
         since = nextSince(since, fresh)
         if (fresh.isEmpty()) return
+        if (fresh.any { it.kind == "ring" }) markForwarded() // 실제 착신 통화가 서버에 왔다 = 착신 설정 완료
+        val off = machine.room == Room.DRIVE_REST || offDuty(LocalDateTime.now(clock), machine.settings)
+        deferNew(fresh, initial, off, today(), machine.settings).takeIf { it.isNotEmpty() }?.let { d ->
+            deferred = deferred + d; Log.i("ROOM", "deferred +${d.keys}")
+            val s = encodeDeferred(deferred); net.execute { prefs.edit().putString("deferred", s).apply() }
+        }
         inbox = (fresh.filter { it.kind in SHOWN_KINDS } + inbox).sortedByDescending { it.id }.take(50)
         Log.i("ROOM", "inbox ${if (initial) "initial" else "new"} ${fresh.size}")
         // 피로 모드면 음성 없이 보관만(카드는 쌓인다)
@@ -118,8 +134,10 @@ class RoomService : Service() {
             // 정수 분이라 != 가 곧 "1분 이상 변화". 방 판정 전이면 첫 방 변경이 같이 올린다.
             val e = adapters.etaMin
             if (e != sentEta) machine.room?.let { sentEta = e; sendState(it.name, ++stateGen, true) }
-            if (restOnce.fire(restDue(driveStart, System.currentTimeMillis(), restMin))) { restOffer = true; say(REST_SPEECH) }
-            if (fatigueOnce.fire(fatigued(machine.room, tripMin()))) say(FATIGUE_SPEECH) // 안전 안내라 동승자 모드에서도
+            // 짧은 P 동안은 driveStart가 남아 있으니 주행 중일 때만 센다(M4). 휴식·피로가 같은 순간이면 한 문장만(H10).
+            val restNow = restOnce.fire(restDue(driveStart.takeIf { machine.room != Room.PARK }, clock.millis(), restMin))
+            if (restNow) { restOffer = true; say(REST_SPEECH) }
+            if (fatigueOnce.fire(fatigued(machine.room, tripMin())) && !restNow) say(FATIGUE_SPEECH) // 안전 안내라 동승자 모드에서도
             seat.update(adapters.passengerSeat)?.let { passengerOffer = it && !passenger }
             if (passenger) passengerOffer = false
             adapters.telltale.let { t -> if (t != lastTell) { lastTell = t; telltale = t; if (t != null && machine.room != Room.PARK) say(TELLTALE_SPEECH) } }
@@ -139,19 +157,32 @@ class RoomService : Service() {
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(1, n)
         net.execute { // 첫 SharedPreferences 로드는 디스크 읽기 → 메인 밖에서
             val p = getSharedPreferences("car_ui", MODE_PRIVATE)
-            val r = p.getInt("rest_min", REST_DEFAULT_MIN).takeIf { m -> m != 1 } ?: REST_DEFAULT_MIN; val ps = p.getBoolean("passenger", false)
-            ui.post { restMin = r; passenger = ps }
+            val r = p.getInt("rest_min", REST_DEFAULT_MIN).takeIf { m -> m != 1 } ?: REST_DEFAULT_MIN
+            // H9: 동승자 모드는 저장하지 않는다(이번 운전만). M5·H7: 본 카드·넘긴 건은 재시작해도 유지.
+            val sn = p.getString("seen", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
+            val df = decodeDeferred(p.getString("deferred", "")); val fw = p.getBoolean("forward_ok", false)
+            val sd = p.getBoolean("setup_done", false); val md = p.getString("mode", "ai") ?: "ai"; val bd = p.getLong("brief_day", -1)
+            ui.post { restMin = r; seen = sn + seen; deferred = df + deferred; forwardOk = forwardOk || fw; setupDone = sd; mode = md; briefDay = bd }
         }
         latch = AlertLatch(Clock.systemDefaultZone())
-        machine = RoomStateMachine(Clock.systemDefaultZone()) // settings = 기본 상수. 설정 화면이 machine.settings를 덮어쓴다.
+        machine = RoomStateMachine(clock) // settings = 기본 상수. 설정 화면이 machine.settings를 덮어쓴다.
         machine.onChange = { from, to ->
-            Log.i("ROOM", "$from -> $to")
+            Log.i("ROOM", "$from -> $to at ${LocalDateTime.now(clock).withNano(0)}")
             room = to.name
-            if (to == Room.PARK) { homeOnce.reset(); restOnce.reset(); fatigueOnce.reset(); restOffer = false; driveStart = null; hold.clear() }
-            else if (driveStart == null) driveStart = System.currentTimeMillis()
+            val now = clock.millis()
+            if (to == Room.PARK) { parkedAt = now; restOffer = false; hold.clear() }
+            else {
+                val parked = parkedAt?.let { now - it }; parkedAt = null
+                // M4: 2분 미만 P는 같은 운전 — 휴식·피로·집 문턱 1회 안내와 운전 시작 시각을 유지
+                if (newDrive(parked)) { homeOnce.reset(); restOnce.reset(); fatigueOnce.reset(); trip.reset(); driveStart = now }
+                else Log.i("ROOM", "short park ${parked!! / 1000}s -> same drive")
+                // H9: 오래 세운 뒤의 출발이면 그 전에 켠 동승자 모드는 끈다
+                if (passenger && parked != null && parked >= PASSENGER_RESET_PARK_MS && passengerAt < now - parked) { togglePassenger(false); say("동승자 모드를 껐어요") }
+            }
             sentEta = adapters.etaMin
             sendState(to.name, ++stateGen, true)
-            if (!passenger) roomSpeech(to)?.let(::say)
+            if (!passenger) roomSpeech(to)?.takeIf { declared.shouldSay(today(), to) }?.let(::say)
+            if (to == Room.DRIVE_WORK && !passenger && briefDay != today()) briefCarryOver()
             getSystemService(NotificationManager::class.java).notify(1, notification(room))
         }
         adapters = CarAdapters(applicationContext, machine).also { it.start() }
@@ -160,6 +191,18 @@ class RoomService : Service() {
         ui.post(ticker)
         ui.post(poller)
         if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) registerDebugRoute()
+    }
+
+    /** H7: 오늘 첫 업무 운전에서 '어제 넘긴 전화 N건' 한 문장. 하루 1회. */
+    private fun briefCarryOver() {
+        val t = today()
+        val c = carryOver(inbox, deferred, seen, t)
+        carrySpeech(c, deferred, t)?.let { briefDay = t; net.execute { prefs.edit().putLong("brief_day", t).apply() }; say(it) }
+    }
+
+    private fun markForwarded() {
+        if (forwardOk) return
+        confirmForward(this); Log.i("ROOM", "forward ok")
     }
 
     private fun notification(r: String) = Notification.Builder(this, CH)
@@ -194,7 +237,24 @@ class RoomService : Service() {
         val tr = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { forcedTrip = i.getIntExtra("min", -1).takeIf { it >= 0 }; Log.i("ROOM", "debug trip force=$forcedTrip") }
         }
-        for ((rc, action) in listOf(wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP")) {
+        // adb shell am broadcast -a ztw.carbiseo.LOC --ef lat 37.41 --ef lng 127.09 (lat 0 = 해제, 내비 실제 위치로)
+        val loc = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                val p = LatLng(i.getFloatExtra("lat", 0f).toDouble(), i.getFloatExtra("lng", 0f).toDouble()).takeIf { it.lat != 0.0 }
+                adapters.forcedLocation = p; p?.let { machine.update { copy(location = it) } }
+                Log.i("ROOM", "debug loc force=$p")
+            }
+        }
+        // adb shell am broadcast -a ztw.carbiseo.TIME --es at 2026-11-02T08:30 (none = 실제 시각으로). 요일·시각 시뮬
+        val tm = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                val at = runCatching { LocalDateTime.parse(i.getStringExtra("at")) }.getOrNull()
+                clock.offsetMs = at?.let { it.atZone(clock.zone).toInstant().toEpochMilli() - System.currentTimeMillis() } ?: 0
+                machine.tick()
+                Log.i("ROOM", "debug time -> ${LocalDateTime.now(clock).withNano(0)} ${LocalDate.now(clock).dayOfWeek} room=${machine.room}")
+            }
+        }
+        for ((rc, action) in listOf(wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP", loc to "ztw.carbiseo.LOC", tm to "ztw.carbiseo.TIME")) {
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(rc, IntentFilter(action), Context.RECEIVER_EXPORTED) else registerReceiver(rc, IntentFilter(action))
             receivers += rc
         }
@@ -214,9 +274,14 @@ class RoomService : Service() {
     private fun addRestStop() {
         restOffer = false
         val s = machine.signals
-        val stop = nearestRestStop(s.location, s.destination) ?: return say("위치를 몰라 휴게소를 못 찾았어요")
-        Log.i("ROOM", "rest stop ${stop.name} dest=${s.destination}")
         val n = adapters.navi ?: return
+        val stop = nearestRestStop(s.location, s.destination)
+        if (stop == null) { // H11: 앞쪽 휴게소를 모르면 경유지를 넣지 않고 내비 장소 검색을 연다(지나온 곳으로 유턴 방지)
+            Log.i("ROOM", "rest stop none ahead -> navi search")
+            runCatching { n.requestNavigationScreen(NavigationScreenRequest.SearchPlace("휴게소")) }.onFailure { Log.w("ROOM", "navi search FAIL $it") }
+            return say("앞쪽 휴게소 정보가 없어서 내비에 휴게소 검색을 띄웠어요")
+        }
+        Log.i("ROOM", "rest stop ${stop.name} dest=${s.destination}")
         if (s.destination != null) n.addWaypoint(RequestWaypointInfo(stop.at.lat, stop.at.lng, stop.name, WaypointIndex.FIRST, "", "", "", ""))
         else route(stop.at, stop.name)
     }
@@ -257,7 +322,28 @@ class RoomService : Service() {
         private const val NAVI_PKG = "ai.umos.maps.android.navigation.app" // Pleos 내비 앱(26 실측)
         var restOffer by mutableStateOf(false); private set // S2: 화면에 휴게소 버튼
         var restMin by mutableIntStateOf(REST_DEFAULT_MIN) // 연속 주행 기준(분). 설정 화면이 바꾼다.
-        var passenger by mutableStateOf(false) // H3: 켜면 업무 TTS(부재중 낭독)·쉼 방 선언(H1)을 끈다. 휴식 제안(S2)은 안전이라 유지.
+        var passenger by mutableStateOf(false); private set // H3: 켜면 업무 TTS(부재중 낭독)·쉼 방 선언(H1)을 끈다. 휴식 제안(S2)은 안전이라 유지.
+        var passengerAt = 0L; private set
+        /** H9: 이번 운전만. 저장하지 않고, 30분 넘게 세운 뒤 출발하면 자동 해제. */
+        fun togglePassenger(on: Boolean) { passenger = on; passengerAt = clock.millis() }
+        val clock = ShiftClock() // 프로세스 공통 시각(디버그 TIME 브로드캐스트만 offset을 바꾼다)
+        var seen by mutableStateOf(setOf<Long>()); private set // M5: 주차 화면에서 연 카드 id. prefs 저장(최근 300)
+        var deferred by mutableStateOf(mapOf<Long, Long>()); private set // H7: 넘긴 통화 id -> 넘긴 날
+        var forwardOk by mutableStateOf(false); private set // H13: 착신 설정 완료(사용자 체크 또는 실제 착신 1회)
+        var serviceNumber by mutableStateOf(""); private set // 착신 받을 070(서버 환경값). 코드에 두지 않는다
+        var setupDone by mutableStateOf(true); private set // 첫 실행 안내를 닫았는지(로드 전엔 숨김)
+        var mode by mutableStateOf("ai") // 응대 모드(설정 화면이 바꾼다)
+        private fun save(c: Context, f: android.content.SharedPreferences.Editor.() -> Unit) =
+            Thread { c.getSharedPreferences("car_ui", MODE_PRIVATE).edit().apply(f).apply() }.start()
+        fun markSeen(c: Context, id: Long) {
+            if (id in seen) return
+            seen = seen + id
+            val s = seen.sorted().takeLast(300).joinToString(",")
+            save(c) { putString("seen", s) }
+        }
+        fun confirmForward(c: Context) { forwardOk = true; save(c) { putBoolean("forward_ok", true) } }
+        fun finishSetup(c: Context) { setupDone = true; save(c) { putBoolean("setup_done", true) } }
+        fun reopenSetup(c: Context) { setupDone = false; save(c) { putBoolean("setup_done", false) } }
         var room by mutableStateOf("(판정 전)"); private set
         var sig by mutableStateOf(""); private set
         var inbox by mutableStateOf(listOf<InboxItem>()); private set // id 내림차순

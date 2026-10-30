@@ -87,4 +87,41 @@ class InboxTest {
         val l = listOf(item(1), item(2), InboxItem(3, "", "", false, 0L, "", kind = "sent"), InboxItem(4, "", "", false, 0L, "", kind = "hint"))
         assertEquals(2, todo(l, setOf(1L)))
     }
+
+    // H7: 업무 외에 받은 통화 = 넘긴 건 → 다음 날 첫 업무 운전에 한 문장 + P 화면 묶음
+    private val utc = ZoneOffset.UTC
+    private fun at(day: Int, h: Int) = (java.time.LocalDate.of(2026, 11, day).atTime(h, 0).toEpochSecond(utc)) * 1000
+    private fun call(id: Long, t: Long, room: String = "") = InboxItem(id, "김", "용건", false, t, "", room = room)
+    private val mon = java.time.LocalDate.of(2026, 11, 2).toEpochDay()
+
+    @Test fun 퇴근길_업무외에_받은_통화만_넘긴다() {
+        val l = listOf(call(1, 0), InboxItem(2, "", "", false, 0L, "", kind = "hint"))
+        assertEquals(mapOf(1L to mon), deferNew(l, false, true, mon, RoomSettings(), utc))
+        assertEquals(emptyMap<Long, Long>(), deferNew(l, false, false, mon, RoomSettings(), utc)) // 업무 중 받은 건 넘기지 않음
+    }
+
+    @Test fun 재시작_첫_폴링은_받은_시각과_서버방으로_어제오늘만() {
+        val l = listOf(call(1, at(2, 19)), call(2, at(2, 10)), call(3, at(2, 10), room = "DRIVE_REST"), call(4, at(1, 20)), call(5, at(3, 2)))
+        // 월 19시(업무 외), 월 10시(업무), 월 10시인데 서버 방이 쉼, 일요일 20시(이틀 전 → 제외), 화 02시(오늘)
+        assertEquals(mapOf(1L to mon, 3L to mon, 5L to mon + 1), deferNew(l, true, false, mon + 1, RoomSettings(), utc))
+    }
+
+    @Test fun 넘긴_건은_다음날부터_안_본_것만() {
+        val items = listOf(call(1, 0), call(2, 0), call(3, 0))
+        val d = mapOf(1L to mon, 2L to mon, 3L to mon + 1)
+        assertEquals(listOf(1L, 2L), carryOver(items, d, emptySet(), mon + 1).map { it.id })
+        assertEquals(listOf(2L), carryOver(items, d, setOf(1L), mon + 1).map { it.id })
+        assertEquals(emptyList<Long>(), carryOver(items, d, emptySet(), mon).map { it.id })  // 당일 저녁엔 아직 '어제 넘긴 건' 아님
+        assertEquals("어제 넘긴 전화 2건 있어요. 차 세우면 보여 드릴게요.", carrySpeech(carryOver(items, d, emptySet(), mon + 1), d, mon + 1))
+        assertEquals("지난번에 넘긴 전화 3건 있어요. 차 세우면 보여 드릴게요.", carrySpeech(carryOver(items, d, emptySet(), mon + 3), d, mon + 3)) // 주말 넘김
+        assertNull(carrySpeech(emptyList(), d, mon + 1))
+    }
+
+    @Test fun 넘긴_건_저장_형식() {
+        val m = mapOf(3L to 20000L, 1L to 20001L)
+        assertEquals(m, decodeDeferred(encodeDeferred(m)))
+        assertEquals(emptyMap<Long, Long>(), decodeDeferred(null))
+        assertEquals(mapOf(1L to 2L), decodeDeferred("1:2,x:y,3"))
+        assertEquals(300, decodeDeferred(encodeDeferred((1L..400L).associateWith { 1L })).size)
+    }
 }
