@@ -12,6 +12,22 @@
 - AI 비서는 첫 마디에 "○○님의 AI 비서 △△입니다. 통화 내용은 요약해서 전해 드립니다"라고 밝힌다(이름은 사용자 설정).
 - 약속 확정·금액·위치는 말하지 않는다.
 
+### 방 밖의 기능
+| 기능 | 언제 | 쓰는 SDK |
+|---|---|---|
+| 다음 일정 출발 | 정차 화면 일정 카드의 "출발" → 그 장소로 경로 | NaviHelper `requestRoute` |
+| 휴식 제안 | 연속 운전이 설정값(1·60·120분) 이상이면 음성 1회 + "가까운 휴게소 들르기" 버튼 → 앞쪽 휴게소를 첫 경유지로 | NaviHelper `addWaypoint`, TextToSpeech |
+| 집 문턱 | 퇴근길·목적지 집·도착 5분 전 "오늘 일은 여기까지예요" 1회 | NaviHelper `remainTime`, TextToSpeech |
+| 오늘 안전 요약 | 정차 화면 "오늘 AI가 대신 받은 전화 N통" | — |
+| 동승자 모드 | 켜면 부재중 낭독·집 문턱 음성을 끔(휴식 제안은 유지) | — |
+
+- 휴게소 좌표는 시연용 경부선 4곳 목록이다(NaviHelper에 장소 검색이 없음).
+- 부팅 직후 내비를 한 번도 열지 않았으면 첫 경로 요청이 무시될 수 있다. 앱은 4초 뒤 1회 다시 요청하고, 그래도 안 되면 음성으로 알린다. 시연 전에 내비를 한 번 열어 두면 확실하다.
+
+## 개인정보 보관
+- 음성은 서버에 저장하지 않는다. 통화 서비스가 보낸 원문 기록은 7일 뒤 비우고, 요약 카드는 30일 뒤 삭제한다(`server` 예약 작업, 매일 03시).
+- 데모 관리 페이지(`/admin`)는 비밀번호로 막혀 있고, 가짜 수신·데모 일정만 넣는다.
+
 ## 구성
 ```
 car-app/   Android(Kotlin, Compose) Pleos Connect 앱 — 방 판정(RoomStateMachine), 포그라운드 서비스, 서버 연동, 음성 알림
@@ -43,7 +59,7 @@ cd car-app
 | 앱 | minSdk 28 / targetSdk 34, applicationId `ztw.carbiseo` |
 | Pleos SDK | Vehicle 2.3.2, NaviHelper 3.0.5, TextToSpeech 3.3.1 |
 | 권한 | CAR_DRIVE, NAVI_ROUTE, NAVI_ROUTE_SEARCH, POST_NOTIFICATIONS, INTERNET |
-| 단위 테스트 | `car-app` 방 판정·부재중 알림 로직, `server` 대본 선택(`npm test`) |
+| 단위 테스트 | `car-app` 48개(방 판정·부재중·주행 기능), `server` 9개(대본·서명·데모·보관 정책, `npm test`) |
 
 ## APK 위치
 `apk/<팀명>_<앱이름>_release.apk` (release 빌드)
