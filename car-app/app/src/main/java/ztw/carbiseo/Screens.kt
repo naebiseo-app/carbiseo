@@ -205,6 +205,9 @@ private fun Park(onImage: Boolean, onSettings: () -> Unit) {
         val today = java.time.LocalDate.now(RoomService.clock).toEpochDay()
         val carry = carryOver(items, RoomService.deferred, RoomService.seen, today)
         val rest = items.filter { it !in carry }
+        // M6: 저녁·주말 P(집 차고 등)는 급한 것만 펼치고 업무 카드는 접는다. 1탭으로 펼침
+        var showAll by rememberSaveable { mutableStateOf(false) }
+        val shown = if (offDuty(java.time.LocalDateTime.now(RoomService.clock), RoomSettings()) && !showAll) rest.filter { it.urgent } else rest
         val tap = { i: InboxItem -> sel = if (sel == i.id) null else i.id; RoomService.markSeen(ctx, i.id) }
         LazyColumn(Modifier.weight(1f).padding(top = 16.dp), list, verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
             if (carry.isNotEmpty()) item(key = "carry") {
@@ -212,8 +215,11 @@ private fun Park(onImage: Boolean, onSettings: () -> Unit) {
                 Text("${if (y) "어제" else "지난번"} 넘긴 건 ${carry.size}", color = ink, fontSize = 22.sp, fontWeight = FontWeight.Black)
             }
             items(carry, key = { it.id }) { i -> Note(i, i.id == sel) { tap(i) } }
-            if (carry.isNotEmpty() && rest.isNotEmpty()) item(key = "new") { Text("그 밖의 것", color = ink, fontSize = 22.sp, fontWeight = FontWeight.Black) }
-            items(rest, key = { it.id }) { i -> Note(i, i.id == sel) { tap(i) } }
+            if (carry.isNotEmpty() && shown.isNotEmpty()) item(key = "new") { Text("그 밖의 것", color = ink, fontSize = 22.sp, fontWeight = FontWeight.Black) }
+            items(shown, key = { it.id }) { i -> Note(i, i.id == sel) { tap(i) } }
+            if (shown.size < rest.size) item(key = "more") {
+                TextButton({ showAll = true }, Tall) { Text("업무 ${rest.size - shown.size}건은 다음 평일 아침에 봐도 돼요 · 지금 보기", color = ink, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+            }
         }
         items.firstOrNull { it.id == sel && it.kind in setOf("call", "task") }?.let { Sheet(it) { sel = null } }
     }
