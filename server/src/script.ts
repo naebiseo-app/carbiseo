@@ -28,10 +28,16 @@ export function parseRoom(v: unknown): Room | null {
 }
 
 // 첫 마디: 누구의 AI 비서인지 밝힌다(AI임을 숨기지 않음). 이름은 사용자가 정한다.
-export function greeting(owner: string, name?: string): string {
-  const who = name ? `${owner}님의 AI 비서 ${name}입니다` : `${owner}님의 AI 비서입니다`;
-  return `전화가 연결되면 첫 마디로 정확히 '안녕하세요, ${who}. 통화 내용은 요약해서 ${owner}님께 전해 드립니다.'라고 말합니다.`;
+// 호칭을 안 정했으면 '주인님' 대신 호칭 없는 인사(거래처·가족이 '주인님'을 듣지 않게).
+export function greeting(owner?: string, name?: string): string {
+  const ai = name ? `AI 비서 ${name}입니다` : "AI 비서입니다";
+  return owner
+    ? `전화가 연결되면 첫 마디로 정확히 '안녕하세요, ${owner}님의 ${ai}. 통화 내용은 요약해서 ${owner}님께 전해 드립니다.'라고 말합니다.`
+    : `전화가 연결되면 첫 마디로 정확히 '안녕하세요, 이 번호로 대신 전화 받는 ${ai}. 통화 내용은 요약해서 전해 드립니다.'라고 말합니다.`;
 }
+
+// 호칭 없으면 '{owner}님은/의/이 '를 지워 주어 없는 문장으로.
+const fillOwner = (s: string, owner?: string) => (owner ? s.replaceAll("{owner}", owner) : s.replace(/\{owner\}님(은|의|이)? ?/g, ""));
 
 // 주행 방 + 도착 예정(분)이 있으면 방 안내를 이것으로 바꾼다. 쉼 방은 '업무 마침·내일 연락'을 유지한다.
 const ETA_BY_ROOM: Record<"DRIVE_WORK" | "DRIVE_REST", string> = {
@@ -55,12 +61,12 @@ const BY_MODE = {
 };
 
 // 방 상태가 없으면 가장 보수적인 DRIVE_WORK 대본. nextAt = 다음 일정 시각(ms), DRIVE_WORK에만 한 줄.
-export function pickScript(room: Room | null, owner = "주인", name?: string, eta?: number | null, mode: Mode = "ai", nextAt?: number | null, cc: Partial<CarCtx> | null = null): { room: Room; instruction: string } {
+export function pickScript(room: Room | null, owner?: string, name?: string, eta?: number | null, mode: Mode = "ai", nextAt?: number | null, cc: Partial<CarCtx> | null = null): { room: Room; instruction: string } {
   const r = room ?? "DRIVE_WORK";
   if (mode !== "ai") return { room: r, instruction: BY_MODE[mode] };
   const byRoom = r !== "PARK" && eta != null ? ETA_BY_ROOM[r].replace("{eta}", String(eta)) : BY_ROOM[r];
   const next = r === "DRIVE_WORK" && nextAt != null ? ` 다음 일정 ${hhmm(nextAt)} 이후 연락 가능.` : "";
-  return { room: r, instruction: `${greeting(owner, name)} ${COMMON} ${byRoom}${next}${ctxLine(cc, r)}`.replaceAll("{owner}", owner) };
+  return { room: r, instruction: fillOwner(`${greeting(owner, name)} ${COMMON} ${byRoom}${next}${ctxLine(cc, r)}`, owner) };
 }
 
 // KST HH:mm
