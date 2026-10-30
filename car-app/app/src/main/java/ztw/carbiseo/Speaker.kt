@@ -25,7 +25,7 @@ class Speaker(private val ctx: Context) {
             val events = object : EventListener {
                 override fun onStart() {}
                 override fun onReady() {}
-                override fun onDone() {}
+                override fun onDone() { Log.i("ROOM", "TTS pleos done"); afterSpeech() }
                 override fun onStop() {}
                 override fun onUpdatedRms(rms: Double) {}
                 override fun onError(e: ErrorType) = useFallback("pleos onError $e", replay = true)
@@ -33,7 +33,7 @@ class Speaker(private val ctx: Context) {
             t.initialize(object : OnInitializeListener {
                 override fun onSuccess() {
                     runCatching {
-                        t.setLocale(Locale.KOREAN); t.addEventListener(events)
+                        t.setLocale(Locale.KOREA); t.addEventListener(events) // ko_KR(엔진은 "ko"만이면 거절, STT 실측과 같은 원인 추정)
                         ready = true; Log.i("ROOM", "TTS pleos ready (on-device)")
                     }.onFailure { useFallback("pleos setup $it", replay = false) }
                 }
@@ -42,7 +42,16 @@ class Speaker(private val ctx: Context) {
         }.onFailure { useFallback("pleos start $it", replay = false) }
     }
 
-    fun speak(text: String) {
+    private val ui = android.os.Handler(android.os.Looper.getMainLooper())
+    private var then: (() -> Unit)? = null
+    private var gen = 0 // 옛 문장의 어림 타이머가 새 문장의 then을 부르지 않게
+    /** 다 읽은 뒤 한 번(음성 응답 듣기 시작). */
+    private fun afterSpeech() = ui.post { then?.let { then = null; it() } }
+
+    /** then: 다 읽은 뒤 할 일. 엔진 완료 콜백이 안 오면 글자 수로 어림한 시간 뒤. */
+    fun speak(text: String, then: (() -> Unit)? = null) {
+        this.then = then; val g = ++gen
+        if (then != null) ui.postDelayed({ if (g == gen) afterSpeech() }, 1500L + text.length * 200L) // ponytail: 어림값, 콜백이 늘 오면 지워도 됨
         lastText = text
         Log.i("ROOM", "TTS speak: $text")
         if (ready) runCatching { pleos?.speak(text, false) }.onFailure { useFallback("pleos speak $it", replay = false) }
@@ -59,7 +68,13 @@ class Speaker(private val ctx: Context) {
         if (fallback == null) {
             fallback = android.speech.tts.TextToSpeech(ctx) { s ->
                 fallbackReady = s == android.speech.tts.TextToSpeech.SUCCESS
-                if (fallbackReady) { fallback?.language = Locale.KOREAN; fallback?.speak(text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, "inbox") }
+                if (fallbackReady) {
+                    fallback?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                        override fun onStart(id: String?) {}
+                        override fun onDone(id: String?) { afterSpeech() }
+                        @Deprecated("") override fun onError(id: String?) { afterSpeech() }
+                    })
+                    fallback?.language = Locale.KOREAN; fallback?.speak(text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, "inbox") }
                 else Log.w("ROOM", "TTS fallback: android TTS init $s")
             }
         } else if (fallbackReady) fallback?.speak(text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, "inbox")

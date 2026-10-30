@@ -25,8 +25,8 @@ class MainActivity : ComponentActivity() {
         // 디버그 빌드만: 메인 스레드 디스크·네트워크 등 차단 호출을 logcat(StrictMode)에 남긴다
         if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) StrictMode.setThreadPolicy(StrictMode.ThreadPolicy.Builder().detectAll().penaltyLog().build())
         super.onCreate(savedInstanceState)
-        // CAR_SPEED는 AAOS에서 런타임 권한. 거부되면 속도만 null(제한속도·카메라·주의구간은 그대로 동작).
-        requestPermissions(arrayOf("android.car.permission.CAR_SPEED") + if (Build.VERSION.SDK_INT >= 33) arrayOf("android.permission.POST_NOTIFICATIONS") else emptyArray(), 0)
+        // CAR_SPEED는 AAOS에서 런타임 권한. 거부되면 속도만 null(제한속도·카메라·주의구간은 그대로 동작). RECORD_AUDIO 거부면 알림 대답은 화면 버튼(P·저속).
+        requestPermissions(arrayOf("android.car.permission.CAR_SPEED", "android.permission.RECORD_AUDIO") + if (Build.VERSION.SDK_INT >= 33) arrayOf("android.permission.POST_NOTIFICATIONS") else emptyArray(), 0)
         startForegroundService(Intent(this, RoomService::class.java))
         setContent { App() }
     }

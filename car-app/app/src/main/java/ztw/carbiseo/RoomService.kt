@@ -66,6 +66,12 @@ class RoomService : Service() {
     private var lastTell: String? = null
     private var ctxSent = ""; private var ctxAt = 0L // 차량 맥락: 바뀌면 올리되 10초에 한 번까지
     private var driveStart: Long? = null // 이번 운전 시작(PARK에서 나온 시각). 정차 중 null.
+    // 폰 알림(35): 알릴 대기열(미루기 조건이 풀리면 묶어서), 이번 실행에 새로 온 것, 이미 알린 것
+    private lateinit var voice: Voice
+    private val talk = NotifTalk()
+    private val notifQueue = mutableListOf<InboxItem>()
+    private val notifFresh = mutableSetOf<Long>()
+    private val notifSaid = mutableSetOf<Long>()
 
     private val poller = object : Runnable {
         override fun run() {
@@ -99,7 +105,28 @@ class RoomService : Service() {
         Log.i("ROOM", "inbox ${if (initial) "initial" else "new"} ${fresh.size}")
         // 피로 모드면 음성 없이 보관만(카드는 쌓인다)
         if (!initial && !passenger && !fatigued(machine.room, tripMin())) hold.offerItems(fresh, machine.room, quiet)?.let { speaker.speak(it) }
+        if (!initial) fresh.filter { it.kind == "notif" }.let { n -> notifFresh += n.map { it.id }; notifQueue += notifNow(n.sortedBy { it.id }, machine.room, favs) } // 도착 순(서버는 최신순)
     }
+
+    /** 알림 묶음 제안 "카톡 3건, ○○님 외 2명. 읽어드릴까요?" → 대답 듣기. */
+    private fun offerNotifs(list: List<InboxItem>) {
+        notifSaid += list.map { it.id }
+        talk.offer(list, favs)?.let(::runTurn)
+    }
+
+    private fun runTurn(t: Turn) {
+        t.send?.let { (id, text) -> net.execute { val ok = Server.reply(id, text); Log.i("ROOM", "reply $id -> ${if (ok) "ok" else "FAIL"}"); if (!ok) ui.post { speaker.speak("답장을 못 보냈어요. 잠시 뒤 다시 해 주세요.") } } }
+        t.say?.let { speaker.speak(it, if (t.listen) ::listenNow else null) }
+        askStep = talk.step
+    }
+
+    /** 음성 인식이 없고(path none) 주행 중이면 대답을 못 받으니 '나중에'(카드로 보관). */
+    private fun listenNow() {
+        if (voice.path == "none") { if (!touchOk()) runTurn(talk.hear("나중에", favs)); return }
+        listening = true; voice.listen()
+    }
+
+    private fun touchOk() = machine.room == Room.PARK || (adapters.speedKmh ?: 0f) < 10f
 
     /** 과속·주의 경고 중이면 보류했다가 경고가 풀리면 읽는다. */
     private fun say(text: String) { hold.offer(text, quiet)?.let { speaker.speak(it) } }
@@ -135,7 +162,12 @@ class RoomService : Service() {
             val inCall = audio.mode == AudioManager.MODE_IN_CALL || audio.mode == AudioManager.MODE_IN_COMMUNICATION
             val q = a != Alert.NONE || busyManeuver(adapters.turnOn, machine.signals.gear, adapters.steerDeg) || inCall
             if (q != quiet) { quiet = q; Log.i("ROOM", "quiet $q"); hold.release(q, machine.room)?.let { speaker.speak(it) } }
-            if (passenger) hold.clear() // 동승자 모드면 보류분도 버린다
+            if (passenger) { hold.clear(); notifQueue.clear() } // 동승자 모드면 보류분도 버린다
+            // 폰 알림: 미루기 조건(경고·깜빡이·후진·큰 조향·통화·피로)이 다 풀리고 대화 중이 아니면 쌓인 것을 묶어서 한 번
+            if (!q && talk.step == NotifTalk.Step.NONE && notifQueue.isNotEmpty() && machine.room.let { it != null && it != Room.PARK } && !passenger && !fatigued(machine.room, tripMin())) {
+                offerNotifs(notifQueue.toList()); notifQueue.clear()
+            }
+            askTouch = touchOk(); voicePath = voice.path
             // 정수 분이라 != 가 곧 "1분 이상 변화". 방 판정 전이면 첫 방 변경이 같이 올린다.
             val e = adapters.etaMin
             if (e != sentEta) machine.room?.let { sentEta = e; sendState(it.name, ++stateGen, true) }
@@ -168,6 +200,7 @@ class RoomService : Service() {
             // H9: 동승자 모드는 저장하지 않는다(이번 운전만). M5·H7: 본 카드·넘긴 건은 재시작해도 유지.
             val sn = p.getString("seen", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
             val df = decodeDeferred(p.getString("deferred", "")); val fw = p.getBoolean("forward_ok", false)
+            val fv = p.getString("fav_senders", "").orEmpty(); ui.post { favs = parseFavs(fv) }
             val sd = p.getBoolean("setup_done", false); val md = p.getString("mode", "ai") ?: "ai"; val bd = p.getLong("brief_day", -1)
             ui.post { restMin = r; seen = sn + seen; deferred = df + deferred; forwardOk = forwardOk || fw; setupDone = sd; mode = md; briefDay = bd }
         }
@@ -177,7 +210,13 @@ class RoomService : Service() {
             Log.i("ROOM", "$from -> $to at ${LocalDateTime.now(clock).withNano(0)}")
             room = to.name
             val now = clock.millis()
-            if (to == Room.PARK) { parkedAt = now; restOffer = false; hold.clear(); parkRemind.reset() }
+            if (to == Room.PARK) {
+                parkedAt = now; restOffer = false; hold.clear(); parkRemind.reset()
+                // 정차 요약: 이번 실행에 와서 아직 안 알리고 안 본 알림(쉼 방 비즐겨찾기·피로·동승자 등으로 미룬 것)
+                notifQueue.clear(); talk.cancel(); listening = false
+                val left = inbox.filter { it.id in notifFresh && it.id !in notifSaid && it.id !in seen && !isAd(it) }.sortedBy { it.id }
+                if (left.isNotEmpty() && !passenger) offerNotifs(left)
+            }
             else {
                 val parked = parkedAt?.let { now - it }; parkedAt = null
                 // M4: 2분 미만 P는 같은 운전 — 휴식·피로·집 문턱 1회 안내와 운전 시작 시각을 유지
@@ -196,6 +235,8 @@ class RoomService : Service() {
         addHomeFavorite = { runCatching { adapters.navi?.requestNavigationScreen(NavigationScreenRequest.AddHomeFavorite) }.onFailure { Log.w("ROOM", "add home FAIL $it") } }
         adapters.onNaviReady = { pendingRoute?.let { pendingRoute = null; Log.i("ROOM", "navi ready -> route"); it() } }
         speaker = Speaker(applicationContext).also { it.start() }
+        voice = Voice(applicationContext) { heard -> listening = false; runTurn(talk.hear(heard, favs)) }.also { it.start() }
+        answer = { voice.inject(it) }
         ui.post(ticker)
         ui.post(poller)
         if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) registerDebugRoute()
@@ -263,7 +304,15 @@ class RoomService : Service() {
                 Log.i("ROOM", "debug time -> ${LocalDateTime.now(clock).withNano(0)} ${LocalDate.now(clock).dayOfWeek} room=${machine.room}")
             }
         }
-        for ((rc, action) in listOf(wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP", loc to "ztw.carbiseo.LOC", tm to "ztw.carbiseo.TIME")) {
+        // adb shell am broadcast -a ztw.carbiseo.SAY --es t "읽어줘" (음성 인식 결과 대신 넣기)
+        val say = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) { Log.i("ROOM", "debug say"); voice.inject(i.getStringExtra("t").orEmpty()) }
+        }
+        // adb shell am broadcast -a ztw.carbiseo.HEAR (앱 files/hear.pcm을 다음 듣기 때 STT 엔진에 넣기, run-as로 복사, 실측용)
+        val hear = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) { runCatching { java.io.File(filesDir, "hear.pcm").readBytes() }.onSuccess { Log.i("ROOM", "debug hear ${it.size}B"); voice.armed = it } }
+        }
+        for ((rc, action) in listOf(hear to "ztw.carbiseo.HEAR", say to "ztw.carbiseo.SAY", wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP", loc to "ztw.carbiseo.LOC", tm to "ztw.carbiseo.TIME")) {
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(rc, IntentFilter(action), Context.RECEIVER_EXPORTED) else registerReceiver(rc, IntentFilter(action))
             receivers += rc
         }
@@ -320,7 +369,7 @@ class RoomService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        ui.removeCallbacks(ticker); ui.removeCallbacks(poller); net.shutdown(); speaker.stop(); adapters.stop(); receivers.forEach { unregisterReceiver(it) }; super.onDestroy()
+        ui.removeCallbacks(ticker); ui.removeCallbacks(poller); net.shutdown(); speaker.stop(); voice.stop(); adapters.stop(); receivers.forEach { unregisterReceiver(it) }; super.onDestroy()
     }
 
     companion object {
@@ -363,5 +412,12 @@ class RoomService : Service() {
         var telltale by mutableStateOf<String?>(null); private set // C⑦ 빨간 경고등
         var homeSrc by mutableStateOf("기본값(내비 즐겨찾기 없음)") // C① 집 좌표 출처(설정 화면 표시)
         var addHomeFavorite: (() -> Unit)? = null // C① 설정 화면 버튼 → 내비 '집 즐겨찾기 추가' 화면
+        // 폰 알림(35): 쉼 방에도 바로 알릴 발신자(설정, 기본 빈 목록), 대답 대기 단계·듣는 중·화면 버튼 허용(P·저속)·음성 경로
+        var favs by mutableStateOf(setOf<String>())
+        var askStep by mutableStateOf(NotifTalk.Step.NONE); private set
+        var listening by mutableStateOf(false); private set
+        var askTouch by mutableStateOf(true); private set
+        var voicePath by mutableStateOf("none"); private set
+        var answer: ((String) -> Unit)? = null // 화면 버튼 → 음성 대답과 같은 처리
     }
 }

@@ -86,6 +86,7 @@ private fun toast(c: Context, s: String) = Toast.makeText(c, s, Toast.LENGTH_SHO
 private fun label(i: InboxItem) = when (i.kind) {
     "task" -> "할 일"
     "sent" -> "보낸 문자 · ${i.fromLabel}"
+    "notif" -> "${i.app} · ${i.fromLabel}"
     else -> i.fromLabel.ifBlank { "모르는 번호" }
 }
 
@@ -116,7 +117,25 @@ fun App() {
         if (p.value < 1f) Text(roomName(room), Modifier.align(Alignment.BottomEnd).padding(24.dp),
             color = accent(room), fontSize = 44.sp, fontWeight = FontWeight.Black)
         AlertFrame(RoomService.alert)
+        AskBar(Modifier.align(Alignment.BottomCenter))
     }
+    }
+}
+
+/** 폰 알림 대답 대기 중: '듣는 중' 한 줄 + 큰 버튼(P·저속에서만, 주행 중엔 음성만). */
+@Composable
+private fun AskBar(m: Modifier) {
+    val step = RoomService.askStep
+    if (step == NotifTalk.Step.NONE) return
+    val opts = when (step) { NotifTalk.Step.OFFER -> listOf("읽어줘", "나중에"); NotifTalk.Step.CONFIRM -> listOf("보내", "취소"); else -> listOf("나중에") }
+    Column(m.fillMaxWidth().background(SheetBg).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(if (RoomService.listening) "듣고 있어요 · ${opts.joinToString(" / ") { "‘$it’" }}${if (step == NotifTalk.Step.AFTER_READ) " / ‘답장, ○○라고 해 줘’" else ""}"
+            else "폰 알림 · 대답을 기다려요", color = SheetInk, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        if (RoomService.askTouch) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            for (o in opts) Button({ RoomService.answer?.invoke(o) }, Modifier.weight(1f).heightIn(min = 96.dp), colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
+                Text(o, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black)
+            }
+        }
     }
 }
 
@@ -477,6 +496,10 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
         }
         Text("집 위치: ${RoomService.homeSrc}", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         OutlinedButton({ RoomService.addHomeFavorite?.invoke() }, Tall) { Text("내비 즐겨찾기에 집 추가", color = ParkInk, fontSize = 18.sp) }
+        var favText by rememberSaveable { mutableStateOf(RoomService.favs.joinToString(", ")) }
+        OutlinedTextField(favText, { favText = it.take(100); RoomService.favs = parseFavs(favText); prefs.edit().putString("fav_senders", favText).apply() },
+            Modifier.fillMaxWidth(), singleLine = true, label = { Text("업무 시간 밖에도 바로 읽을 알림 보낸이", fontSize = 18.sp) },
+            supportingText = { Text("쉼표로 구분(예: 엄마, 아빠). 나머지는 차를 세우면 묶어서 알려 드려요") }, textStyle = TextStyle(color = ParkInk, fontSize = 22.sp))
         Text("전화 응대", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         ModeButtons()
         OutlinedButton({ RoomService.reopenSetup(ctx); onClose() }, Tall) { Text("처음 설정(착신·방해 금지) 다시 보기", color = ParkInk, fontSize = 18.sp) }
