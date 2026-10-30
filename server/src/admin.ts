@@ -75,7 +75,15 @@ export function replayCards(s: DemoEvent[], nowMs: number) {
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
-export function adminPage(msg = ""): string {
+export type ReplyRow = { from_label: string; summary: string; status: string };
+
+// B안 '보낼 답장': queued = 아직 폰이 안 가져감, delivered = 연결 앱이 가져감
+export function repliesHtml(rows: ReplyRow[]): string {
+  if (!rows.length) return "<p>아직 없습니다.</p>";
+  return "<ul>" + rows.map((r) => `<li>${esc(r.from_label)}님께 “${esc(r.summary)}” · ${r.status === "queued" ? "보낼 답장" : "폰에 전달"}</li>`).join("") + "</ul>";
+}
+
+export function adminPage(msg = "", replies: ReplyRow[] = []): string {
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>내비서 데모</title>
 <style>body{font:18px sans-serif;max-width:560px;margin:24px auto;padding:0 16px;background:#F3EEE4;color:#2B2620}
@@ -87,6 +95,13 @@ form{background:#FFFDF8;padding:16px;border-radius:14px;margin:16px 0}.m{font-we
 <input name="summary" placeholder="용건 (120자 이내)" maxlength="120" required>
 <label><input type="checkbox" name="urgent" style="width:auto"> 급함</label>
 <button>넣기</button></form>
+<form method="post" action="/admin/fake-notif"><h2>시험 알림 보내기</h2><p>폰에 메시지 알림이 온 것처럼 차에 넣습니다(보낸이는 가상 이름).</p>
+<input name="app" placeholder="앱 (예: 카카오톡, 문자)" maxlength="30" value="카카오톡" required>
+<input name="sender" placeholder="보낸이 (예: 김부장, 엄마)" maxlength="30" required>
+<input name="text" placeholder="내용 (500자 이내)" maxlength="500" required>
+<label><input type="checkbox" name="replyable" value="1" checked style="width:auto"> 답장 가능</label>
+<button>알림 보내기</button></form>
+<form><h2>보낼 답장</h2><p>차에서 음성으로 만든 답장입니다.</p>${repliesHtml(replies)}</form>
 <form method="post" action="/admin/reset-schedule"><h2>데모 일정 초기화</h2><p>오늘 일정 3건(지금부터 1·3·5시간 뒤)으로 덮어씁니다.</p><button>초기화</button></form>
 <form method="post" action="/admin/owner-as-guest"><h2>녹화용: 주인 번호를 손님으로</h2><p>켜면 주인 번호로 건 전화도 일반 발신자처럼 AI가 응대합니다. 녹화 뒤 꼭 끄세요.</p><button name="on" value="1">켜기</button><button name="on" value="0">끄기</button></form>
 <form method="post" action="/admin/reset-inbox"><h2>부재중 카드 비우기</h2><p>녹화 전에 inbox를 모두 지웁니다.</p><button>비우기</button></form>

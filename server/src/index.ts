@@ -1,5 +1,6 @@
 import { carChip, callerNumber, cleanName, freshCtx, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, sameNumber, type Mode, type Recent } from "./script.ts";
-import { adminPage, basicOk, demoSchedule, parseFakeCall, REPLAY_SAID, replayCards } from "./admin.ts";
+import { adminPage, basicOk, demoSchedule, parseFakeCall, REPLAY_SAID, replayCards, type ReplyRow } from "./admin.ts";
+import { parseNotify, parseReply, TAKE_REPLIES_SQL, type Notif } from "./notif.ts";
 
 interface Env {
   DB: D1Database;
@@ -110,6 +111,13 @@ export function transcriptTarget(raw: string) {
 // 미래 행보다 id가 큰 행을 먼저 주면 차가 since를 넘겨 버려 미래 행(재현 hint)을 영영 못 받는다.
 export const INBOX_SQL =
   "SELECT * FROM inbox WHERE id>?1 AND id < COALESCE((SELECT MIN(id) FROM inbox WHERE id>?1 AND created_at>?2), 9e18) ORDER BY id DESC LIMIT 50";
+
+// 폰 알림 1건 → inbox kind='notif'. 방은 받을 때의 차 방(카드 칩·판단 참고용)
+async function saveNotif(db: D1Database, n: Notif) {
+  const room = parseRoom((await kvGet(db, "car_context"))?.room) ?? null;
+  return db.prepare("INSERT INTO inbox(kind,status,room,from_label,summary,created_at,meta) VALUES('notif','new',?,?,?,?,?)")
+    .bind(room, n.sender, n.text, now(), JSON.stringify({ app: n.app, replyable: n.replyable, key: n.key })).run();
+}
 
 const DAY = 86_400_000;
 export const retention = (t: number): [string, number][] => [
@@ -238,6 +246,37 @@ export default {
       return json(r, r.ok ? 200 : 502);
     }
 
+    // 폰 연결 앱(A안)이 받은 메시지 알림. 차와 같은 토큰
+    if (m === "POST" && pathname === "/phone/notify") {
+      if (!authed) return json({ error: "unauthorized" }, 401);
+      const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+      const n = parseNotify((k) => b[k]);
+      if (!n) return json({ error: "app·sender·text required" }, 400);
+      const r = await saveNotif(env.DB, n);
+      return json({ ok: true, id: r.meta.last_row_id });
+    }
+
+    // 차 음성 답장(되읽고 '보내' 확인된 것만) → 답장 대기열 kind='reply'
+    if (m === "POST" && pathname === "/car/reply") {
+      if (!authed) return json({ error: "unauthorized" }, 401);
+      const p = parseReply((await req.json().catch(() => ({}))) as Record<string, unknown>);
+      if ("error" in p) return json({ error: p.error }, 400);
+      const n = await env.DB.prepare("SELECT from_label,meta FROM inbox WHERE id=? AND kind='notif'").bind(p.id).first<{ from_label: string; meta: string }>();
+      if (!n) return json({ error: "notif not found" }, 404);
+      const meta = JSON.parse(n.meta ?? "{}");
+      if (!meta.replyable) return json({ error: "not replyable" }, 400);
+      await env.DB.prepare("INSERT INTO inbox(kind,status,from_label,summary,created_at,meta) VALUES('reply','queued',?,?,?,?)")
+        .bind(n.from_label, p.text, now(), JSON.stringify({ notif_id: p.id, app: meta.app, key: meta.key ?? "" })).run();
+      return json({ ok: true });
+    }
+
+    // 폰 연결 앱이 보낼 답장을 가져간다(가져간 것은 delivered)
+    if (m === "GET" && pathname === "/phone/replies") {
+      if (!authed) return json({ error: "unauthorized" }, 401);
+      const { results } = await env.DB.prepare(TAKE_REPLIES_SQL).all<{ id: number; from_label: string; summary: string; meta: string }>();
+      return json({ items: results.map((r) => { const mt = JSON.parse(r.meta ?? "{}"); return { id: r.id, sender: r.from_label, text: r.summary, app: mt.app ?? "", key: mt.key ?? "" }; }) });
+    }
+
     // H13: 첫 실행 안내용. 착신 받을 서비스 번호(환경값, 코드에 두지 않음)와 실제 착신 통화(ring)를 받은 적 있는지.
     if (m === "GET" && pathname === "/car/config") {
       if (!authed) return json({ error: "unauthorized" }, 401);
@@ -254,7 +293,11 @@ export default {
     if (pathname === "/admin" || pathname.startsWith("/admin/")) {
       if (!basicOk(req.headers.get("authorization"), env.ADMIN_TOKEN))
         return new Response("unauthorized", { status: 401, headers: { "www-authenticate": 'Basic realm="carbiseo-admin", charset="UTF-8"' } });
-      const html = (msg: string, status = 200) => new Response(adminPage(msg), { status, headers: { "content-type": "text/html; charset=utf-8" } });
+      // B안: 차가 만든 답장(최근 10건)을 '보낼 답장'으로 보여 준다
+      const html = async (msg: string, status = 200) => {
+        const { results } = await env.DB.prepare("SELECT from_label,summary,status FROM inbox WHERE kind='reply' ORDER BY id DESC LIMIT 10").all<ReplyRow>();
+        return new Response(adminPage(msg, results), { status, headers: { "content-type": "text/html; charset=utf-8" } });
+      };
       if (m === "GET" && pathname === "/admin") return html("");
       if (m === "POST" && pathname === "/admin/fake-call") {
         const c = parseFakeCall(await req.formData());
@@ -263,6 +306,13 @@ export default {
         await env.DB.prepare("INSERT INTO inbox(kind,status,room,from_label,summary,urgent,created_at,raw,meta) VALUES('call','demo',?,?,?,?,?,?,?)")
           .bind(cc?.room ?? null, c.from_label, c.summary, c.urgent, now(), JSON.stringify(c), JSON.stringify({ demo: true, car: carChip(cc, now()) })).run();
         return html(`넣었습니다: ${c.from_label} / ${c.summary}`);
+      }
+      if (m === "POST" && pathname === "/admin/fake-notif") {
+        const f = await req.formData();
+        const n = parseNotify((k) => f.get(k));
+        if (!n) return html("입력 확인: 앱·보낸이·내용을 채워 주세요", 400);
+        await saveNotif(env.DB, n);
+        return html(`알림을 넣었습니다: ${n.app} · ${n.sender}`);
       }
       if (m === "POST" && pathname === "/admin/reset-schedule") {
         const s = demoSchedule(now());
