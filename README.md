@@ -8,6 +8,7 @@
 | 운전 중 업무 전화가 오면 받자니 위험하고, 안 받자니 상대가 기다린다 | 운전 중 못 받은 전화는 AI 비서가 대신 받아 "운전 중이라 정차 후 연락드리겠습니다"처럼 방에 맞게 응대하고 요약 카드로 남긴다 |
 | 통신사 AI 비서는 내가 운전 중인지, 퇴근길인지 모른다 | 차 앱이 기어·목적지·도착 예정·운전 시간을 서버에 올리고, 통화 직전 서버가 그 상태로 응대 대본을 고른다 |
 | 운전 중 화면을 들여다보면 위험하다 | 주행 중엔 상태 한 줄과 음성 한 줄만. 카드 확인·문자 답장은 기어 P일 때만 |
+| 운전 중 폰 메시지 알림을 볼 수 없다 | 차가 방·운전 상황으로 **언제·무엇을 읽을지** 정해 "카톡 3건, 김부장님 외 2명. 읽어드릴까요?"로 묻고, "읽어줘"·"답장, ○○라고 해 줘"·"나중에"로 답한다 |
 | 퇴근 뒤에도 업무가 따라온다 | 퇴근길엔 급한 전화만 알리고 나머지는 다음 평일 첫 업무 운전에 "어제 넘긴 전화 N건"으로 묶어 알린다 |
 
 AI 비서는 첫 마디에 AI임을 밝히고, 약속 확정·금액·운전자 위치는 말하지 않는다(서버 대본에 고정).
@@ -59,11 +60,12 @@ flowchart LR
 | NaviHelper `addWaypoint(RequestWaypointInfo)` | 휴식 제안 버튼 → 앞쪽 휴게소를 첫 경유지로 | `RoomService.kt` |
 | NaviHelper `requestNavigationScreen(SearchPlace / AddHomeFavorite)` | 앞쪽 휴게소를 모를 때 내비 검색, 설정의 "내비 즐겨찾기에 집 추가" | `RoomService.kt` |
 | NaviHelper `onCurrentRoadSpeedLimit` / `onCameraAlert` / `onCautionPointInfo` | 과속·주의 경고 테두리, 경고 중 음성 보류 | `CarAdapters.kt`, `Alert.kt` |
-| TextToSpeech `Mode.ON_DEVICE` `speak` | 방 전환 안내, 부재중 한 줄 낭독, 휴식·집 문턱 안내 (실패 시 Android TTS로 대체) | `Speaker.kt` |
+| TextToSpeech `Mode.ON_DEVICE` `speak` | 방 전환 안내, 부재중 한 줄 낭독, 휴식·집 문턱 안내, 폰 알림 묶음·낭독 (실패 시 Android TTS로 대체) | `Speaker.kt` |
+| SpeechToText `Mode.ON_DEVICE` `request` / `ResultListener` (ko_KR) | 폰 알림 음성 대답("읽어줘"·"답장 …라고 해 줘"·"응"·"나중에"), 안 되면 Android 인식 → P·저속 큰 버튼 | `Voice.kt`, `Notif.kt` |
 | AAOS `CarUxRestrictionsManager` (리플렉션) | 주행 화면 제한(DO) 여부 → 방 판정 보조 | `CarAdapters.kt` |
 | AAOS `CarPropertyManager` `PERF_VEHICLE_SPEED` | 속도(Pleos Vehicle SDK에 없음) → 과속 판정 | `CarAdapters.kt` |
 
-의존성: `ai.pleos.playground:Vehicle:2.3.2`, `NaviHelper:3.0.5`, `TextToSpeech:3.3.1`. 차량은 읽기만 하고 제어하지 않는다.
+의존성: `ai.pleos.playground:Vehicle:2.3.2`, `NaviHelper:3.0.5`, `TextToSpeech:3.3.1`, `SpeechToText:3.3.1`. 차량은 읽기만 하고 제어하지 않는다.
 
 ## 방 판정 규칙
 `RoomStateMachine.kt`(순수 Kotlin, 단위 테스트 대상).
@@ -83,6 +85,8 @@ flowchart LR
 | 업무 운전 | 상태 한 줄 | 음성 한 줄 | "운전 중이라 정차 후 연락드리겠습니다"(도착 예정이 있으면 "약 N분 뒤 도착 예정") |
 | 업무 시간 밖 | 상태 한 줄 | 급한 전화만 음성 | "오늘 업무는 마치셨습니다. (다음 평일 오전)에 연락드리도록 전해 드리겠습니다" |
 
+폰 알림: 업무 운전 = 광고((광고) 표기·이름에 '광고') 외 전부 묻기, 업무 시간 밖 = 설정의 즐겨찾기 보낸이만, 나머지는 세울 때 묶어서. 깜빡이·후진·큰 조향·경고·블루투스 통화·피로(2시간) 중이면 미뤘다가 풀리면 한 번에. 알림은 `phone-app/`(안드로이드 '내비서 연결', 알림 접근 권한)이 서버로 넘기고 답장도 그 알림의 답장 버튼으로 보낸다. 시연용으로 관리 페이지 '시험 알림 보내기'가 같은 경로에 넣는다.
+
 ## 실행 방법
 ### 1. 에뮬레이터
 - Pleos Connect SDK Emulator(Android API 34 Pleos 이미지)를 실행한다.
@@ -101,7 +105,15 @@ cd car-app
 - 저장소 루트 `.env`의 `CAR_TOKEN`이 BuildConfig로 들어간다(`.env.example` 참고). 없으면 서버 연동 없이 빌드된다.
 - release 서명은 저장소 밖 `../현대차공모전_keys/keystore.properties`(storeFile·storePassword·keyAlias·keyPassword)를 읽는다. 없으면 서명 없이 빌드된다.
 - minify(R8)는 끈다. Pleos SDK가 kotlin-reflect로 클래스 메타데이터를 읽기 때문이다.
-- 디버그 빌드에만 시연용 브로드캐스트(`ztw.carbiseo.ALERT·TRIP·LOC·TIME·ROUTE·WP`)가 등록된다. release에서는 등록되지 않는다(`FLAG_DEBUGGABLE` 검사).
+- 디버그 빌드에만 시연용 브로드캐스트(`ztw.carbiseo.ALERT·TRIP·LOC·TIME·ROUTE·WP·SAY·HEAR`)가 등록된다. release에서는 등록되지 않는다(`FLAG_DEBUGGABLE` 검사).
+
+### 2-1. 휴대폰 연결 앱 (phone-app, 안드로이드 폰)
+```
+cd phone-app
+./gradlew testDebugUnitTest assembleDebug --max-workers=2
+```
+- 차 앱과 같은 `.env`의 `CAR_TOKEN`이 BuildConfig로 들어간다. 설치 뒤 앱을 열면 '알림 접근 허용' 화면이 뜨고, '내비서 연결'을 켠다(adb: `cmd notification allow_listener ztw.carbiseo.phone/.Listener`).
+- 디버그 빌드에만 답장 버튼이 있는 시험 메시지: `adb shell am broadcast -n ztw.carbiseo.phone/.TestSender --es from 김부장 --es text "회의 자료 보냈어요"`.
 
 ### 3. 서버 (Cloudflare Workers + D1)
 ```
@@ -120,8 +132,9 @@ npm run deploy
 ## 테스트
 | 대상 | 명령 | 현재 |
 |---|---|---|
-| 차 앱 단위 테스트(방 판정·부재중·주행 기능·경고·도착 예정·배경) | `cd car-app && ./gradlew testDebugUnitTest --max-workers=2` | 77개 통과, 0 실패 |
-| 서버(대본·서명 검증·관리자·보관 정책·요약·주인 통화·재현·중계·스위치) | `cd server && npm test` | 41개 통과, 0 실패 |
+| 차 앱 단위 테스트(방 판정·부재중·주행 기능·경고·도착 예정·배경·폰 알림) | `cd car-app && ./gradlew testDebugUnitTest --max-workers=2` | 84개 통과, 0 실패 |
+| 서버(대본·서명 검증·관리자·보관 정책·요약·주인 통화·재현·중계·스위치·폰 알림) | `cd server && npm test` | 44개 통과, 0 실패 |
+| 휴대폰 연결 앱(메시지 알림 거르기) | `cd phone-app && ./gradlew testDebugUnitTest --max-workers=2` | 3개 통과, 0 실패 |
 
 ## 개인정보
 - 음성은 우리 서버에 저장하지 않는다. 통화 엔진이 보낸 원문 기록은 7일 뒤 비우고, 요약 카드는 30일 뒤 삭제한다.
@@ -130,13 +143,14 @@ npm run deploy
 ## APK
 `apk/내비서_내비서_release.apk` (release 빌드, minSdk 28 / targetSdk 34, applicationId `ztw.carbiseo`)
 
-권한: `CAR_DRIVE`, `CAR_LIGHTS`, `CAR_SEATS`, `CAR_ENERGY`, `CAR_SAFETY`, `NAVI_ROUTE`, `NAVI_ROUTE_SEARCH`, `NAVI_CUSTOM_MAP`, `TTS_SERVICE`, `CAR_SPEED`, 포그라운드 서비스, 알림, 부팅 완료, 인터넷.
+권한: `STT_SERVICE`, `RECORD_AUDIO`, `CAR_DRIVE`, `CAR_LIGHTS`, `CAR_SEATS`, `CAR_ENERGY`, `CAR_SAFETY`, `NAVI_ROUTE`, `NAVI_ROUTE_SEARCH`, `NAVI_CUSTOM_MAP`, `TTS_SERVICE`, `CAR_SPEED`, 포그라운드 서비스, 알림, 부팅 완료, 인터넷.
 
 ## 알려진 제약
 - **주행 중 화면 가림**: 에뮬레이터는 기어 D에서 앱 화면을 가린다(주행 제한). 그래서 휴식 제안 버튼은 주행 중 음성 안내까지만 확인했고, 버튼 탭은 에뮬에서 직접 누르지 못했다.
 - **트립 주행시간 미지원**: 에뮬에서 `getTrip*DrivingTime` 3종이 모두 `ERROR_NOT_SUPPORTED_PROPERTY`. 앱이 잰 연속 운전 시간으로 대신하고, 실차에서 SDK 값이 오면 그것을 우선 쓴다(단위는 실차에서 확정).
 - **경고등**: `getTelltalesInfo`는 `PRIVATE_CAR_SAFETY` 권한이 필요해 에뮬에서 SecurityException. 조회 코드만 있고 실패하면 멈춘다.
-- **음성 인식 없음**: Pleos SpeechToText·서버 TTS는 콘솔에서 '준비 중'이라 쓰지 않는다. "응/아니" 확인은 화면 버튼, TTS는 기기 안(ON_DEVICE) 모드.
+- **음성 인식**: SpeechToText는 기기 안(ON_DEVICE) 모드만 쓴다(서버 모드는 콘솔 '준비 중'). 로캘을 `ko`로 주면 엔진이 거절해 `ko_KR`(Locale.KOREA)로 준다(TTS도 같이 바꿔 에뮬 엔진 오류가 사라짐). 에뮬에서는 녹음된 음성 파일을 넣어 "읽어줘" 인식을 확인했지만 결과가 불안정했고, 실제 마이크 음성은 확인하지 못했다. 대화 흐름은 인식 결과를 디버그로 넣어(`SAY`) 확인했다.
+- **폰 알림**: 아이폰은 다른 앱 알림을 읽을 수 없어(애플 정책) 안드로이드 폰만. 메시지 답장은 그 알림이 폰에 떠 있어야 보낼 수 있다.
 - **휴게소 목록**: NaviHelper에 장소 검색 API가 없어 경부선 휴게소 4곳 데모 좌표를 앱에 둔다.
 - **충전 중 판정**: SDK에 충전 중 읽기 API가 없어 기어 P로만 판단한다.
 - **동승자 감지**: 에뮬의 조수석 착석 값이 반대로 오는 것으로 보여, 자동 전환 대신 확인 버튼 1번을 거친다.
