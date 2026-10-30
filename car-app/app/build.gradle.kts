@@ -3,6 +3,9 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 val envLines = file("../../.env").takeIf { it.exists() }?.readLines().orEmpty()
 fun env(k: String) = envLines.firstOrNull { it.startsWith("$k=") }?.substringAfter("=")?.trim()?.trim { it.code == 34 || it.code == 39 } ?: ""
 val carToken = env("CAR_TOKEN")
+// release 서명: 저장소 밖 현대차공모전_keys/keystore.properties. 없으면 서명 없이 빌드된다.
+val keyDir = file("../../../현대차공모전_keys")
+val keyProps = File(keyDir, "keystore.properties").takeIf { it.exists() }?.readLines().orEmpty().filter { "=" in it }.associate { it.substringBefore("=").trim() to it.substringAfter("=").trim() }
 android {
     namespace = "ztw.carbiseo"
     compileSdk = 34
@@ -11,6 +14,12 @@ android {
         buildConfigField("String", "SERVER_URL", "\"https://carbiseo-api.wondi81.workers.dev\"")
         buildConfigField("String", "CAR_TOKEN", "\"$carToken\"")
     }
+    if (keyProps.isNotEmpty()) signingConfigs.create("release") {
+        storeFile = File(keyDir, keyProps.getValue("storeFile"))
+        storePassword = keyProps["storePassword"]; keyAlias = keyProps["keyAlias"]; keyPassword = keyProps["keyPassword"]
+    }
+    // minify 끔: Pleos SDK가 kotlin-reflect로 클래스 메타데이터를 읽어서 R8이 깨뜨릴 수 있다.
+    buildTypes { release { isMinifyEnabled = false; signingConfigs.findByName("release")?.let { signingConfig = it } } }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true; buildConfig = true }
