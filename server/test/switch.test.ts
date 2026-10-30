@@ -1,0 +1,51 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import worker from "../src/index.ts";
+
+// 최소 D1 흉내: kv 표만 기억하고 실행한 SQL을 남긴다.
+function fakeDB() {
+  const kv: Record<string, string> = {};
+  const log: string[] = [];
+  return {
+    kv, log,
+    prepare(sql: string) {
+      let args: unknown[] = [];
+      const st = {
+        bind(...a: unknown[]) { args = a; return st; },
+        async run() {
+          log.push(sql);
+          const k = sql.match(/VALUES\('(\w+)',\?/)?.[1];
+          if (k) kv[k] = args[0] as string;
+          return { meta: { changes: sql.startsWith("DELETE FROM inbox") ? 3 : 1 } };
+        },
+        async first() { const v = sql.includes("key=?") ? kv[args[0] as string] : undefined; return v == null ? null : { value: v }; },
+        async all() { return { results: [] }; },
+      };
+      return st;
+    },
+  };
+}
+
+const OWNER = "01011112222"; // 가상 번호
+const mkEnv = () => ({ DB: fakeDB(), CAR_TOKEN: "t", CALL_CONTEXT_SECRET: "cc", ADMIN_TOKEN: "adm", OWNER_NUMBER: OWNER }) as any;
+const admin = (env: any, path: string, form: Record<string, string> = {}, pw = "adm") =>
+  worker.fetch(new Request("https://x" + path, { method: "POST", headers: { authorization: "Basic " + btoa("a:" + pw) }, body: new URLSearchParams(form) }), env);
+const ring = async (env: any) =>
+  ((await (await worker.fetch(new Request("https://x/clawops/call-context/cc", { method: "POST", body: `From=${OWNER}` }), env)).json()) as any).CallContext;
+
+test("녹화 스위치: 기본 꺼짐 → 주인 대본, 켜면 손님 대본, 끄면 다시 주인", async () => {
+  const env = mkEnv();
+  assert.equal((await ring(env)).Variables.owner_mode, "1");
+  assert.equal((await admin(env, "/admin/owner-as-guest", { on: "1" })).status, 200);
+  const c = await ring(env);
+  assert.equal(c.Variables.owner_mode, undefined);
+  assert.doesNotMatch(c.Instruction, /본인/);
+  await admin(env, "/admin/owner-as-guest", { on: "0" });
+  assert.equal((await ring(env)).Variables.owner_mode, "1");
+});
+
+test("관리자 인증: 비밀번호 틀리면 스위치 401", async () => {
+  const env = mkEnv();
+  assert.equal((await admin(env, "/admin/owner-as-guest", { on: "1" }, "no")).status, 401);
+  assert.equal(env.DB.kv.owner_as_guest, undefined);
+});

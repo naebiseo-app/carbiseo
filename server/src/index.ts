@@ -172,9 +172,10 @@ export default {
       let mode: Mode = "ai";
       let schedule = null;
       let cc: Record<string, any> | null = null; // car_context: 방·ETA·차량 맥락
-      const isOwner = sameNumber(callerNumber(raw), env.OWNER_NUMBER);
+      let isOwner = sameNumber(callerNumber(raw), env.OWNER_NUMBER);
       let recent: Recent[] = [];
       try {
+        if (isOwner && (await kvGet(env.DB, "owner_as_guest"))) isOwner = false; // 녹화용 스위치: 주인 번호도 손님 대본으로
         cc = freshCtx(await env.DB.prepare("SELECT value,updated_at FROM kv WHERE key='car_context'").first<{ value: string; updated_at: number }>(), now());
         room = parseRoom(cc?.room);
         eta = parseEta(cc?.eta_min);
@@ -209,7 +210,7 @@ export default {
         console.log("transcript request", callId, r.status); // 202 접수, 409 이미 요청됨
       }
       const card = sig === "ok" ? summaryCard(raw) : null;
-      if (card && sameNumber(new URLSearchParams(raw).get("From") ?? "", env.OWNER_NUMBER)) {
+      if (card && sameNumber(new URLSearchParams(raw).get("From") ?? "", env.OWNER_NUMBER) && !(await kvGet(env.DB, "owner_as_guest"))) {
         // 주인 모드 통화 → 할 일 카드(문자 초안 등). 재전송 대비 1장만
         const cc = await kvGet(env.DB, "car_context");
         await env.DB.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,summary,created_at) SELECT 'task','open',?,?,'주인',?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='task' AND call_id=?)")
@@ -265,6 +266,12 @@ export default {
         const s = demoSchedule(now());
         await env.DB.prepare("INSERT OR REPLACE INTO kv(key,value,updated_at) VALUES('schedule',?,?)").bind(JSON.stringify(s), now()).run();
         return html(`일정 ${s.length}건으로 초기화했습니다`);
+      }
+      // 녹화용: 주인 번호로 건 전화도 일반 발신자처럼 AI 응대(기본 꺼짐)
+      if (m === "POST" && pathname === "/admin/owner-as-guest") {
+        const on = String((await req.formData()).get("on")) === "1";
+        await env.DB.prepare("INSERT OR REPLACE INTO kv(key,value,updated_at) VALUES('owner_as_guest',?,?)").bind(JSON.stringify(on), now()).run();
+        return html(on ? "주인 번호를 손님으로 취급합니다(켜짐)" : "주인 번호는 주인 모드입니다(꺼짐)");
       }
       if (m === "POST" && pathname === "/admin/replay") {
         const t = now();
