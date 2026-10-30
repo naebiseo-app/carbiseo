@@ -55,4 +55,20 @@ class DriveTest {
         assertEquals(null, nextEvent(list, 300)) // 시작한 일정은 제외
         assertEquals(null, nextEvent(emptyList(), 0))
     }
+
+    @Test fun 조작중이면_조용히() {
+        assertTrue(busyManeuver(true, Gear.DRIVE, 0f))
+        assertTrue(busyManeuver(false, Gear.REVERSE, null))
+        assertTrue(busyManeuver(false, Gear.DRIVE, -90f))
+        assertFalse(busyManeuver(false, Gear.DRIVE, 89.9f))
+        assertFalse(busyManeuver(false, Gear.DRIVE, null))
+    }
+
+    @Test fun 피로모드는_주행중_120분부터() {
+        assertFalse(fatigued(Room.DRIVE_WORK, 119))
+        assertTrue(fatigued(Room.DRIVE_WORK, 120))
+        assertTrue(fatigued(Room.DRIVE_REST, 300))
+        assertFalse(fatigued(Room.PARK, 300))
+        assertFalse(fatigued(Room.DRIVE_WORK, null))
+    }
 }

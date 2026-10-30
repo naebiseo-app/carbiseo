@@ -42,8 +42,17 @@ class RoomService : Service() {
     private lateinit var latch: AlertLatch
     private val hold = SpeechHold()
     private var forced: Alert? = null // 디버그 브로드캐스트로 강제한 값
+    private var forcedTrip: Int? = null // 디버그: 트립 주행시간(분) 강제
+
+    /** 트립 주행시간(분): SDK 값, 없으면(에뮬은 3종 모두 ERROR_NOT_SUPPORTED_PROPERTY) 이번 운전을 앱이 잰 분. */
+    private fun tripMin(): Int? = forcedTrip ?: adapters.tripMin ?: driveStart?.let { ((System.currentTimeMillis() - it) / 60_000).toInt() }
     private val homeOnce = Once()
     private val restOnce = Once()
+    private val fatigueOnce = Once()
+    private var quiet = false            // 경고·깜빡이·후진·큰 조향 중
+    private var lastSeat: Boolean? = null
+    private var lastTell: String? = null
+    private var ctxSent = ""; private var ctxAt = 0L // 차량 맥락: 바뀌면 올리되 10초에 한 번까지
     private var driveStart: Long? = null // 이번 운전 시작(PARK에서 나온 시각). 정차 중 null.
 
     private val poller = object : Runnable {
@@ -69,15 +78,27 @@ class RoomService : Service() {
         if (fresh.isEmpty()) return
         inbox = (fresh.filter { it.kind in SHOWN_KINDS } + inbox).sortedByDescending { it.id }.take(50)
         Log.i("ROOM", "inbox ${if (initial) "initial" else "new"} ${fresh.size}")
-        if (!initial && !passenger) hold.offerItems(fresh, machine.room, alert)?.let { speaker.speak(it) }
+        // 피로 모드면 음성 없이 보관만(카드는 쌓인다)
+        if (!initial && !passenger && !fatigued(machine.room, tripMin())) hold.offerItems(fresh, machine.room, quiet)?.let { speaker.speak(it) }
     }
 
     /** 과속·주의 경고 중이면 보류했다가 경고가 풀리면 읽는다. */
-    private fun say(text: String) { hold.offer(text, alert)?.let { speaker.speak(it) } }
+    private fun say(text: String) { hold.offer(text, quiet)?.let { speaker.speak(it) } }
 
-    private fun sendState(r: String, gen: Int, retry: Boolean, eta: Int? = sentEta): Unit = net.execute {
-        val ok = Server.postState(r, eta)
-        Log.i("ROOM", "state $r eta=$eta -> ${if (ok) "ok" else "FAIL"}")
+    /** 서버 대본 변수·카드 칩용 SDK 값. */
+    private fun carCtx(): Map<String, Any?> = mapOf(
+        "gear" to gearCode(machine.signals.gear), "trip_min" to tripMin(), "soc" to adapters.soc,
+        "turn" to adapters.turnOn, "passenger" to (passenger || adapters.passengerSeat == true), "telltale" to adapters.telltale,
+    )
+
+    private fun sendState(r: String, gen: Int, retry: Boolean, eta: Int? = sentEta) {
+        val ctx = carCtx(); ctxSent = ctx.toString(); ctxAt = System.currentTimeMillis()
+        net.execute { postState(r, gen, retry, eta, ctx) }
+    }
+
+    private fun postState(r: String, gen: Int, retry: Boolean, eta: Int?, ctx: Map<String, Any?>) {
+        val ok = Server.postState(r, eta, ctx)
+        Log.i("ROOM", "state $r eta=$eta ctx=$ctx -> ${if (ok) "ok" else "FAIL"}")
         if (ok) ui.post { okState = r to eta }
         // ponytail: 1회 재시도 후 포기(다음 방 변경이 어차피 다시 보냄)
         if (!ok && retry) ui.postDelayed({ if (gen == stateGen) sendState(r, gen, false, eta) }, 30_000)
@@ -90,12 +111,19 @@ class RoomService : Service() {
             if (t != sig) Log.i("ROOM", "signals $t") // 입력 신호가 바뀔 때만
             sig = t
             val a = latch.update(adapters.speedKmh, adapters.limitKmh, adapters.cameraOverspeed, adapters.cautionZone).let { forced ?: it }
-            if (a != alert) { alert = a; Log.i("ROOM", "alert $a"); hold.release(a, machine.room)?.let { speaker.speak(it) } }
+            if (a != alert) { alert = a; Log.i("ROOM", "alert $a") }
+            val q = a != Alert.NONE || busyManeuver(adapters.turnOn, machine.signals.gear, adapters.steerDeg)
+            if (q != quiet) { quiet = q; Log.i("ROOM", "quiet $q"); hold.release(q, machine.room)?.let { speaker.speak(it) } }
             if (passenger) hold.clear() // 동승자 모드면 보류분도 버린다
             // 정수 분이라 != 가 곧 "1분 이상 변화". 방 판정 전이면 첫 방 변경이 같이 올린다.
             val e = adapters.etaMin
             if (e != sentEta) machine.room?.let { sentEta = e; sendState(it.name, ++stateGen, true) }
             if (restOnce.fire(restDue(driveStart, System.currentTimeMillis(), restMin))) { restOffer = true; say(REST_SPEECH) }
+            if (fatigueOnce.fire(fatigued(machine.room, tripMin()))) say(FATIGUE_SPEECH) // 안전 안내라 동승자 모드에서도
+            adapters.passengerSeat.let { s -> if (s != lastSeat) { lastSeat = s; passengerOffer = s == true && !passenger } }
+            if (passenger) passengerOffer = false
+            adapters.telltale.let { t -> if (t != lastTell) { lastTell = t; telltale = t; if (t != null && machine.room != Room.PARK) say(TELLTALE_SPEECH) } }
+            if (carCtx().toString() != ctxSent && System.currentTimeMillis() - ctxAt >= 10_000) machine.room?.let { sendState(it.name, ++stateGen, false) }
             if (homeOnce.fire(homeSoon(machine.room, machine.signals.destination, machine.settings, e)) && !passenger) say(HOME_SOON_SPEECH)
             ui.postDelayed(this, 200)
         }
@@ -113,7 +141,7 @@ class RoomService : Service() {
         machine.onChange = { from, to ->
             Log.i("ROOM", "$from -> $to")
             room = to.name
-            if (to == Room.PARK) { homeOnce.reset(); restOnce.reset(); restOffer = false; driveStart = null; hold.clear() }
+            if (to == Room.PARK) { homeOnce.reset(); restOnce.reset(); fatigueOnce.reset(); restOffer = false; driveStart = null; hold.clear() }
             else if (driveStart == null) driveStart = System.currentTimeMillis()
             sentEta = adapters.etaMin
             sendState(to.name, ++stateGen, true)
@@ -155,7 +183,11 @@ class RoomService : Service() {
                 Log.i("ROOM", "debug alert force=$forced")
             }
         }
-        for ((rc, action) in listOf(wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT")) {
+        // adb shell am broadcast -a ztw.carbiseo.TRIP --ei min 125 (-1 = 해제)
+        val tr = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) { forcedTrip = i.getIntExtra("min", -1).takeIf { it >= 0 }; Log.i("ROOM", "debug trip force=$forcedTrip") }
+        }
+        for ((rc, action) in listOf(wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP")) {
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(rc, IntentFilter(action), Context.RECEIVER_EXPORTED) else registerReceiver(rc, IntentFilter(action))
             receivers += rc
         }
@@ -212,5 +244,7 @@ class RoomService : Service() {
         var alert by mutableStateOf(Alert.NONE); private set
         var schedule by mutableStateOf(listOf<Event>()); private set // F6 데모 일정
         var offline by mutableStateOf(false); private set // #23 서버 폴링 실패
+        var passengerOffer by mutableStateOf(false) // C⑤ 조수석 착석 감지 → "동승자 모드로 바꿀까요?"
+        var telltale by mutableStateOf<String?>(null); private set // C⑦ 빨간 경고등
     }
 }

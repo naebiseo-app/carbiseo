@@ -8,7 +8,19 @@ import ai.pleos.playground.navi.data.DestinationInfo
 import ai.pleos.playground.navi.data.WaypointChangedInfo
 import ai.pleos.playground.navi.helper.NaviHelper
 import ai.pleos.playground.navi.helper.listener.NaviHelperEventListener
+import ai.pleos.playground.navi.constants.BookmarkType
+import ai.pleos.playground.navi.data.BookmarkInfo
 import ai.pleos.playground.vehicle.Vehicle
+import ai.pleos.playground.vehicle.api.model.area.SeatArea
+import ai.pleos.playground.vehicle.constant.area.SeatValue
+import ai.pleos.playground.vehicle.constant.area.TurnSignalValue
+import ai.pleos.playground.vehicle.constant.telltale.TelltaleColor
+import ai.pleos.playground.vehicle.constant.telltale.TelltaleState
+import ai.pleos.playground.vehicle.listener.DrivingTimeListener
+import ai.pleos.playground.vehicle.listener.EvBatteryStateOfChargeListener
+import ai.pleos.playground.vehicle.listener.SeatOccupancyListener
+import ai.pleos.playground.vehicle.listener.SteeringWheelAngleListener
+import ai.pleos.playground.vehicle.listener.TurnSignalStateListener
 import ai.pleos.playground.vehicle.constant.control.VehicleGear
 import ai.pleos.playground.vehicle.listener.GearSelectionListener
 import android.car.Car
@@ -39,6 +51,15 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
     var cameraOverspeed = false; private set
     var cautionZone = false; private set
     var etaMin: Int? = null; private set // 목적지까지 남은 분. null = 목적지 없음.
+    // C: Pleos Vehicle SDK 값(메인 스레드에서만 씀). null = 모름/권한 없음.
+    var turnOn = false; private set
+    var steerDeg: Float? = null; private set
+    var tripMin: Int? = null; private set
+    var soc: Int? = null; private set
+    var passengerSeat: Boolean? = null; private set // 조수석 착석. 에뮬은 콘솔 값과 반대로 온다(26 실측) — 앱에서 뒤집지 않는다
+    var telltale: String? = null; private set // 빨간색·켜짐 경고등 종류
+
+    private fun fail(what: String): (Exception) -> Unit = { e -> Log.w(TAG, "$what FAIL $e") }
 
     private fun set(f: Signals.() -> Signals) { ui.post { m.update(f) } }
 
@@ -63,12 +84,76 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
                 })
                 v.getGear().getCurrentGearSelectionState({ g -> set { copy(gear = g.toGear()) } }, { Log.w(TAG, "gear get FAIL $it") })
             }.onFailure { Log.w(TAG, "gear attach FAIL $it") }
+            attachVehicleExtras(v)
         }, 2000)
 
         val carCls = Class.forName("android.car.Car")
         car = carCls.getMethod("createCar", Context::class.java).invoke(null, ctx)
         ui.postDelayed({ runCatching { attachUx(carCls) }.onFailure { Log.w(TAG, "uxr attach FAIL ${it.cause ?: it}") } }, 2000)
         ui.postDelayed({ attachSpeed() }, 2000)
+    }
+
+    // 깜빡이(CAR_LIGHTS)·조향각·트립 주행시간(CAR_DRIVE)·SoC(CAR_ENERGY)·조수석 착석(CAR_SEATS)·경고등 30초 조회(CAR_SAFETY). 하나가 실패해도 나머지는 붙는다.
+    private fun attachVehicleExtras(v: Vehicle) {
+        runCatching {
+            v.getTurnSignal().registerTurnSignalState(object : TurnSignalStateListener {
+                override fun onTurnSignalStateUpdated(s: TurnSignalValue?) { Log.i(TAG, "turn $s"); ui.post { turnOn = s != null && s != TurnSignalValue.OFF } }
+                override fun onFailed(e: Exception) { fail("turn")(e) }
+            })
+        }.onFailure { Log.w(TAG, "turn attach FAIL $it") }
+        runCatching {
+            v.getSteeringWheel().registerSteeringWheelAngle(object : SteeringWheelAngleListener {
+                override fun onSteeringWheelAngleUpdated(a: Float?) {
+                    ui.post { if ((a?.let { Math.abs(it) >= BIG_STEER_DEG } ?: false) != (steerDeg?.let { Math.abs(it) >= BIG_STEER_DEG } ?: false)) Log.i(TAG, "steer big=${a?.let { Math.abs(it) >= BIG_STEER_DEG }} $a"); steerDeg = a }
+                }
+                override fun onFailed(e: Exception) { fail("steer")(e) }
+            })
+        }.onFailure { Log.w(TAG, "steer attach FAIL $it") }
+        runCatching {
+            // ponytail: 단위를 분으로 가정(콘솔 usage_time_min과 같은 값이 오는지 에뮬 실측으로 확인). 초로 오면 /60
+            val onTrip = { t: Int? -> Log.i(TAG, "tripTime raw=$t"); ui.post { tripMin = t }; Unit }
+            // 에뮬 실측: Current는 ERROR_NOT_SUPPORTED_PROPERTY, 콘솔 TRIP_DRIVING_TIME(0x21410450)은 Cumulative 쪽
+            val l = object : DrivingTimeListener {
+                override fun onDrivingTimeUpdated(t: Int?) { onTrip(t) }
+                override fun onFailed(e: Exception) { fail("trip")(e) }
+            }
+            val o = v.getOdometer()
+            o.getTripCurrentDrivingTime({ onTrip(it); o.registerTripCurrentDrivingTime(l) }, { e ->
+                Log.w(TAG, "trip current FAIL $e -> cumulative")
+                o.getTripCumulativeDrivingTime({ onTrip(it); o.registerTripCumulativeDrivingTime(l) }, { e2 ->
+                    Log.w(TAG, "trip cumulative FAIL $e2 -> sinceRefill")
+                    o.getTripSinceRefillDrivingTime({ onTrip(it); o.registerTripSinceRefillDrivingTime(l) }, fail("trip sinceRefill"))
+                })
+            })
+        }.onFailure { Log.w(TAG, "trip attach FAIL $it") }
+        runCatching {
+            val onSoc = { s: Int? -> Log.i(TAG, "soc $s"); ui.post { soc = s }; Unit }
+            v.getEvBattery().registerEvBatteryStateOfCharge(object : EvBatteryStateOfChargeListener {
+                override fun onEvBatteryStateOfChargeUpdated(s: Int?) { onSoc(s) }
+                override fun onFailed(e: Exception) { fail("soc")(e) }
+            })
+            v.getEvBattery().getEvBatteryStateOfCharge({ onSoc(it) }, fail("soc get"))
+        }.onFailure { Log.w(TAG, "soc attach FAIL $it") }
+        runCatching {
+            val seat = SeatArea(SeatValue.ROW_1_RIGHT)
+            val onSeat = { b: Boolean? -> Log.i(TAG, "passengerSeat $b"); ui.post { passengerSeat = b }; Unit }
+            v.getSeat().registerSeatOccupancy(seat, object : SeatOccupancyListener {
+                override fun onSeatOccupancyUpdated(b: Boolean?) { onSeat(b) }
+                override fun onFailed(e: Exception) { fail("seat")(e) }
+            })
+            v.getSeat().getCurrentSeatOccupancy(seat, { onSeat(it) }, fail("seat get"))
+        }.onFailure { Log.w(TAG, "seat attach FAIL $it") }
+        // registerTelltales는 PRIVATE_CAR_SAFETY가 필요해 쓰지 않는다. 조회만 30초마다, 실패하면 멈춘다.
+        ui.post(object : Runnable {
+            override fun run() {
+                runCatching {
+                    v.getSafety().getTelltalesInfo({ t ->
+                        val red = t.telltales.firstOrNull { TelltaleColor.entries.getOrNull(it.color) == TelltaleColor.RED /* id = 순서(javap static init), findById는 internal */ && it.state == TelltaleState.ON }?.type?.name
+                        ui.post { if (red != telltale) Log.i(TAG, "telltale red=$red"); telltale = red; ui.postDelayed(this, 30_000) }
+                    }, { e -> Log.w(TAG, "telltale get FAIL $e (조회 중단)") })
+                }.onFailure { Log.w(TAG, "telltale FAIL $it (조회 중단)") }
+            }
+        })
     }
 
     // 속도: Pleos Vehicle SDK엔 없음 -> 공식 FAQ대로 AAOS PERF_VEHICLE_SPEED(m/s). CAR_SPEED 권한이 늦게 허용될 수 있어 실패 시 5초 뒤 재시도.
@@ -130,10 +215,17 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
             override fun onCameraAlert(a: List<CameraAlert>) { val o = a.any { it.isOverSpeed || it.isOverSectionAvrSpeed }; ui.post { cameraOverspeed = o } }
             // ponytail: 남은 거리 단위를 m로 가정(문서 미확인), 에뮬 실측으로 조정
             override fun onCautionPointInfo(p: List<CautionPoint>) { val z = p.any { it.remainDistance in 0..300 }; ui.post { cautionZone = z } }
+            // C①: 내비 즐겨찾기 '집'이 있으면 그 좌표로 방 판정. 없으면 기존 설정 유지.
+            override fun onBookmarkInfo(l: List<BookmarkInfo>) {
+                val h = l.firstOrNull { it.category == BookmarkType.HOME }
+                Log.i(TAG, "bookmarks n=${l.size} home=${h != null} office=${l.any { it.category == BookmarkType.OFFICE }}")
+                if (h != null) ui.post { m.settings = m.settings.copy(home = LatLng(h.latitude, h.longitude)) }
+            }
+            override fun onBookMarkChanged() { n.getBookmarkInfo() }
             override fun onNavigationStatus(s: NavigationStatus) { Log.i(TAG, "navStatus $s"); if (s == NavigationStatus.ROUTE_DRIVE) n.getDestinationInfo() }
         })
         n.initialize({
-            n.getDestinationInfo(); n.getCurrentLocationInfo()
+            n.getDestinationInfo(); n.getCurrentLocationInfo(); runCatching { n.getBookmarkInfo() }.onFailure { Log.w(TAG, "bookmark FAIL $it") }
             ui.post(object : Runnable { override fun run() { navi?.getCurrentLocationInfo(); navi?.getDestinationInfo(); ui.postDelayed(this, 5000) } })
         }, { Log.w(TAG, "navi initialize FAIL $it") })
     }

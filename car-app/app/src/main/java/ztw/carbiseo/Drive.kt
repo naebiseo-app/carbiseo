@@ -50,3 +50,18 @@ fun roomSpeech(r: Room): String? = when (r) {
     Room.DRIVE_REST -> "퇴근길이에요, 급한 전화만 알려 드릴게요"
     Room.PARK -> null
 }
+
+/** C④ 조작 중(깜빡이·후진·큰 조향)엔 말 걸지 않는다. 끝나면 보류분을 읽는다. */
+const val BIG_STEER_DEG = 90f
+fun busyManeuver(turn: Boolean, gear: Gear, steerDeg: Float?): Boolean =
+    turn || gear == Gear.REVERSE || (steerDeg != null && kotlin.math.abs(steerDeg) >= BIG_STEER_DEG)
+
+/** C② 피로 모드: 트립 주행시간이 기준 이상이면 전화 알림은 전부 보관(음성 없음). */
+const val FATIGUE_MIN = 120
+const val FATIGUE_SPEECH = "두 시간째 운전 중이에요. 전화는 제가 다 받아 둘게요"
+fun fatigued(room: Room?, tripMin: Int?): Boolean = room != null && room != Room.PARK && (tripMin ?: 0) >= FATIGUE_MIN
+
+const val TELLTALE_SPEECH = "계기판에 빨간 경고등이 켜졌어요. 안전한 곳에 세운 뒤 확인해 주세요"
+
+/** 서버 car_context용 기어 한 글자. */
+fun gearCode(g: Gear): String? = when (g) { Gear.PARK -> "P"; Gear.DRIVE -> "D"; Gear.REVERSE -> "R"; Gear.NEUTRAL -> "N"; Gear.UNKNOWN -> null }

@@ -192,6 +192,10 @@ private fun Park(onImage: Boolean, onSettings: () -> Unit) {
         if (RoomService.offline) Text("서버 연결 끊김 — 다시 연결하는 중. 그동안 전화는 통화 서비스가 기본 안내로 받아요",
             Modifier.padding(top = 6.dp).fillMaxWidth().background(Color(0xFFC62828), RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
             color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        RoomService.telltale?.let { Text("계기판 빨간 경고등($it) — 출발 전에 확인해 주세요",
+            Modifier.padding(top = 6.dp).fillMaxWidth().background(Color(0xFFC62828), RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
+            color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+        PassengerOffer(ParkAcc, Color.White, Modifier.padding(top = 8.dp))
         nextEvent(RoomService.schedule, System.currentTimeMillis())?.let { NextEvent(it) }
         LazyColumn(Modifier.weight(1f).padding(top = 16.dp), list, verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
             items(items, key = { it.id }) { i ->
@@ -244,6 +248,22 @@ private fun NextEvent(e: Event) {
         }, Tall, colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
             Text("출발", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
+    }
+}
+
+/** C⑤ 조수석 착석 감지 시 확인 버튼(자동으로 바꾸지 않는다). */
+@Composable
+private fun PassengerOffer(bg: Color, ink: Color, m: Modifier = Modifier) {
+    if (!RoomService.passengerOffer) return
+    val ctx = LocalContext.current
+    Row(m.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Button({
+            RoomService.passenger = true; RoomService.passengerOffer = false
+            ctx.getSharedPreferences("car_ui", Context.MODE_PRIVATE).edit().putBoolean("passenger", true).apply()
+        }, Modifier.weight(1f).heightIn(min = 96.dp), colors = ButtonDefaults.buttonColors(containerColor = bg)) {
+            Text("동승자가 탔어요 · 동승자 모드로 바꿀까요?", color = ink, fontSize = 24.sp, fontWeight = FontWeight.Black)
+        }
+        OutlinedButton({ RoomService.passengerOffer = false }, Modifier.heightIn(min = 96.dp)) { Text("아니요", color = bg, fontSize = 22.sp) }
     }
 }
 
@@ -315,7 +335,7 @@ private fun Work(r: String) {
             Text("$n", color = WorkInk, fontSize = 120.sp, lineHeight = 130.sp, fontWeight = FontWeight.Black)
             Text("급한 건", color = WorkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         }
-        RestButton(WorkAcc, WorkBg1, Modifier.align(Alignment.BottomCenter))
+        Column(Modifier.align(Alignment.BottomCenter)) { PassengerOffer(WorkAcc, WorkBg1); RestButton(WorkAcc, WorkBg1) }
     }
 }
 
@@ -327,6 +347,7 @@ private fun Rest() {
         Text("오늘 일은 여기까지", color = RestInk, fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Black)
         // TODO: 집까지 ETA·가족 전화 카드 — 내비 ETA·가족 연락처 데이터가 생기면 추가
         Spacer(Modifier.weight(1f))
+        PassengerOffer(RestAcc, RestBg1)
         RestButton(RestAcc, RestBg1, Modifier.padding(bottom = 16.dp))
         Text("업무 ${n}건은 내일 아침에 알려 드릴게요", color = RestInk, fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold)
     }

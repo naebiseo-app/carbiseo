@@ -19,7 +19,8 @@ object Server {
         (c.responseCode in 200..299).also { c.disconnect() }
     }.getOrDefault(false)
 
-    fun postState(room: String, etaMin: Int?) = post("/car/state", JSONObject().put("room", room).put("eta_min", etaMin ?: JSONObject.NULL))
+    fun postState(room: String, etaMin: Int?, ctx: Map<String, Any?> = emptyMap()) =
+        post("/car/state", JSONObject().put("room", room).put("eta_min", etaMin ?: JSONObject.NULL).also { j -> ctx.forEach { (k, v) -> j.put(k, v ?: JSONObject.NULL) } })
 
     fun postSettings(ownerLabel: String, assistantName: String) =
         post("/car/settings", JSONObject().put("owner_label", ownerLabel).put("assistant_name", assistantName))

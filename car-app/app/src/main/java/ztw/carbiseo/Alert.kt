@@ -31,17 +31,17 @@ class AlertLatch(private val clock: Clock, private val releaseMs: Long = 2000) {
     }
 }
 
-/** 경고 중엔 새 TTS를 보류한다. 전화는 항목을 쌓아 두었다가 풀릴 때 한 문장(급함·건수 유지), 그 밖의 문장은 최신 1개. */
+/** 조용히 할 때(경고·깜빡이·후진·큰 조향) 새 TTS를 보류한다. 전화는 항목을 쌓아 두었다가 풀릴 때 한 문장(급함·건수 유지), 그 밖의 문장은 최신 1개. */
 class SpeechHold {
     private val items = mutableListOf<InboxItem>()
     private var text: String? = null
     /** 지금 읽을 문장(경고 중이면 null로 보류). */
-    fun offer(text: String, alert: Alert): String? = if (alert == Alert.NONE) text else { this.text = text; null }
-    fun offerItems(fresh: List<InboxItem>, room: Room?, alert: Alert): String? =
-        if (alert == Alert.NONE) speechFor(fresh, room) else { items += fresh; null }
-    /** 경고가 바뀔 때 호출. NONE이면 보류분을 지금 방 기준 한 문장으로 내주고 비운다. */
-    fun release(alert: Alert, room: Room?): String? {
-        if (alert != Alert.NONE) return null
+    fun offer(text: String, quiet: Boolean): String? = if (!quiet) text else { this.text = text; null }
+    fun offerItems(fresh: List<InboxItem>, room: Room?, quiet: Boolean): String? =
+        if (!quiet) speechFor(fresh, room) else { items += fresh; null }
+    /** quiet가 바뀔 때 호출. 풀렸으면 보류분을 지금 방 기준 한 문장으로 내주고 비운다. */
+    fun release(quiet: Boolean, room: Room?): String? {
+        if (quiet) return null
         val s = listOfNotNull(speechFor(items, room), text).joinToString(" ").ifEmpty { null }
         clear(); return s
     }
