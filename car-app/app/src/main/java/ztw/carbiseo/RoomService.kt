@@ -36,6 +36,7 @@ class RoomService : Service() {
     private val net = Executors.newSingleThreadExecutor() // 서버 호출은 여기서만(순서 보장, 메인 차단 방지)
     private var stateGen = 0       // 방 변경마다 +1. 재시도는 최신 방일 때만.
     private var sentEta: Int? = null // 마지막으로 올린 남은 분. 분이 바뀔 때만 다시 올린다.
+    private var okState: Pair<String, Int?>? = null // 서버가 마지막으로 받은 (방, 남은 분)
     private var since = 0L
     private var firstPoll = true   // 첫 폴링은 기존 항목을 채우기만 하고 읽지 않는다.
     private lateinit var latch: AlertLatch
@@ -49,7 +50,12 @@ class RoomService : Service() {
         override fun run() {
             net.execute {
                 val r = Server.fetchInbox(since)
-                ui.post { offline = r == null; r?.let(::onInbox) } // 15초마다 다시 시도한다
+                ui.post {
+                    offline = r == null; r?.let(::onInbox) // 15초마다 다시 시도한다
+                    // 오프라인 중 상태 전송이 다 실패했으면 서버가 옛 방에 멈춰 있다 → 연결되면 지금 상태를 다시 올린다
+                    val cur = machine.room?.let { it.name to sentEta }
+                    if (r != null && cur != null && cur != okState) { Log.i("ROOM", "state resync $cur (server had $okState)"); sendState(cur.first, ++stateGen, false) }
+                }
                 Server.fetchSchedule()?.let { r -> ui.post { schedule = r } }
             }
             ui.postDelayed(this, 15_000)
@@ -63,7 +69,7 @@ class RoomService : Service() {
         if (fresh.isEmpty()) return
         inbox = (fresh.filter { it.kind == "call" } + inbox).sortedByDescending { it.id }.take(50)
         Log.i("ROOM", "inbox ${if (initial) "initial" else "new"} ${fresh.size}")
-        if (!initial && !passenger) speechFor(fresh, machine.room)?.let { hold.offer(it, alert) }?.let { speaker.speak(it) }
+        if (!initial && !passenger) hold.offerItems(fresh, machine.room, alert)?.let { speaker.speak(it) }
     }
 
     /** 과속·주의 경고 중이면 보류했다가 경고가 풀리면 읽는다. */
@@ -72,6 +78,7 @@ class RoomService : Service() {
     private fun sendState(r: String, gen: Int, retry: Boolean, eta: Int? = sentEta): Unit = net.execute {
         val ok = Server.postState(r, eta)
         Log.i("ROOM", "state $r eta=$eta -> ${if (ok) "ok" else "FAIL"}")
+        if (ok) ui.post { okState = r to eta }
         // ponytail: 1회 재시도 후 포기(다음 방 변경이 어차피 다시 보냄)
         if (!ok && retry) ui.postDelayed({ if (gen == stateGen) sendState(r, gen, false, eta) }, 30_000)
     }
@@ -83,7 +90,8 @@ class RoomService : Service() {
             if (t != sig) Log.i("ROOM", "signals $t") // 입력 신호가 바뀔 때만
             sig = t
             val a = latch.update(adapters.speedKmh, adapters.limitKmh, adapters.cameraOverspeed, adapters.cautionZone).let { forced ?: it }
-            if (a != alert) { alert = a; Log.i("ROOM", "alert $a"); hold.release(a)?.let { speaker.speak(it) } }
+            if (a != alert) { alert = a; Log.i("ROOM", "alert $a"); hold.release(a, machine.room)?.let { speaker.speak(it) } }
+            if (passenger) hold.clear() // 동승자 모드면 보류분도 버린다
             // 정수 분이라 != 가 곧 "1분 이상 변화". 방 판정 전이면 첫 방 변경이 같이 올린다.
             val e = adapters.etaMin
             if (e != sentEta) machine.room?.let { sentEta = e; sendState(it.name, ++stateGen, true) }
@@ -99,16 +107,17 @@ class RoomService : Service() {
             .createNotificationChannel(NotificationChannel(CH, "내비서", NotificationManager.IMPORTANCE_LOW))
         val n = notification(room)
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(1, n)
-        getSharedPreferences("car_ui", MODE_PRIVATE).let { restMin = it.getInt("rest_min", REST_DEFAULT_MIN); passenger = it.getBoolean("passenger", false) }
+        getSharedPreferences("car_ui", MODE_PRIVATE).let { restMin = it.getInt("rest_min", REST_DEFAULT_MIN).takeIf { m -> m != 1 } ?: REST_DEFAULT_MIN; passenger = it.getBoolean("passenger", false) }
         latch = AlertLatch(Clock.systemDefaultZone())
         machine = RoomStateMachine(Clock.systemDefaultZone()) // settings = 기본 상수. 설정 화면이 machine.settings를 덮어쓴다.
         machine.onChange = { from, to ->
             Log.i("ROOM", "$from -> $to")
             room = to.name
-            if (to == Room.PARK) { homeOnce.reset(); restOnce.reset(); restOffer = false; driveStart = null }
+            if (to == Room.PARK) { homeOnce.reset(); restOnce.reset(); restOffer = false; driveStart = null; hold.clear() }
             else if (driveStart == null) driveStart = System.currentTimeMillis()
             sentEta = adapters.etaMin
             sendState(to.name, ++stateGen, true)
+            if (!passenger) roomSpeech(to)?.let(::say)
             getSystemService(NotificationManager::class.java).notify(1, notification(room))
         }
         adapters = CarAdapters(applicationContext, machine).also { it.start() }
@@ -173,15 +182,15 @@ class RoomService : Service() {
         else route(stop.at, stop.name)
     }
 
-    /** 부팅 직후 내비가 준비 전이면 요청이 조용히 버려진다(에뮬 실측 'navi not ready'). 4초 뒤 목적지가 안 잡혔으면 1회 재시도, 그래도 안 되면 알린다. */
-    private fun route(to: LatLng, name: String, retry: Boolean = true) {
+    /** 경로 계산에 12~15초 걸린다(에뮬 실측). 재요청은 진행 중 경로를 취소시키므로(onRouteCancelled) 확인만 하고, 20초 뒤에도 안 잡혔으면 알린다. */
+    private fun route(to: LatLng, name: String) {
         val n = adapters.navi ?: return
         n.requestRoute(RouteInfo(to.lat, to.lng, null, null, name, "", "", "", RouteOption.RECOMMENDED, "", false))
         ui.postDelayed({
             if (machine.signals.destination?.let { distanceM(it, to) < 300 } == true) return@postDelayed
-            Log.w("ROOM", "route not set: $name retry=$retry")
-            if (retry) route(to, name, false) else say("내비가 아직 준비 중이에요. 잠시 뒤 다시 눌러 주세요")
-        }, 4000)
+            Log.w("ROOM", "route not set: $name")
+            say("내비가 아직 준비 중이에요. 잠시 뒤 다시 눌러 주세요")
+        }, 20_000)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

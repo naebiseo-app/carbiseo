@@ -14,13 +14,19 @@ data class InboxItem(
 /** 마지막으로 본 id. 항목이 없으면 그대로. */
 fun nextSince(since: Long, items: List<InboxItem>): Long = maxOf(since, items.maxOfOrNull { it.id } ?: since)
 
-/** 새 항목 -> 읽을 한 문장. PARK(또는 방 미판정)이거나 항목이 없으면 null. */
+/** 새 항목 -> 읽을 한 문장. PARK(또는 방 미판정)이거나 항목이 없으면 null. 퇴근길(DRIVE_REST)은 급한 전화만 읽는다. */
 fun speechFor(items: List<InboxItem>, room: Room?): String? {
-    val newItems = items.filter { it.kind == "call" } // 웹훅 이벤트는 같은 통화라 세지 않는다
+    val calls = items.filter { it.kind == "call" }.distinctBy { it.id } // 웹훅 이벤트·힌트·할 일은 세지 않는다
+    val newItems = if (room == Room.DRIVE_REST) calls.filter { it.urgent } else calls
     if (newItems.isEmpty() || (room != Room.DRIVE_WORK && room != Room.DRIVE_REST)) return null
-    val kind = if (newItems.any { it.urgent }) "급한 전화" else "부재중 전화"
-    val count = if (newItems.size == 1) "한 건" else "${newItems.size}건"
-    return "$kind $count, AI가 용건을 받아 두었습니다."
+    val n = newItems.size; val u = newItems.count { it.urgent }
+    val head = when {
+        n == 1 -> if (u == 1) "급한 전화 한 건" else "부재중 전화 한 건"
+        u == n -> "급한 전화 ${n}건"
+        u > 0 -> "급한 전화 ${u}건 포함 ${n}건"
+        else -> "부재중 전화 ${n}건"
+    }
+    return "$head, AI가 용건을 받아 두었습니다."
 }
 
 private val timeFmt = DateTimeFormatter.ofPattern("MM-dd HH:mm")
@@ -36,3 +42,6 @@ fun itemLine(i: InboxItem, zone: ZoneId = ZoneId.systemDefault()): String {
 /** S4: 오늘(zone 기준 날짜) 받은 통화 수. 웹훅 이벤트는 같은 통화라 세지 않는다. */
 fun todayCalls(items: List<InboxItem>, today: java.time.LocalDate, zone: ZoneId = ZoneId.systemDefault()): Int =
     items.count { it.kind == "call" && Instant.ofEpochMilli(it.createdAt).atZone(zone).toLocalDate() == today }
+
+/** 주차 화면 순서: 급한 카드 먼저, 그 안에서 최신순. */
+fun parkOrder(items: List<InboxItem>): List<InboxItem> = items.sortedWith(compareByDescending<InboxItem> { it.urgent }.thenByDescending { it.id })

@@ -43,3 +43,10 @@ data class Event(val title: String, val start: Long, val place: String, val at: 
 
 /** F7: 아직 시작 안 한 일정 중 가장 이른 것. */
 fun nextEvent(events: List<Event>, nowMs: Long): Event? = events.filter { it.start > nowMs }.minByOrNull { it.start }
+
+/** 방이 바뀔 때 한 문장. PARK는 무음. */
+fun roomSpeech(r: Room): String? = when (r) {
+    Room.DRIVE_WORK -> "업무 운전 모드예요"
+    Room.DRIVE_REST -> "퇴근길이에요, 급한 전화만 알려 드릴게요"
+    Room.PARK -> null
+}

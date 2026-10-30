@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -166,7 +167,10 @@ private fun BgImage(f: File, ver: Int, pol: BgPolicy): Boolean {
 
 @Composable
 private fun Park(onImage: Boolean, onSettings: () -> Unit) {
-    val items = RoomService.inbox
+    val items = parkOrder(RoomService.inbox)
+    val list = rememberLazyListState()
+    val newest = RoomService.inbox.maxOfOrNull { it.id }
+    LaunchedEffect(newest) { if (newest != null) list.animateScrollToItem(0) } // 새 카드가 위에 숨지 않게
     var sel by rememberSaveable { mutableStateOf<Long?>(null) }
     val ink = if (onImage) Color.White else ParkInk
     Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 12.dp)) {
@@ -175,15 +179,17 @@ private fun Park(onImage: Boolean, onSettings: () -> Unit) {
             PassengerToggle(ink)
             TextButton(onSettings, Tall) { Text("꾸미기", color = ink, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
         }
-        Text(if (items.isEmpty()) "세워 둔 동안, 볼 건 없어요" else "세워 둔 동안, ${items.size}건만 보면 돼요",
+        val unseen = items.count { it.id !in seenIds }
+        Text(if (unseen == 0) "세워 둔 동안, 볼 건 없어요" else "확인할 게 ${unseen}건 있어요",
             color = ink, fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Black)
         val calls = todayCalls(items, java.time.LocalDate.now())
         if (calls > 0) Text("오늘 AI가 대신 받은 전화 ${calls}통 = 운전 중 통화 ${calls}번 줄임",
             Modifier.padding(top = 6.dp), color = if (onImage) Color.White else ParkBody, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         if (RoomService.offline) Text("서버 연결 끊김 — 다시 연결하는 중. 그동안 전화는 통화 서비스가 기본 안내로 받아요",
-            Modifier.padding(top = 6.dp), color = if (onImage) Color.White else ParkAcc, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Modifier.padding(top = 6.dp).fillMaxWidth().background(Color(0xFFC62828), RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
+            color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         nextEvent(RoomService.schedule, System.currentTimeMillis())?.let { NextEvent(it) }
-        LazyColumn(Modifier.weight(1f).padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
+        LazyColumn(Modifier.weight(1f).padding(top = 16.dp), list, verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
             items(items, key = { it.id }) { i ->
                 Note(i, i.id == sel) { sel = if (sel == i.id) null else i.id; seenIds = seenIds + i.id }
             }
@@ -339,7 +345,7 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             for ((min, t) in listOf(1 to "1분(시연)", 60 to "60분", REST_DEFAULT_MIN to "120분")) {
                 val on = RoomService.restMin == min
-                Button({ RoomService.restMin = min; prefs.edit().putInt("rest_min", min).apply() }, Tall,
+                Button({ RoomService.restMin = min; if (min != 1) prefs.edit().putInt("rest_min", min).apply() }, Tall, // 시연값은 저장 안 함
                     colors = ButtonDefaults.buttonColors(containerColor = if (on) ParkAcc else ParkNote)) {
                     Text(t, color = if (on) Color.White else ParkInk, fontSize = 18.sp)
                 }

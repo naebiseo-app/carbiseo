@@ -21,6 +21,7 @@ data class RoomSettings(
     val homeNearRadiusM: Double = 2000.0,  // 목적지 없을 때 현재 위치가 "집 근처"인 반경
     val destGraceMs: Long = 10_000,         // 목적지 해제 유예
     val debounceMs: Long = 300,            // 전환 직후 되돌림 무시 시간
+    val parkHoldMs: Long = 2000,           // 주행 -> PARK는 PARK 판정이 이만큼 이어져야(P↔D 빠른 반복 흡수)
 )
 
 data class Signals(
@@ -57,6 +58,7 @@ class RoomStateMachine(
     private var prevRoom: Room? = null
     private var lastDest: LatLng? = null
     private var destLostAtMs: Long? = null
+    private var parkSinceMs: Long? = null
 
     fun update(f: Signals.() -> Signals) { signals = signals.f(); evaluate() }
     fun tick() = evaluate()
@@ -89,7 +91,9 @@ class RoomStateMachine(
         val now = clock.millis()
         val t = target(now)
         val cur = room
+        parkSinceMs = if (t == Room.PARK) parkSinceMs ?: now else null
         if (t == cur) return
+        if (cur != null && t == Room.PARK && now - parkSinceMs!! < settings.parkHoldMs) return // tick이 나중에 재판정
         if (cur != null && t == prevRoom && now - lastChangeMs < settings.debounceMs) return // 되돌림 무시(tick이 나중에 재판정)
         prevRoom = cur; room = t; lastChangeMs = now
         onChange(cur, t)

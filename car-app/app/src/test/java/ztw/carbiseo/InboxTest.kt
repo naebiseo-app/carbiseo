@@ -12,7 +12,11 @@ class InboxTest {
 
     @Test fun 주행중_새항목이면_부재중_문장() {
         assertEquals("부재중 전화 한 건, AI가 용건을 받아 두었습니다.", speechFor(listOf(item(1)), Room.DRIVE_WORK))
-        assertEquals("부재중 전화 한 건, AI가 용건을 받아 두었습니다.", speechFor(listOf(item(1)), Room.DRIVE_REST))
+    }
+
+    @Test fun 퇴근길은_급한_전화만_읽는다() {
+        assertNull(speechFor(listOf(item(1), item(2)), Room.DRIVE_REST))
+        assertEquals("급한 전화 한 건, AI가 용건을 받아 두었습니다.", speechFor(listOf(item(1), item(2, urgent = true)), Room.DRIVE_REST))
     }
 
     @Test fun 급함이면_급한_전화() {
@@ -21,7 +25,8 @@ class InboxTest {
 
     @Test fun 여러_건이면_건수() {
         assertEquals("부재중 전화 2건, AI가 용건을 받아 두었습니다.", speechFor(listOf(item(1), item(2)), Room.DRIVE_WORK))
-        assertTrue(speechFor(listOf(item(1), item(2, urgent = true)), Room.DRIVE_WORK)!!.startsWith("급한 전화 2건"))
+        assertEquals("급한 전화 1건 포함 2건, AI가 용건을 받아 두었습니다.", speechFor(listOf(item(1), item(2, urgent = true)), Room.DRIVE_WORK))
+        assertTrue(speechFor(listOf(item(1, urgent = true), item(2, urgent = true)), Room.DRIVE_WORK)!!.startsWith("급한 전화 2건,"))
     }
 
     @Test fun PARK_미판정_항목없음은_읽지_않는다() {
@@ -59,5 +64,10 @@ class InboxTest {
         )
         assertEquals(2, todayCalls(items, today, z))
         assertEquals(0, todayCalls(emptyList(), today, z))
+    }
+
+    @Test fun 주차화면_급한것_먼저_그안에서_최신순() {
+        val l = parkOrder(listOf(item(1), item(2, urgent = true), item(3), item(4, urgent = true)))
+        assertEquals(listOf(4L, 2L, 3L, 1L), l.map { it.id })
     }
 }

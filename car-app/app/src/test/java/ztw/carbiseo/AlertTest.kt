@@ -50,13 +50,30 @@ class AlertTest {
         c.ms = 2020; assertEquals(Alert.NONE, l.update(null, null, false, false)) // CAUTION은 즉시 해제
     }
 
-    @Test fun 음성_보류_후_최신_1개만() {
+    @Test fun 음성_보류_후_문장은_최신_1개만() {
         val h = SpeechHold()
         assertEquals("a", h.offer("a", Alert.NONE))
         assertNull(h.offer("b", Alert.OVERSPEED))
         assertNull(h.offer("c", Alert.CAUTION))
-        assertNull(h.release(Alert.CAUTION))
-        assertEquals("c", h.release(Alert.NONE))
-        assertNull(h.release(Alert.NONE))
+        assertNull(h.release(Alert.CAUTION, Room.DRIVE_WORK))
+        assertEquals("c", h.release(Alert.NONE, Room.DRIVE_WORK))
+        assertNull(h.release(Alert.NONE, Room.DRIVE_WORK))
+    }
+
+    private fun call(id: Long, urgent: Boolean = false) = InboxItem(id, "x", "y", urgent, 0L, "")
+
+    @Test fun 경고중_전화는_쌓였다가_급함_건수_한_문장() {
+        val h = SpeechHold()
+        assertNull(h.offerItems(listOf(call(1, urgent = true)), Room.DRIVE_WORK, Alert.OVERSPEED))
+        assertNull(h.offerItems(listOf(call(2)), Room.DRIVE_WORK, Alert.OVERSPEED))
+        assertEquals("급한 전화 1건 포함 2건, AI가 용건을 받아 두었습니다.", h.release(Alert.NONE, Room.DRIVE_WORK))
+        assertNull(h.release(Alert.NONE, Room.DRIVE_WORK))
+    }
+
+    @Test fun 보류분은_비우면_사라진다() {
+        val h = SpeechHold()
+        h.offerItems(listOf(call(1)), Room.DRIVE_WORK, Alert.CAUTION); h.offer("t", Alert.CAUTION)
+        h.clear()
+        assertNull(h.release(Alert.NONE, Room.DRIVE_WORK))
     }
 }

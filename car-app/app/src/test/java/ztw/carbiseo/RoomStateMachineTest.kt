@@ -115,15 +115,26 @@ class RoomStateMachineTest {
         assertEquals(listOf<Pair<Room?, Room>>(null to Room.PARK), events)
     }
 
-    @Test fun 디바운스_300ms_안_되돌림은_무시하고_뒤에_반영() {
+    @Test fun 주행에서_PARK는_2초_유지돼야_반영() {
         m.update { copy(gear = Gear.PARK) }; settle()
         drive()                                                    // PARK -> WORK
         clock.ms += 100
         m.update { copy(gear = Gear.PARK, distractionOptimized = false) }
         assertEquals(Room.DRIVE_WORK, m.room)                      // 되돌림 무시
-        clock.ms += 250; m.tick()                                  // 전환 후 350ms
+        clock.ms += 1900; m.tick()                                 // P 1.9초
+        assertEquals(Room.DRIVE_WORK, m.room)
+        clock.ms += 100; m.tick()                                  // P 2초
         assertEquals(Room.PARK, m.room)                            // 신호가 계속 P면 결국 반영
         assertEquals(3, events.size)
+    }
+
+    @Test fun P_D_빠른_반복은_방_안_바뀜() {
+        drive(); settle()
+        repeat(5) {
+            clock.ms += 800; m.update { copy(gear = Gear.PARK, distractionOptimized = false) }
+            clock.ms += 800; drive()
+        }
+        assertEquals(1, events.size)                               // null->WORK 뿐
     }
 
     @Test fun 디바운스_깜빡임은_이벤트_안_만든다() {
@@ -135,10 +146,10 @@ class RoomStateMachineTest {
         assertEquals(2, events.size)                               // null->PARK, PARK->WORK 뿐
     }
 
-    @Test fun 디바운스_300ms_지나면_즉시_전환() {
-        drive(); settle()
-        m.update { copy(gear = Gear.PARK, distractionOptimized = false) }
-        assertEquals(Room.PARK, m.room)
+    @Test fun PARK에서_주행은_디바운스_뒤_즉시() {
+        m.update { copy(gear = Gear.PARK) }; settle()
+        drive()
+        assertEquals(Room.DRIVE_WORK, m.room)                      // PARK -> 주행은 바로
     }
 
     @Test fun 목적지_해제는_유예_후_반영() {
