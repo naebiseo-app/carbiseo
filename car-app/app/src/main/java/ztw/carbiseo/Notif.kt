@@ -76,8 +76,10 @@ class NotifTalk {
         return Turn(s, listen = true)
     }
 
-    fun hear(said: String?, favs: Set<String>): Turn {
+    /** parked: P에서는 못 들었거나 모르는 말이면 묻는 바를 그대로 둔다(누르거나 출발할 때까지). 주행 중엔 카드로. */
+    fun hear(said: String?, favs: Set<String>, parked: Boolean = false): Turn {
         val c = voiceCmd(said)
+        if (parked && c == Cmd.Unknown && (step == Step.OFFER || step == Step.AFTER_READ)) return Turn(null)
         val st = step; step = Step.NONE
         return when {
             st == Step.CONFIRM -> if (c == Cmd.Yes) Turn("보낼게요.", send = target!!.id to draft) else Turn("답장을 취소했어요.")

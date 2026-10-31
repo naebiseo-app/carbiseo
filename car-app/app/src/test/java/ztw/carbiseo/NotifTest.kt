@@ -78,6 +78,16 @@ class NotifTest {
         assertEquals(Turn("이 알림은 답장할 수 없어요. 화면에 남겨 둘게요."), t.hear("답장 네", favs))
     }
 
+    @Test fun 정차_중엔_못들어도_바_유지() {
+        val t = NotifTalk(); val l = listOf(n(1, "김부장"))
+        t.offer(l, favs)
+        assertEquals(Turn(null), t.hear(null, favs, parked = true)) // 10초 듣기 타임아웃
+        assertEquals(Turn(null), t.hear("오늘 날씨", favs, parked = true))
+        assertEquals(NotifTalk.Step.OFFER, t.step)
+        assertEquals(Turn("화면에 남겨 둘게요."), t.hear("나중에", favs, parked = true)) // 버튼을 누르면 닫힌다
+        assertEquals(NotifTalk.Step.NONE, t.step)
+    }
+
     @Test fun 즐겨찾기_설정_문자열() {
         assertEquals(setOf("엄마", "아빠"), parseFavs(" 엄마, 아빠 ,,"))
         assertEquals(emptySet<String>(), parseFavs(""))

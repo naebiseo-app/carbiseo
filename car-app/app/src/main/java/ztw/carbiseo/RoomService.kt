@@ -219,6 +219,7 @@ class RoomService : Service() {
             }
             else {
                 val parked = parkedAt?.let { now - it }; parkedAt = null
+                if (from == Room.PARK && talk.step != NotifTalk.Step.NONE) { talk.cancel(); askStep = talk.step; listening = false } // P에서 남겨 둔 바는 출발하면 닫는다(카드는 남음)
                 // M4: 2분 미만 P는 같은 운전 — 휴식·피로·집 문턱 1회 안내와 운전 시작 시각을 유지
                 if (newDrive(parked)) { homeOnce.reset(); restOnce.reset(); fatigueOnce.reset(); trip.reset(); driveStart = now }
                 else Log.i("ROOM", "short park ${parked!! / 1000}s -> same drive")
@@ -235,7 +236,7 @@ class RoomService : Service() {
         addHomeFavorite = { runCatching { adapters.navi?.requestNavigationScreen(NavigationScreenRequest.AddHomeFavorite) }.onFailure { Log.w("ROOM", "add home FAIL $it") } }
         adapters.onNaviReady = { pendingRoute?.let { pendingRoute = null; Log.i("ROOM", "navi ready -> route"); it() } }
         speaker = Speaker(applicationContext).also { it.start() }
-        voice = Voice(applicationContext) { heard -> listening = false; runTurn(talk.hear(heard, favs)) }.also { it.start() }
+        voice = Voice(applicationContext) { heard -> listening = false; runTurn(talk.hear(heard, favs, machine.room == Room.PARK)) }.also { it.start() }
         answer = { voice.inject(it) }
         ui.post(ticker)
         ui.post(poller)
