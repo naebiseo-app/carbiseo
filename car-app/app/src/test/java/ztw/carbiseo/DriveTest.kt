@@ -142,4 +142,13 @@ class DriveTest {
         assertEquals(h, homeFromRecent(listOf("Home" to h)))
         assertEquals(null, homeFromRecent(listOf("집합 장소" to far)))
     }
+
+    @Test fun 신호_곧_초록불_출발알림() {
+        assertEquals(true, greenSoon(5, Gear.DRIVE, 0f, busy = false))
+        assertEquals(false, greenSoon(6, Gear.DRIVE, 0f, busy = false)) // 아직 이르다
+        assertEquals(false, greenSoon(3, Gear.DRIVE, 5f, busy = false)) // 이미 출발
+        assertEquals(false, greenSoon(3, Gear.PARK, 0f, busy = false))
+        assertEquals(false, greenSoon(3, Gear.DRIVE, 0f, busy = true)) // 통화·경고·알림 대화 중
+        assertEquals(false, greenSoon(-1, Gear.DRIVE, 0f, busy = false)) // 값 없음
+    }
 }

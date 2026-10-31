@@ -124,6 +124,10 @@ const val BIG_STEER_DEG = 90f
 fun busyManeuver(turn: Boolean, gear: Gear, steerDeg: Float?): Boolean =
     turn || gear == Gear.REVERSE || (steerDeg != null && kotlin.math.abs(steerDeg) >= BIG_STEER_DEG)
 
+/** 신호 대기 출발 알림: 초록불까지 5초 이하·D·정지(<1km/h)·경고/통화/알림 대화 중 아님일 때만. 이미 출발했으면 침묵. */
+fun greenSoon(left: Int, gear: Gear, speedKmh: Float?, busy: Boolean): Boolean =
+    left in 0..5 && gear == Gear.DRIVE && (speedKmh ?: 0f) < 1f && !busy
+
 /** C② 피로 모드: 트립 주행시간이 기준 이상이면 전화 알림은 전부 보관(음성 없음). */
 const val FATIGUE_MIN = 120
 // H10: D에선 시스템이 앱 화면을 가려 버튼이 안 보인다 → 주행 중엔 누르라고 하지 않는다. 버튼 안내는 P에서만.

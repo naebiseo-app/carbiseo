@@ -61,6 +61,7 @@ class RoomService : Service() {
     private val restOnce = Once()
     private val fatigueOnce = Once()
     private val parkRemind = Once() // M12: 정차마다 1회
+    private var greenSaid = false        // 이번 신호에 출발 알림을 했나
     private var quiet = false            // 경고·깜빡이·후진·큰 조향 중
     private val seat = SeatEdge()
     private var lastTell: String? = null
@@ -290,6 +291,17 @@ class RoomService : Service() {
         val tr = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { forcedTrip = i.getIntExtra("min", -1).takeIf { it >= 0 }; Log.i("ROOM", "debug trip force=$forcedTrip") }
         }
+        // adb shell am broadcast -a ztw.carbiseo.SIGNAL --ei left 4 (초록불까지 남은 초). 5초 넘게 남은 값이 오면 다음 신호로 보고 다시 말할 수 있게.
+        // ponytail: 실시간 신호 API는 강릉시만 공개(data.go.kr 15140011, 키 없음). 키 생기면 서버에서 교차로별 남은 초 → 같은 입력으로.
+        val sig = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                val left = i.getIntExtra("left", -1)
+                if (left > 5) greenSaid = false
+                val go = !greenSaid && greenSoon(left, machine.signals.gear, adapters.speedKmh, quiet || listening || talk.step != NotifTalk.Step.NONE)
+                Log.i("ROOM", "debug signal left=$left -> ${if (go) "say" else "skip"}")
+                if (go) { greenSaid = true; speaker.speak("곧 초록불이에요, 출발 준비하세요.") }
+            }
+        }
         // adb shell am broadcast -a ztw.carbiseo.LOC --ef lat 37.41 --ef lng 127.09 [--ez home true = 그 좌표를 집으로] (lat 0 = 해제, 내비 실제 위치로)
         val loc = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
@@ -316,7 +328,7 @@ class RoomService : Service() {
         val hear = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { runCatching { java.io.File(filesDir, "hear.pcm").readBytes() }.onSuccess { Log.i("ROOM", "debug hear ${it.size}B"); voice.armed = it } }
         }
-        for ((rc, action) in listOf(hear to "ztw.carbiseo.HEAR", say to "ztw.carbiseo.SAY", wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP", loc to "ztw.carbiseo.LOC", tm to "ztw.carbiseo.TIME")) {
+        for ((rc, action) in listOf(hear to "ztw.carbiseo.HEAR", say to "ztw.carbiseo.SAY", wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP", loc to "ztw.carbiseo.LOC", tm to "ztw.carbiseo.TIME", sig to "ztw.carbiseo.SIGNAL")) {
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(rc, IntentFilter(action), Context.RECEIVER_EXPORTED) else registerReceiver(rc, IntentFilter(action))
             receivers += rc
         }
