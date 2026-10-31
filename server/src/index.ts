@@ -259,7 +259,9 @@ export default {
       let cc: Record<string, any> | null = null; // car_context: 방·ETA·차량 맥락
       let isOwner = sameNumber(callerNumber(raw), env.OWNER_NUMBER);
       let recent: Recent[] = [];
+      let clk = now(); // 대본의 요일·시각(평일/저녁/주말). 녹화용 시연 시각이 있으면 그만큼 민다
       try {
+        clk += Number(await kvGet(env.DB, "demo_offset")) || 0;
         if (isOwner && (await kvGet(env.DB, "owner_as_guest"))) isOwner = false; // 녹화용 스위치: 주인 번호도 손님 대본으로
         cc = freshCtx(await env.DB.prepare("SELECT value,updated_at FROM kv WHERE key='car_context'").first<{ value: string; updated_at: number }>(), now());
         room = parseRoom(cc?.room);
@@ -278,7 +280,7 @@ export default {
         const instruction = ownerScript({ owner, name, room, eta, schedule, recent, nowMs: now(), passenger: cc?.passenger === true });
         return json({ CallContext: { Instruction: instruction, Variables: { room: room ?? "UNKNOWN", owner_mode: "1" } } });
       }
-      const s = pickScript(room, owner, name, eta, mode, nextEventAt(schedule, now()), cc);
+      const s = pickScript(room, owner, name, eta, mode, nextEventAt(schedule, now()), cc, clk);
       const callId = field(raw, ["callid", "callsid", "call_id"]);
       const report = mode === "ai" && CALL_ID.test(callId) ? reportLine(callId) : ""; // 안내 멘트(ment·off)는 대화가 없어 생략
       return json({ CallContext: { Instruction: s.instruction + report, Variables: { room: s.room ?? "UNKNOWN", car: carChip(cc, now()) } } });
@@ -416,6 +418,14 @@ export default {
         const on = String((await req.formData()).get("on")) === "1";
         await env.DB.prepare("INSERT OR REPLACE INTO kv(key,value,updated_at) VALUES('owner_as_guest',?,?)").bind(JSON.stringify(on), now()).run();
         return html(on ? "주인 번호를 손님으로 취급합니다(켜짐)" : "주인 번호는 주인 모드입니다(꺼짐)");
+      }
+      // 녹화용 시연 시각: at=2026-11-02T10:30(KST) → 손님 대본의 평일·저녁·주말 판단만 그 시각으로. at=none 해제
+      if (m === "POST" && pathname === "/admin/demo-clock") {
+        const at = String((await req.formData()).get("at") ?? "none");
+        const t = Date.parse(`${at}:00+09:00`);
+        const off = Number.isNaN(t) ? 0 : t - now();
+        await env.DB.prepare("INSERT OR REPLACE INTO kv(key,value,updated_at) VALUES('demo_offset',?,?)").bind(JSON.stringify(off), now()).run();
+        return html(off ? `시연 시각 ${at} (대본만)` : "시연 시각 해제(실제 시각)");
       }
       // 녹화 전 부재중 카드 비우기. id는 AUTOINCREMENT라 차의 since 커서와 어긋나지 않는다.
       if (m === "POST" && pathname === "/admin/reset-inbox") {

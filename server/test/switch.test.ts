@@ -65,3 +65,12 @@ test("/car/inbox: 비었으면 min_id null(차가 카드를 비운다)", async (
   const r = await worker.fetch(new Request("https://x/car/inbox?since=9", { headers: { authorization: "Bearer t" } }), env);
   assert.deepEqual(await r.json(), { items: [], min_id: null });
 });
+
+test("/admin/demo-clock: 시연 시각만큼 offset 저장, none이면 0", async () => {
+  const env = mkEnv();
+  await admin(env, "/admin/demo-clock", { at: "2030-01-07T10:30" });
+  const want = Date.parse("2030-01-07T10:30:00+09:00") - Date.now();
+  assert.ok(Math.abs(Number(env.DB.kv.demo_offset) - want) < 5000);
+  await admin(env, "/admin/demo-clock", { at: "none" });
+  assert.equal(env.DB.kv.demo_offset, "0");
+});
