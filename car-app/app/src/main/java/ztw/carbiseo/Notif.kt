@@ -59,8 +59,11 @@ fun voiceCmd(said: String?): Cmd {
     }
 }
 
-/** 한 턴의 결과: 말할 문장, 이어서 들을지, 서버에 보낼 답장(알림 id, 내용). */
-data class Turn(val say: String?, val listen: Boolean = false, val send: Pair<Long, String>? = null)
+/** 한 턴의 결과: 말할 문장, 이어서 들을지, 서버에 보낼 답장(알림 id, 내용), 다 읽어 준 알림 id(카드에서 뺀다). */
+data class Turn(val say: String?, val listen: Boolean = false, val send: Pair<Long, String>? = null, val done: List<Long> = emptyList())
+
+/** 화면 카드·건수: 읽어 준(답장은 읽은 뒤라 포함) 폰 알림은 뺀다. '나중에'는 "화면에 남겨 둘게요"라 남는다. */
+fun unread(items: List<InboxItem>, done: Set<Long>) = items.filter { it.kind != "notif" || it.id !in done }
 
 /** 알림 대화: 제안 → (읽어줘) 낭독 → (답장 …) 되읽기 → (응) 대기열. 그 밖의 대답은 카드로 남긴다. */
 class NotifTalk {
@@ -87,7 +90,7 @@ class NotifTalk {
             st == Step.OFFER && c == Cmd.Read -> {
                 val more = items.any { it.replyable }
                 step = if (more) Step.AFTER_READ else Step.NONE
-                Turn(sentences(readAloud(items, favs), if (more) "답장하시려면 '답장' 하고 말씀하세요" else null), listen = more)
+                Turn(sentences(readAloud(items, favs), if (more) "답장하시려면 '답장' 하고 말씀하세요" else null), listen = more, done = items.take(5).map { it.id })
             }
             st == Step.OFFER -> Turn("화면에 남겨 둘게요.")
             else -> Turn(null)

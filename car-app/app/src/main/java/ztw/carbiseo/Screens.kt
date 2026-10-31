@@ -189,7 +189,7 @@ private fun BgImage(f: File, ver: Int, pol: BgPolicy): Boolean {
 
 @Composable
 private fun Park(onImage: Boolean, onSettings: () -> Unit) {
-    val items = parkOrder(RoomService.inbox)
+    val items = parkOrder(unread(RoomService.inbox, RoomService.notifDone))
     val list = rememberLazyListState()
     val newest = RoomService.inbox.maxOfOrNull { it.id }
     LaunchedEffect(newest) { if (newest != null) list.animateScrollToItem(0) } // 새 카드가 위에 숨지 않게
@@ -435,7 +435,7 @@ private fun Work(r: String) {
 
 @Composable
 private fun Rest() {
-    val n = todo(RoomService.inbox, RoomService.seen)
+    val n = todo(unread(RoomService.inbox, RoomService.notifDone), RoomService.seen)
     Column(Modifier.fillMaxSize().padding(24.dp)) {
         Text(roomName("DRIVE_REST"), color = RestAcc, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Text("오늘 일은 여기까지", color = RestInk, fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Black)

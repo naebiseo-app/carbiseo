@@ -116,6 +116,7 @@ class RoomService : Service() {
 
     private fun runTurn(t: Turn) {
         t.send?.let { (id, text) -> net.execute { val ok = Server.reply(id, text); Log.i("ROOM", "reply $id -> ${if (ok) "ok" else "FAIL"}"); if (!ok) ui.post { speaker.speak("답장을 못 보냈어요. 잠시 뒤 다시 해 주세요.") } } }
+        if (t.done.isNotEmpty()) markDone(this, t.done)
         t.say?.let { speaker.speak(it, if (t.listen) ::listenNow else null) }
         askStep = talk.step
     }
@@ -199,10 +200,11 @@ class RoomService : Service() {
             val r = p.getInt("rest_min", REST_DEFAULT_MIN).takeIf { m -> m != 1 } ?: REST_DEFAULT_MIN
             // H9: 동승자 모드는 저장하지 않는다(이번 운전만). M5·H7: 본 카드·넘긴 건은 재시작해도 유지.
             val sn = p.getString("seen", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
+            val nd = p.getString("notif_done", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
             val df = decodeDeferred(p.getString("deferred", "")); val fw = p.getBoolean("forward_ok", false)
             val fv = p.getString("fav_senders", "").orEmpty(); ui.post { favs = parseFavs(fv) }
             val sd = p.getBoolean("setup_done", false); val md = p.getString("mode", "ai") ?: "ai"; val bd = p.getLong("brief_day", -1)
-            ui.post { restMin = r; seen = sn + seen; deferred = df + deferred; forwardOk = forwardOk || fw; setupDone = sd; mode = md; briefDay = bd }
+            ui.post { restMin = r; seen = sn + seen; notifDone = nd + notifDone; deferred = df + deferred; forwardOk = forwardOk || fw; setupDone = sd; mode = md; briefDay = bd }
         }
         latch = AlertLatch(Clock.systemDefaultZone())
         machine = RoomStateMachine(clock) // settings = 기본 상수. 설정 화면이 machine.settings를 덮어쓴다.
@@ -399,6 +401,12 @@ class RoomService : Service() {
             seen = seen + id
             val s = seen.sorted().takeLast(300).joinToString(",")
             save(c) { putString("seen", s) }
+        }
+        var notifDone by mutableStateOf(setOf<Long>()); private set // 읽어 준 폰 알림 id: 카드·건수에서 뺀다. prefs 저장(최근 300)
+        fun markDone(c: Context, ids: List<Long>) {
+            notifDone = notifDone + ids
+            val s = notifDone.sorted().takeLast(300).joinToString(",")
+            save(c) { putString("notif_done", s) }
         }
         fun confirmForward(c: Context) { forwardOk = true; save(c) { putBoolean("forward_ok", true) } }
         fun finishSetup(c: Context) { setupDone = true; save(c) { putBoolean("setup_done", true) } }

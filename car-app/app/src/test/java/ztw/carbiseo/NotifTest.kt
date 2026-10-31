@@ -95,6 +95,14 @@ class NotifTest {
         assertEquals("김부장님, 카톡. 자료 보냈어요. 답장하시려면 '답장' 하고 말씀하세요.", t.hear("읽어줘", favs).say)
     }
 
+    @Test fun 읽어준_알림은_카드에서_뺌() {
+        val t = NotifTalk(); val l = listOf(n(1, "김부장"), n(2, "엄마"))
+        t.offer(l, favs); assertEquals(listOf(1L, 2L), t.hear("읽어줘", favs).done)
+        t.offer(l, favs); assertEquals(emptyList<Long>(), t.hear("나중에", favs).done) // 나중에 = 카드로 남김
+        val call = InboxItem(3, "고객", "견적", false, 0, "")
+        assertEquals(listOf(2L, 3L), unread(l + call, setOf(1L, 3L)).map { it.id }) // 통화 카드는 그대로
+    }
+
     @Test fun 즐겨찾기_설정_문자열() {
         assertEquals(setOf("엄마", "아빠"), parseFavs(" 엄마, 아빠 ,,"))
         assertEquals(emptySet<String>(), parseFavs(""))
