@@ -3,8 +3,8 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 val envLines = file("../../.env").takeIf { it.exists() }?.readLines().orEmpty()
 fun env(k: String) = envLines.firstOrNull { it.startsWith("$k=") }?.substringAfter("=")?.trim()?.trim { it.code == 34 || it.code == 39 } ?: ""
 val carToken = env("CAR_TOKEN")
-// release 서명: 저장소 밖 현대차공모전_keys/keystore.properties. 없으면 서명 없이 빌드된다.
-val keyDir = file("../../../현대차공모전_keys")
+// release 서명: 저장소 밖 07_내비서/keys/keystore.properties. 없으면 서명 없이 빌드된다.
+val keyDir = file("../../../keys")
 val keyProps = File(keyDir, "keystore.properties").takeIf { it.exists() }?.readLines().orEmpty().filter { "=" in it }.associate { it.substringBefore("=").trim() to it.substringAfter("=").trim() }
 android {
     namespace = "ztw.carbiseo"
