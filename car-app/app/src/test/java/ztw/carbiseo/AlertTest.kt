@@ -56,7 +56,7 @@ class AlertTest {
         assertNull(h.offer("b", true))
         assertNull(h.offer("c", true))
         assertNull(h.release(true, Room.DRIVE_WORK))
-        assertEquals("c", h.release(false, Room.DRIVE_WORK))
+        assertEquals("c.", h.release(false, Room.DRIVE_WORK)) // 끝 마침표 보장
         assertNull(h.release(false, Room.DRIVE_WORK))
     }
 

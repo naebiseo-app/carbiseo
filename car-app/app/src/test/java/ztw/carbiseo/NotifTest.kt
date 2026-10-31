@@ -88,6 +88,13 @@ class NotifTest {
         assertEquals(NotifTalk.Step.NONE, t.step)
     }
 
+    @Test fun 문장_끝_마침표_보장() {
+        assertEquals("보냈어요. 답장하시려면.", sentences("보냈어요 \n", null, "", "답장하시려면"))
+        assertEquals("정말? 네!", sentences("정말?", "네!"))
+        val t = NotifTalk(); t.offer(listOf(n(1, "김부장", "자료 보냈어요 ")), favs)
+        assertEquals("김부장님, 카톡. 자료 보냈어요. 답장하시려면 '답장' 하고 말씀하세요.", t.hear("읽어줘", favs).say)
+    }
+
     @Test fun 즐겨찾기_설정_문자열() {
         assertEquals(setOf("엄마", "아빠"), parseFavs(" 엄마, 아빠 ,,"))
         assertEquals(emptySet<String>(), parseFavs(""))

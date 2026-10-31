@@ -34,7 +34,7 @@ fun notifSpeech(items: List<InboxItem>, favs: Set<String>): String? {
 
 /** 낭독: 보낸이·앱·내용. 최대 5건(길면 운전에 방해). */
 fun readAloud(items: List<InboxItem>, favs: Set<String>): String =
-    items.take(5).joinToString(" ") { "${who(it.fromLabel, favs)}, ${appShort(it.app)}. ${it.summary.take(200).let { t -> if (t.isEmpty() || t.last() in ".?!") t else "$t." }}" } // 문장 끝 쉼(TTS 억양)
+    sentences(*items.take(5).flatMap { listOf("${who(it.fromLabel, favs)}, ${appShort(it.app)}", it.summary.take(200)) }.toTypedArray())
 
 sealed interface Cmd {
     object Read : Cmd; object Later : Cmd; object Yes : Cmd; object No : Cmd; object Unknown : Cmd
@@ -87,7 +87,7 @@ class NotifTalk {
             st == Step.OFFER && c == Cmd.Read -> {
                 val more = items.any { it.replyable }
                 step = if (more) Step.AFTER_READ else Step.NONE
-                Turn(readAloud(items, favs) + if (more) " 답장하시려면 '답장' 하고 말씀하세요." else "", listen = more)
+                Turn(sentences(readAloud(items, favs), if (more) "답장하시려면 '답장' 하고 말씀하세요" else null), listen = more)
             }
             st == Step.OFFER -> Turn("화면에 남겨 둘게요.")
             else -> Turn(null)
