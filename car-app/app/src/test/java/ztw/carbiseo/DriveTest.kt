@@ -131,6 +131,9 @@ class DriveTest {
         assertTrue(fatigued(Room.DRIVE_REST, 300))
         assertFalse(fatigued(Room.PARK, 300))
         assertFalse(fatigued(Room.DRIVE_WORK, null))
+        assertFalse("누르" in fatigueSpeech(Gear.DRIVE)) // H10: 주행 중엔 버튼이 안 보인다
+        assertTrue(fatigueSpeech(Gear.DRIVE).endsWith("다음 휴게소에서 쉬어 가세요."))
+        assertTrue("휴게소 버튼" in fatigueSpeech(Gear.PARK))
     }
 
     @Test fun 최근_목적지에서_집_찾기() {

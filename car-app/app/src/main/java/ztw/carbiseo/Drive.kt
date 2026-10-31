@@ -126,7 +126,9 @@ fun busyManeuver(turn: Boolean, gear: Gear, steerDeg: Float?): Boolean =
 
 /** C② 피로 모드: 트립 주행시간이 기준 이상이면 전화 알림은 전부 보관(음성 없음). */
 const val FATIGUE_MIN = 120
-const val FATIGUE_SPEECH = "두 시간째 운전 중이에요. 전화는 제가 다 받아 둘게요. 쉬어 가시려면 휴게소 버튼을 누르세요"
+// H10: D에선 시스템이 앱 화면을 가려 버튼이 안 보인다 → 주행 중엔 누르라고 하지 않는다. 버튼 안내는 P에서만.
+fun fatigueSpeech(gear: Gear): String = "두 시간째 운전 중이에요. 전화는 제가 다 받아 둘게요. " +
+    if (gear == Gear.PARK) "쉬어 가시려면 휴게소 버튼을 누르세요." else "다음 휴게소에서 쉬어 가세요."
 fun fatigued(room: Room?, tripMin: Int?): Boolean = room != null && room != Room.PARK && (tripMin ?: 0) >= FATIGUE_MIN
 
 const val TELLTALE_SPEECH = "계기판에 빨간 경고등이 켜졌어요. 안전한 곳에 세운 뒤 확인해 주세요"
