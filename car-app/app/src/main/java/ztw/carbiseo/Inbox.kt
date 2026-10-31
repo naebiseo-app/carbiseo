@@ -65,6 +65,12 @@ fun taskDraft(text: String): Pair<String, String> {
     return num to body.trim()
 }
 
+/** O2: 할 일 본문의 `메일: 받는사람 / 제목 / 내용` 줄 -> (받는 사람, 제목, 내용). 없거나 칸이 모자라면 null(= 문자 초안으로 본다). */
+fun mailDraft(text: String): Triple<String, String, String>? {
+    val p = Regex("""메일\s*[:：]\s*(.+)""").find(text)?.groupValues?.get(1)?.split(" / ", limit = 3)?.map { it.trim() } ?: return null
+    return if (p.size == 3 && p[0].isNotEmpty() && p[2].isNotEmpty()) Triple(p[0], p[1], p[2]) else null
+}
+
 /** 서버에서 지워진 카드(관리자 inbox 비우기·30일 삭제)는 차에서도 뺀다. minId: 서버 최소 id(비었으면 Long.MAX_VALUE), null = 모름 → 그대로. */
 fun pruneGone(items: List<InboxItem>, minId: Long?): List<InboxItem> = if (minId == null) items else items.filter { it.id >= minId || it.id >= LOCAL_ID_BASE }
 

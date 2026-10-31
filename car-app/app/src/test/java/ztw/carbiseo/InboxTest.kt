@@ -148,4 +148,13 @@ class InboxTest {
         assertEquals(listOf(local.id, 7L), pruneGone(listOf(local, item(7), item(3)), 5).map { it.id })
         assertEquals(listOf(local.id), pruneGone(listOf(local, item(7)), Long.MAX_VALUE).map { it.id })
     }
+
+    @Test fun 메일_줄이_있으면_메일_초안() {
+        assertEquals(Triple("park@example.com", "회의 자료", "내일 3시 자료 보냅니다"), mailDraft("메일: park@example.com / 회의 자료 / 내일 3시 자료 보냅니다"))
+        assertEquals(Triple("박 대리", "제목", "본문 / 슬래시 포함"), mailDraft("박 대리에게 보내기\n메일：박 대리 / 제목 / 본문 / 슬래시 포함")) // 내용 칸은 나머지 전부
+        assertEquals(Triple("a@b.co", "", "제목 없이"), mailDraft("메일:a@b.co /  / 제목 없이"))
+        assertNull(mailDraft("박 대리 010-1234-5678에게 문자 / 내용: 3시 도착")) // 문자 초안
+        assertNull(mailDraft("메일: park@example.com / 제목만"))               // 칸 모자람
+        assertNull(mailDraft("메일: / 제목 / 내용"))                           // 받는 사람 없음
+    }
 }

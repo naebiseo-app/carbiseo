@@ -262,7 +262,7 @@ private fun Note(i: InboxItem, selected: Boolean, onTap: () -> Unit) {
             color = ParkBody, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         // 카드는 주차 화면에만 있다 = 버튼도 P에서만
         if (i.kind == "task") Button(onTap, Tall.padding(top = 8.dp), colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
-            Text("문자 보내기", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(if (mailDraft(i.summary) != null) "메일 보내기" else "문자 보내기", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
         // H15: 서버가 보관한 실제 번호로 회신(화면엔 끝 4자리만). 문자는 카드를 눌러 확인 시트에서.
         if (i.kind == "call" && i.fromNumber.isNotBlank()) {
@@ -373,7 +373,9 @@ private fun Sheet(i: InboxItem, onDone: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     // H15: 통화 카드는 서버가 보관한 실제 번호로(화면엔 끝 4자리만). '끝번호 0000님' 같은 호칭은 쓰지 않는다.
-    val draft = remember(i.id) { if (i.kind == "task") taskDraft(i.summary) else i.fromNumber to "운전 중이라 전화를 못 받았습니다. 확인하고 다시 연락드리겠습니다." }
+    val mail = remember(i.id) { if (i.kind == "task") mailDraft(i.summary) else null } // O2: 메일 줄이 있으면 문자 대신 메일
+    var subject by remember(i.id) { mutableStateOf(mail?.second ?: "") }
+    val draft = remember(i.id) { if (mail != null) mail.first to mail.third else if (i.kind == "task") taskDraft(i.summary) else i.fromNumber to "운전 중이라 전화를 못 받았습니다. 확인하고 다시 연락드리겠습니다." }
     val auto = i.kind == "call" && i.fromNumber.isNotBlank()
     var number by remember(i.id) { mutableStateOf(draft.first) }
     var text by remember(i.id) { mutableStateOf(draft.second) }
@@ -382,9 +384,11 @@ private fun Sheet(i: InboxItem, onDone: () -> Unit) {
     val digits = number.filter { it.isDigit() }
     Column(Modifier.fillMaxWidth().background(SheetBg, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("${if (i.kind == "task") "할 일" else "${label(i)}님께"} 문자 · 보내기 전 확인", color = SheetInk.copy(alpha = 0.8f), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(if (mail != null) "메일 · 보내기 전 확인" else "${if (i.kind == "task") "할 일" else "${label(i)}님께"} 문자 · 보내기 전 확인", color = SheetInk.copy(alpha = 0.8f), fontSize = 16.sp, fontWeight = FontWeight.Bold)
         if (auto) Text("받는 번호 · 끝번호 ${digits.takeLast(4)}(자동)", color = SheetInk, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        else OutlinedTextField(number, { number = it.take(13) }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("받는 번호", fontSize = 16.sp) },
+        else OutlinedTextField(number, { number = it.take(if (mail != null) 80 else 13) }, Modifier.fillMaxWidth(), singleLine = true, label = { Text(if (mail != null) "받는 사람" else "받는 번호", fontSize = 16.sp) },
+            textStyle = TextStyle(color = SheetInk, fontSize = 20.sp))
+        if (mail != null) OutlinedTextField(subject, { subject = it.take(100) }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("제목", fontSize = 16.sp) },
             textStyle = TextStyle(color = SheetInk, fontSize = 20.sp))
         if (edit) OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), textStyle = TextStyle(color = SheetInk, fontSize = 20.sp))
         else Text("“$text”", color = SheetInk, fontSize = 20.sp, lineHeight = 28.sp)
@@ -393,12 +397,12 @@ private fun Sheet(i: InboxItem, onDone: () -> Unit) {
             Button({
                 busy = true
                 scope.launch {
-                    val code = withContext(Dispatchers.IO) { Server.send(if (auto) i.fromLabel else "", digits, text.trim()) }
+                    val code = withContext(Dispatchers.IO) { if (mail != null) Server.mail(number.trim(), subject.trim(), text.trim()) else Server.send(if (auto) i.fromLabel else "", digits, text.trim()) }
                     busy = false
                     toast(ctx, when (code) { "ok" -> "보냈어요"; null -> "서버 연결 실패 — 다시 시도해 주세요"; "overseas_ip_blocked" -> "못 보냄(서버 IP 제한)"; else -> "못 보냄($code)" })
                     if (code == "ok") { RoomService.dropLocal(i.id); onDone() }
                 }
-            }, Tall, enabled = !busy && digits.length in 9..11 && text.isNotBlank(), colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
+            }, Tall, enabled = !busy && (if (mail != null) number.isNotBlank() else digits.length in 9..11) && text.isNotBlank(), colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
                 Text("보내기", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             }
         }

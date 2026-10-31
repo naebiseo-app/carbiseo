@@ -56,6 +56,11 @@ object Server {
     fun postFamilyEta(etaMin: Int): String =
         postJson("/car/family-eta", JSONObject().put("eta_min", etaMin))?.let { if (it.optBoolean("skipped")) "skipped" else if (it.optBoolean("ok")) "ok" else it.str("code").ifEmpty { it.str("error") } } ?: "FAIL"
 
+    /** O2 확인된 메일 발송. 결과는 send와 같은 규칙("ok" 또는 코드, 네트워크 실패면 null). */
+    fun mail(to: String, subject: String, body: String): String? =
+        postJson("/car/mail", JSONObject().put("to", to).put("subject", subject).put("body", body).put("confirmed", true))
+            ?.let { if (it.optBoolean("ok")) "ok" else it.str("code").ifEmpty { it.str("error") } }
+
     /** (새 항목, 서버 최소 id). 최소 id: 서버가 비었으면 Long.MAX_VALUE, 옛 서버(값 없음)면 null. */
     fun fetchInbox(since: Long): Pair<List<InboxItem>, Long?>? = runCatching {
         val c = open("/car/inbox?since=$since", "GET")
