@@ -39,6 +39,23 @@ object Server {
         } finally { c.disconnect() }
     }.getOrNull()
 
+    /** JSON 한 번 보내고 응답 JSON(오류 본문 포함). 네트워크 실패면 null. */
+    private fun postJson(path: String, body: JSONObject): JSONObject? = runCatching {
+        val c = open(path, "POST")
+        c.doOutput = true
+        c.setRequestProperty("Content-Type", "application/json")
+        c.outputStream.use { it.write(body.toString().toByteArray()) }
+        try { JSONObject((if (c.responseCode in 200..299) c.inputStream else c.errorStream).bufferedReader().readText()) } finally { c.disconnect() }
+    }.getOrNull()
+
+    /** H1 가족 번호 저장(숫자 10~11, ""=삭제). 성공하면 가려진 표시("****1234", 삭제면 ""), 실패면 null. 번호는 서버에만 둔다. */
+    fun postFamilyNumber(number: String): String? =
+        postJson("/car/settings", JSONObject().put("family_number", number))?.takeIf { it.optBoolean("ok") }?.optJSONObject("settings")?.str("family_label")
+
+    /** H1 집 문턱: 가족에게 도착 예상 문자(서버가 번호 없으면 skipped). 결과 문자열은 로그용. */
+    fun postFamilyEta(etaMin: Int): String =
+        postJson("/car/family-eta", JSONObject().put("eta_min", etaMin))?.let { if (it.optBoolean("skipped")) "skipped" else if (it.optBoolean("ok")) "ok" else it.str("code").ifEmpty { it.str("error") } } ?: "FAIL"
+
     /** (새 항목, 서버 최소 id). 최소 id: 서버가 비었으면 Long.MAX_VALUE, 옛 서버(값 없음)면 null. */
     fun fetchInbox(since: Long): Pair<List<InboxItem>, Long?>? = runCatching {
         val c = open("/car/inbox?since=$since", "GET")

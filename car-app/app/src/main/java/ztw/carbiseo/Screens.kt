@@ -499,6 +499,20 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
         OutlinedTextField(favText, { favText = it.take(100); RoomService.favs = parseFavs(favText); prefs.edit().putString("fav_senders", favText).apply() },
             Modifier.fillMaxWidth(), singleLine = true, label = { Text("업무 시간 밖에도 바로 읽을 알림 보낸이", fontSize = 18.sp) },
             supportingText = { Text("쉼표로 구분(예: 엄마, 아빠). 나머지는 차를 세우면 묶어서 알려 드려요") }, textStyle = TextStyle(color = ParkInk, fontSize = 22.sp))
+        // H1: 번호는 서버에만 저장하고 앱엔 가려진 표시(끝 4자리)만 남긴다
+        var family by rememberSaveable { mutableStateOf("") }
+        var familyLabel by rememberSaveable { mutableStateOf(prefs.getString("family_label", "") ?: "") }
+        OutlinedTextField(family, { family = it.filter(Char::isDigit).take(11) }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("가족 번호(집에 가까워지면 도착 문자)", fontSize = 18.sp) },
+            supportingText = { Text(if (familyLabel.isNotEmpty()) "저장됨 $familyLabel · 비우고 저장하면 지워요" else "숫자 10~11자리") }, textStyle = TextStyle(color = ParkInk, fontSize = 22.sp))
+        Button({
+            scope.launch {
+                val l = withContext(Dispatchers.IO) { Server.postFamilyNumber(family) }
+                if (l != null) { familyLabel = l; family = ""; prefs.edit().putString("family_label", l).apply() }
+                toast(ctx, if (l != null) "저장했어요" else "저장 실패 — 다시 시도해 주세요")
+            }
+        }, Tall, enabled = family.isEmpty() || family.length in 10..11, colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
+            Text("가족 번호 저장", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        }
         Text("전화 응대", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         ModeButtons()
         OutlinedButton({ RoomService.reopenSetup(ctx); onClose() }, Tall) { Text("처음 설정(착신·방해 금지) 다시 보기", color = ParkInk, fontSize = 18.sp) }

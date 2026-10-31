@@ -78,6 +78,7 @@ class RoomService : Service() {
     private var pending = Ask.NONE
     private var lateEvent: Pair<Event, Int>? = null
     private val lateAsked = mutableSetOf<Long>() // 이미 물은 일정(start)
+    private var familyDay = -1L // 가족에게 도착 예상을 보낸 날(하루 한 번)
     private var restSnoozeUntil = 0L // 휴식 제안에 '아니'라고 한 뒤 30분(시뮬 시각)
 
     private val poller = object : Runnable {
@@ -223,7 +224,10 @@ class RoomService : Service() {
                     lateBy(now, e, ev.start)?.let { m -> lateAsked += ev.start; lateEvent = ev to m; askVoice(lateSpeech(m), Ask.LATE) }
                 }
             }
-            if (homeOnce.fire(homeSoon(machine.room, machine.signals.destination, machine.settings, e)) && !passenger) say(HOME_SOON_SPEECH)
+            if (homeOnce.fire(homeSoon(machine.room, machine.signals.destination, machine.settings, e))) {
+                if (!passenger) say(HOME_SOON_SPEECH)
+                notifyFamily(e)
+            }
             ui.postDelayed(this, 200)
         }
     }
@@ -242,6 +246,7 @@ class RoomService : Service() {
             val nd = p.getString("notif_done", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
             val df = decodeDeferred(p.getString("deferred", "")); val fw = p.getBoolean("forward_ok", false)
             val fv = p.getString("fav_senders", "").orEmpty(); ui.post { favs = parseFavs(fv) }
+            val fd = p.getLong("family_day", -1); ui.post { familyDay = fd }
             val sd = p.getBoolean("setup_done", false); val md = p.getString("mode", "ai") ?: "ai"; val bd = p.getLong("brief_day", -1)
             ui.post { restMin = r; seen = sn + seen; notifDone = nd + notifDone; deferred = df + deferred; forwardOk = forwardOk || fw; setupDone = sd; mode = md; briefDay = bd }
         }
@@ -283,6 +288,14 @@ class RoomService : Service() {
         ui.post(ticker)
         ui.post(poller)
         if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) registerDebugRoute()
+    }
+
+    /** H1: 집 문턱에서 하루 한 번 서버에 가족 문자 요청. 번호가 없으면 서버가 건너뛴다. 결과는 로그만. */
+    private fun notifyFamily(etaMin: Int?) {
+        val m = etaMin ?: return
+        val t = today(); if (familyDay == t) return
+        familyDay = t
+        net.execute { prefs.edit().putLong("family_day", t).apply(); Log.i("ROOM", "family eta $m -> ${Server.postFamilyEta(m)}") }
     }
 
     /** H7: 오늘 첫 업무 운전에서 '어제 넘긴 전화 N건' 한 문장. 하루 1회. */
