@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { summaryCard, transcriptTarget } from "../src/index.ts";
+import { summaryCard, transcriptTarget, statusDone } from "../src/index.ts";
 
 // 10-30 실제 summary.completed 본문 형식(번호·ID는 가짜)
 const body = (dir: string, sum: object) => new URLSearchParams({
@@ -41,4 +41,11 @@ test("급함 판정: 실제 요약 문장 표현들", () => {
     "월급 지급 일정 문의", "부품 공급한 업체에서 확인 전화", "지난 회의 때 언급한 자료 요청", "급할 건 없고 시간 될 때 회신"])
     assert.equal(u(s), 0, s);
   assert.equal(summaryCard(body("inbound", { coreSummary: "견적 문의", followUps: ["오늘 중 빨리 회신"] }))?.urgent, 1); // 후속 조치도 본다
+});
+
+test("상태 통지: 끝난 통화만 받아쓰기 대상(폼·JSON)", () => {
+  assert.equal(statusDone("CallStatus=completed&CallId=CAe210942f21a47ab8e7eb36072fff5480"), "CAe210942f21a47ab8e7eb36072fff5480");
+  assert.equal(statusDone(JSON.stringify({ status: "completed", callId: "CAe210942f21a47ab8e7eb36072fff5480" })), "CAe210942f21a47ab8e7eb36072fff5480");
+  assert.equal(statusDone("CallStatus=answered&CallId=CAe210942f21a47ab8e7eb36072fff5480"), null);
+  assert.equal(statusDone("CallStatus=completed&CallId=../x"), null);
 });

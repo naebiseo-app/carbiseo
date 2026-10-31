@@ -102,6 +102,16 @@ export async function relaySend(env: Pick<Env, "SMS_RELAY_URL" | "SMS_RELAY_SECR
 }
 
 /** 받은 전화의 AI 통화가 끝났으면 그 CallId. */
+// 상태 통지 본문(폼 또는 JSON)에서 '끝난 통화'의 CallId. 키 대소문자 무시.
+export function statusDone(raw: string): string | null {
+  let o: Record<string, unknown> = {};
+  try { o = JSON.parse(raw); } catch { o = Object.fromEntries(new URLSearchParams(raw)); }
+  const get = (...ks: string[]) => { const hit = Object.entries(o ?? {}).find(([k]) => ks.includes(k.toLowerCase())); return hit ? String(hit[1]) : ""; };
+  const st = get("callstatus", "status", "event", "statuscallbackevent").toLowerCase();
+  const id = get("callid", "callsid", "call_id");
+  return st.includes("completed") && /^CA[0-9a-f]{20,40}$/i.test(id) ? id : null;
+}
+
 export function transcriptTarget(raw: string) {
   const f = new URLSearchParams(raw);
   return f.get("Event") === "agent.disconnected" && f.get("Direction") !== "outbound" ? f.get("CallId") || null : null;
@@ -205,6 +215,20 @@ export default {
       }
       const s = pickScript(room, owner, name, eta, mode, nextEventAt(schedule, now()), cc);
       return json({ CallContext: { Instruction: s.instruction, Variables: { room: s.room ?? "UNKNOWN", car: carChip(cc, now()) } } });
+    }
+
+    // 번호 statusCallback: 통화가 끝나는 즉시 받아쓰기 요청 → 약 16초 뒤 summary.completed(카드). managed_agent 모드는 agent.disconnected 웹훅이 안 와서(10-31 실측) 이 경로가 주 경로
+    if (m === "POST" && pathname.startsWith("/clawops/status/")) {
+      if (pathname.slice("/clawops/status/".length) !== env.CALL_CONTEXT_SECRET) return json({ error: "not found" }, 404);
+      const raw = await req.text();
+      const id = statusDone(raw);
+      await saveInbox(env.DB, "event", "status", null, raw, { ct: req.headers.get("content-type") });
+      if (id && env.CLAWOPS_API_KEY) {
+        const r = await fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls/${id}/transcript`,
+          { method: "POST", headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}` } });
+        console.log("status transcript request", id, r.status);
+      }
+      return json({ ok: true });
     }
 
     if (m === "POST" && pathname === "/clawops/events") {
