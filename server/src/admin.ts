@@ -83,7 +83,19 @@ export function repliesHtml(rows: ReplyRow[]): string {
   return "<ul>" + rows.map((r) => `<li>${esc(r.from_label)}님께 “${esc(r.summary)}” · ${r.status === "queued" ? "보낼 답장" : "폰에 전달"}</li>`).join("") + "</ul>";
 }
 
-export function adminPage(msg = "", replies: ReplyRow[] = []): string {
+export type MailRow = { from_label: string; summary: string; created_at: number; meta: string };
+
+// 데모 메일함: 차에서 '보낸' 메일(실제 발송 없음). 받는 사람·제목·본문 앞 80자·시각
+export function mailsHtml(rows: MailRow[]): string {
+  if (!rows.length) return "<p>아직 없습니다.</p>";
+  return "<ul>" + rows.map((r) => {
+    let subject = "";
+    try { subject = JSON.parse(r.meta).subject ?? ""; } catch { /* 제목 없음 */ }
+    return `<li>${esc(r.from_label)}님께 · ${esc(subject)} · ${esc((r.summary ?? "").slice(0, 80))} · ${hm(r.created_at)}</li>`;
+  }).join("") + "</ul>";
+}
+
+export function adminPage(msg = "", replies: ReplyRow[] = [], mails: MailRow[] = []): string {
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>내비서 데모</title>
 <style>body{font:18px sans-serif;max-width:560px;margin:24px auto;padding:0 16px;background:#F3EEE4;color:#2B2620}
@@ -102,6 +114,7 @@ form{background:#FFFDF8;padding:16px;border-radius:14px;margin:16px 0}.m{font-we
 <label><input type="checkbox" name="replyable" value="1" checked style="width:auto"> 답장 가능</label>
 <button>알림 보내기</button></form>
 <form><h2>보낼 답장</h2><p>차에서 음성으로 만든 답장입니다.</p>${repliesHtml(replies)}</form>
+<form><h2>데모 메일함</h2><p>차에서 보낸 메일입니다(실제로는 발송되지 않고 여기에만 저장).</p>${mailsHtml(mails)}</form>
 <form method="post" action="/admin/reset-schedule"><h2>데모 일정 초기화</h2><p>오늘 일정 3건(지금부터 1·3·5시간 뒤)으로 덮어씁니다.</p><button>초기화</button></form>
 <form method="post" action="/admin/owner-as-guest"><h2>녹화용: 주인 번호를 손님으로</h2><p>켜면 주인 번호로 건 전화도 일반 발신자처럼 AI가 응대합니다. 녹화 뒤 꼭 끄세요.</p><button name="on" value="1">켜기</button><button name="on" value="0">끄기</button></form>
 <form method="post" action="/admin/reset-inbox"><h2>부재중 카드 비우기</h2><p>녹화 전에 inbox를 모두 지웁니다.</p><button>비우기</button></form>

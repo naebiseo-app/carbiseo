@@ -1,5 +1,5 @@
-import { CALL_ID, carChip, callerNumber, cleanName, field, freshCtx, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, reportLine, sameNumber, type Mode, type Recent } from "./script.ts";
-import { adminPage, basicOk, demoSchedule, parseFakeCall, REPLAY_SAID, replayCards, type ReplyRow } from "./admin.ts";
+import { CALL_ID, carChip, callerNumber, cleanName, field, freshCtx, hhmm, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, reportLine, sameNumber, type Mode, type Recent } from "./script.ts";
+import { adminPage, basicOk, demoSchedule, parseFakeCall, REPLAY_SAID, replayCards, type MailRow, type ReplyRow } from "./admin.ts";
 import { parseNotify, parseReply, TAKE_REPLIES_SQL, type Notif } from "./notif.ts";
 
 interface Env {
@@ -233,8 +233,16 @@ export default {
         if (!v) return json({ error: `bad ${k}` }, 400);
         cur[k] = v;
       }
+      if ("family_number" in b) { // 가족 도착 문자 수신번호: 숫자 10~11자리, 빈 값이면 삭제
+        const v = typeof b.family_number === "string" ? b.family_number.replace(/-/g, "") : null;
+        if (v === "") delete cur.family_number;
+        else if (v && /^\d{10,11}$/.test(v)) cur.family_number = v;
+        else return json({ error: "bad family_number" }, 400);
+      }
       await env.DB.prepare("INSERT OR REPLACE INTO kv(key,value,updated_at) VALUES('settings',?,?)").bind(JSON.stringify(cur), Date.now()).run();
-      return json({ ok: true, settings: cur });
+      const out = { ...cur }; // 응답엔 끝 4자리만(차 화면 표시용)
+      if (cur.family_number) out.family_number = out.family_label = `****${cur.family_number.slice(-4)}`;
+      return json({ ok: true, settings: out });
     }
 
     if (m === "GET" && pathname === "/car/inbox") {
@@ -340,6 +348,40 @@ export default {
       return json(r, r.ok ? 200 : 502);
     }
 
+    // 데모 메일함(설계 O2): 실제 메일은 보내지 않고 inbox kind='sent'(channel=mail)에 저장
+    if (m === "POST" && pathname === "/car/mail") {
+      if (!authed) return json({ error: "unauthorized" }, 401);
+      const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+      const to = typeof b.to === "string" ? b.to.trim() : "";
+      const body = typeof b.body === "string" ? b.body.trim() : "";
+      const subject = (typeof b.subject === "string" ? b.subject.trim() : "") || body.slice(0, 20);
+      if (b.confirmed !== true) return json({ error: "confirmed must be true" }, 400);
+      if (to.length < 1 || to.length > 100) return json({ error: "bad to" }, 400);
+      if (body.length < 1 || body.length > 2000) return json({ error: "bad body" }, 400);
+      if (subject.length > 100) return json({ error: "bad subject" }, 400);
+      const r = await env.DB.prepare("INSERT INTO inbox(kind,status,from_label,summary,created_at,meta) VALUES('sent','sent',?,?,?,?)")
+        .bind(to, body, now(), JSON.stringify({ channel: "mail", subject })).run();
+      return json({ ok: true, id: r.meta.last_row_id });
+    }
+
+    // 집 문턱(설계 H1): 가족에게 'N시 N분 도착' 한 줄, 하루 한 번(KST)
+    if (m === "POST" && pathname === "/car/family-eta") {
+      if (!authed) return json({ error: "unauthorized" }, 401);
+      const eta = ((await req.json().catch(() => ({}))) as Record<string, unknown>).eta_min;
+      if (typeof eta !== "number" || !Number.isInteger(eta) || eta < 0 || eta > 120) return json({ error: "eta_min must be integer 0..120" }, 400);
+      const st = (await kvGet(env.DB, "settings")) ?? {};
+      if (!st.family_number) return json({ ok: true, skipped: "no_family" });
+      const t = now();
+      const day = new Date(t + 9 * 3_600_000).toISOString().slice(0, 10);
+      if ((await kvGet(env.DB, "family_sent_day")) === day) return json({ ok: true, skipped: "sent_today" });
+      const text = `${st.owner_label ?? "주인"}님 ${hhmm(t + eta * 60_000)}쯤 도착 예정이에요. (내비서)`;
+      const r = await relaySend(env, st.family_number, text);
+      await env.DB.prepare("INSERT INTO inbox(kind,status,message_id,from_label,summary,created_at,meta) VALUES('sent',?,?,'가족',?,?,?)")
+        .bind(r.ok ? "sent" : "failed", r.message_id, text, t, JSON.stringify({ channel: "family", http: r.http, code: r.code })).run();
+      if (r.ok) await env.DB.prepare("INSERT OR REPLACE INTO kv(key,value,updated_at) VALUES('family_sent_day',?,?)").bind(JSON.stringify(day), t).run();
+      return json(r, r.ok ? 200 : 502);
+    }
+
     // 폰 연결 앱(A안)이 받은 메시지 알림. 차와 같은 토큰
     if (m === "POST" && pathname === "/phone/notify") {
       if (!authed) return json({ error: "unauthorized" }, 401);
@@ -390,7 +432,8 @@ export default {
       // B안: 차가 만든 답장(최근 10건)을 '보낼 답장'으로 보여 준다
       const html = async (msg: string, status = 200) => {
         const { results } = await env.DB.prepare("SELECT from_label,summary,status FROM inbox WHERE kind='reply' ORDER BY id DESC LIMIT 10").all<ReplyRow>();
-        return new Response(adminPage(msg, results), { status, headers: { "content-type": "text/html; charset=utf-8" } });
+        const mails = await env.DB.prepare("SELECT from_label,summary,created_at,meta FROM inbox WHERE kind='sent' AND json_extract(meta,'$.channel')='mail' ORDER BY id DESC LIMIT 20").all<MailRow>();
+        return new Response(adminPage(msg, results, mails.results), { status, headers: { "content-type": "text/html; charset=utf-8" } });
       };
       if (m === "GET" && pathname === "/admin") return html("");
       if (m === "POST" && pathname === "/admin/fake-call") {
