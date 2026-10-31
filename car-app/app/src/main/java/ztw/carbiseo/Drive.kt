@@ -113,6 +113,9 @@ class ShiftClock(@Volatile var offsetMs: Long = 0, private val base: java.time.C
 }
 
 /** H13: 화면 상단 상태 — 거짓으로 '받는 중'이라고 하지 않는다. */
+/** 응대 모드 '끔'은 선택지에서 뺐다: 저장값이 off면 화면엔 한 마디 안내(ment)로 보이고 다음 저장 때 ment가 된다. */
+fun modeShown(mode: String) = if (mode == "off") "ment" else mode
+
 fun readiness(offline: Boolean, forwardOk: Boolean, mode: String): String = when {
     offline -> "서버 연결 끊김 · 알림이 늦어져요"
     !forwardOk -> "AI 응대 준비 안 됨(착신 설정 필요)"

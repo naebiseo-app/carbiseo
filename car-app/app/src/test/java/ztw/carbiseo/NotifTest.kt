@@ -136,4 +136,31 @@ class NotifTest {
         assertEquals(emptyList<InboxItem>(), t.dropStale())
         assertEquals(false, t.waiting)
     }
+
+    @Test fun 번호는_한_자리씩_읽는다() {
+        assertEquals("끝자리 육 공 공 공", spellDigits("끝자리 6000"))
+        assertEquals("끝자리 일 이 삼 사님", spellDigits("****1234님"))
+        assertEquals("전화 공 일 공 일 이 삼 사 오 육 칠 팔 로 왔어요", spellDigits("전화 010-1234-5678 로 왔어요"))
+        assertEquals("공 일 공 일 이 삼 사 오 육 칠 팔", spellDigits("01012345678"))
+    }
+
+    @Test fun 시각_분_금액은_그대로() {
+        for (t in listOf("15:30까지 연락 주세요", "25분 늦어요", "5000원 입금", "번호 3개, 전화 100건", "2026-11-02 일정", "3시 30분")) assertEquals(t, spellDigits(t))
+    }
+
+    private fun call(label: String = "김부장", num: String = "01000000000", sum: String) = InboxItem(1, label, sum, false, 0L, "", fromNumber = num)
+
+    @Test fun 먼저_제안_기한이면_시각_문장() {
+        assertEquals("확인하고 15:30 전에 연락드리겠습니다", callbackMessage(call(sum = "오후 3시 30분까지 견적 부탁")))
+        assertEquals("확인하고 곧 연락드리겠습니다", callbackMessage(call(sum = "회신 부탁드립니다")))
+        assertEquals("김부장님께 '확인하고 곧 연락드리겠습니다'라고 문자 먼저 보내 드릴까요?", callbackAsk(call(sum = "x"), "확인하고 곧 연락드리겠습니다"))
+        assertEquals("01000000000" to "확인하고 곧 연락드리겠습니다", taskDraft(callbackTask(call(sum = "x"), "확인하고 곧 연락드리겠습니다")))
+    }
+
+    @Test fun 먼저_제안_조건이_없으면_묻지_않는다() {
+        assertNull(callbackMessage(call(sum = "그냥 전화 드렸어요")))
+        assertNull(callbackMessage(call(num = "", sum = "회신 부탁")))
+        assertNull(callbackMessage(call(label = "끝번호 0000", sum = "회신 부탁")))
+        assertNull(callbackMessage(call(label = "", sum = "회신 부탁")))
+    }
 }

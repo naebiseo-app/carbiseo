@@ -103,6 +103,10 @@ class DriveTest {
         assertEquals("안내 멘트로 응대 중", readiness(false, true, "ment"))
     }
 
+    @Test fun 저장값_off는_한_마디_안내로_보인다() {
+        assertEquals("ment", modeShown("off")); assertEquals("ment", modeShown("ment")); assertEquals("ai", modeShown("ai"))
+    }
+
     @Test fun 휴식_문장은_누르라고_하지_않는다() {
         assertFalse(REST_SPEECH.contains("누르"))
         assertFalse(roomSpeech(Room.DRIVE_REST)!!.contains("퇴근")) // 토요일 운전도 DRIVE_REST

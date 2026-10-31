@@ -2,6 +2,34 @@ package ztw.carbiseo
 
 // 폰 알림 읽어주기(35 설계). 서버 inbox kind='notif' = 폰 메시지 알림(app·보낸이·내용·답장 가능).
 
+private const val KO_DIGITS = "공일이삼사오육칠팔구"
+// 번호 맥락만: ****1234·끝자리 6000·010-1234-5678·01012345678. 시각(15:30)·분(25분)·금액(5000원)은 걸리지 않는다.
+private val NUMBER_CTX = Regex("""[*●•]+\s*\d{3,}(?:-\d+)*(?!\d)|(?:끝자리|끝번호|끝|뒷자리|번호|전화)\s*\d{3,}(?:-\d+)*(?!\d)(?!\s*[건통개원분명시초%])|(?<![\d-])0\d{1,2}-\d{3,4}-\d{4}(?!\d)|(?<![\d-])\d{3,4}-\d{4}(?!\d)|(?<!\d)0\d{9,10}(?!\d)""")
+
+/** TTS 직전 한 곳(Speaker.speak): 번호 맥락의 3자리 이상 숫자는 '육천'이 아니라 '육 공 공 공'처럼 한 자리씩. */
+fun spellDigits(text: String): String = NUMBER_CTX.replace(text) { m ->
+    Regex("""\d+""").replace(m.value.replace("****", "끝자리 ").replace('-', ' ')) { d -> d.value.map { KO_DIGITS[it - '0'] }.joinToString(" ") }
+}
+
+private val DEADLINE = Regex("""(오전|오후)?\s*(\d{1,2})\s*(?::|시)\s*(\d{1,2})?\s*분?\s*(?:까지|전)""")
+private val REPLY_ASK = Regex("""연락\s*(?:좀\s*)?(?:주|부탁|바라|달라)|회신|콜백|전화\s*(?:좀\s*)?(?:주|부탁|바라|달라)|답장""")
+
+/** 통화 카드에 시간 기한이나 회신 요청이 있고 발신자 이름·번호가 있으면 먼저 보낼 문자 내용, 아니면 null. 이름이 번호 모양이면 호칭으로 못 쓴다. */
+fun callbackMessage(i: InboxItem): String? {
+    if (i.kind != "call" || i.fromLabel.isBlank() || i.fromNumber.isBlank() || Regex("""\d{3}""").containsMatchIn(i.fromLabel)) return null
+    val t = i.summary.ifBlank { i.raw }
+    val hhmm = DEADLINE.find(t)?.let { m ->
+        val h = m.groupValues[2].toInt().let { if (m.groupValues[1] == "오후" && it < 12) it + 12 else it }; val min = m.groupValues[3].ifEmpty { "0" }.toInt()
+        if (h in 0..23 && min in 0..59) "%02d:%02d".format(h, min) else null
+    }
+    if (hhmm == null && !REPLY_ASK.containsMatchIn(t)) return null
+    return "확인하고 ${hhmm?.let { "$it 전에 " } ?: "곧 "}연락드리겠습니다"
+}
+fun callbackAsk(i: InboxItem, msg: String) = "${i.fromLabel}님께 '$msg'라고 문자 먼저 보내 드릴까요?"
+/** 할 일 카드 본문(taskDraft 형식: 번호 + 내용). */
+fun callbackTask(i: InboxItem, msg: String) = "${i.fromLabel}님께 회신 문자 ${i.fromNumber} / 내용: $msg"
+const val CALLBACK_DONE_SPEECH = "할 일에 문자를 준비해 뒀어요. 보내기를 누르면 바로 갑니다."
+
 /** 설정 문자열 "엄마, 아빠" → 이름 집합. */
 fun parseFavs(s: String) = s.split(",", "，").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
 

@@ -74,11 +74,14 @@ class RoomService : Service() {
     private val notifFresh = mutableSetOf<Long>()
     private val notifSaid = mutableSetOf<Long>()
     // 음성으로 묻고 대답을 기다리는 질문(알림 묻기는 talk가 따로). 대답은 heard()가 받는다.
-    private enum class Ask { NONE, LATE, REST, RESERVE }
+    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK }
     private var pending = Ask.NONE
     private var lateEvent: Pair<Event, Int>? = null
     private val lateAsked = mutableSetOf<Long>() // 이미 물은 일정(start)
     private val reserveOnce = Once() // O4: 운전 1회당 한 번
+    private val callFresh = mutableSetOf<Long>() // 이번 실행에 새로 온 통화 카드 id
+    private val callbackAsked = mutableSetOf<Long>() // 문자 먼저 보낼지 이미 물은 카드(카드당 한 번)
+    private var callback: Pair<InboxItem, String>? = null
     private var reserve: Pair<String, String>? = null // 예약 초안을 물은 (목적지 이름, 도착 HH:MM)
     private var forcedDest: String? = null // 디버그 ROUTE의 --es name (에뮬은 내비가 목적지 이름을 안 줄 수 있어서)
     private var familyDay = -1L // 가족에게 도착 예상을 보낸 날(하루 한 번)
@@ -119,6 +122,7 @@ class RoomService : Service() {
             if (fatigued(machine.room, tripMin())) directSpeech(fresh, mode)?.let(::say)
             else hold.offerItems(fresh, machine.room, quiet)?.let { speaker.speak(it) }
         }
+        if (!initial) callFresh += fresh.filter { it.kind == "call" }.map { it.id }
         if (!initial) fresh.filter { it.kind == "notif" }.let { n -> notifFresh += n.map { it.id }; notifQueue += notifNow(n.sortedBy { it.id }, machine.room, favs, off) } // 도착 순(서버는 최신순)
     }
 
@@ -141,6 +145,7 @@ class RoomService : Service() {
         when (p) {
             Ask.LATE -> lateEvent?.let { (ev, m) -> if (yesNo(said) == true) { addLocalTask(lateTask(ev, m)); say(LATE_DONE_SPEECH) } }
             Ask.RESERVE -> reserve?.let { (n, t) -> if (yesNo(said) == true) { addLocalTask(reserveTask(n, t)); say(RESERVE_DONE_SPEECH) } }
+            Ask.CALLBACK -> callback?.let { (i, m) -> if (yesNo(said) == true) { addLocalTask(callbackTask(i, m)); say(CALLBACK_DONE_SPEECH) } }
             Ask.REST -> when (yesNo(said)) {
                 true -> addRestStop(true)
                 false -> { restSnoozeUntil = clock.millis() + REST_SNOOZE_MS; restOnce.reset(); restOffer = false }
@@ -163,7 +168,7 @@ class RoomService : Service() {
 
     /** 음성 인식이 없고(path none) 주행 중이면 대답을 못 받으니 '나중에'(카드로 보관). */
     private fun listenNow() {
-        if (voice.path == "none") { if (!touchOk()) heard("나중에"); return }
+        if (voice.path == "none") { if (!touchOk() || pending == Ask.CALLBACK) heard("나중에"); return }
         listening = true; voice.listen()
     }
 
@@ -209,6 +214,10 @@ class RoomService : Service() {
             if (!q && (talk.step == NotifTalk.Step.NONE || talk.waiting && !listening) && pending == Ask.NONE && notifQueue.isNotEmpty() && machine.room != null && !passenger && !fatigued(machine.room, tripMin())) {
                 offerNotifs((talk.dropStale() + notifQueue).distinctBy { it.id }.sortedBy { it.id }); notifQueue.clear()
             }
+            // 자비스처럼 먼저 제안: 정차 중 안 본 새 통화 카드에 기한·회신 요청이 있으면 카드당 한 번 "문자 먼저 보내 드릴까요?"(알림 묻기가 끝난 뒤)
+            if (machine.room == Room.PARK && !passenger && notifQueue.isEmpty() && canAsk())
+                inbox.firstOrNull { it.id in callFresh && it.id !in seen && it.id !in callbackAsked && callbackMessage(it) != null }?.let { i ->
+                    callbackAsked += i.id; val m = callbackMessage(i)!!; callback = i to m; askVoice(callbackAsk(i, m), Ask.CALLBACK) }
             askTouch = touchOk(); voicePath = voice.path
             // 정수 분이라 != 가 곧 "1분 이상 변화". 방 판정 전이면 첫 방 변경이 같이 올린다.
             val e = adapters.etaMin
@@ -387,11 +396,19 @@ class RoomService : Service() {
         val say = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { Log.i("ROOM", "debug say"); voice.inject(i.getStringExtra("t").orEmpty()) }
         }
+        // adb shell am broadcast -a ztw.carbiseo.CALLCARD --es from 김부장 --es num 01000000000 --es sum "3시 30분까지 연락 주세요" (새 통화 카드 주입, 서버 호출 없음. 정차 상태에서 확인)
+        val cc = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                val id = LOCAL_ID_BASE + clock.millis()
+                inbox = listOf(InboxItem(id, i.getStringExtra("from").orEmpty(), i.getStringExtra("sum").orEmpty(), false, System.currentTimeMillis(), "", fromNumber = i.getStringExtra("num").orEmpty())) + inbox
+                callFresh += id; Log.i("ROOM", "debug callcard $id")
+            }
+        }
         // adb shell am broadcast -a ztw.carbiseo.HEAR (앱 files/hear.pcm을 다음 듣기 때 STT 엔진에 넣기, run-as로 복사, 실측용)
         val hear = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { runCatching { java.io.File(filesDir, "hear.pcm").readBytes() }.onSuccess { Log.i("ROOM", "debug hear ${it.size}B"); voice.armed = it } }
         }
-        for ((rc, action) in listOf(hear to "ztw.carbiseo.HEAR", say to "ztw.carbiseo.SAY", wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP", loc to "ztw.carbiseo.LOC", tm to "ztw.carbiseo.TIME", sig to "ztw.carbiseo.SIGNAL")) {
+        for ((rc, action) in listOf(cc to "ztw.carbiseo.CALLCARD", hear to "ztw.carbiseo.HEAR", say to "ztw.carbiseo.SAY", wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP", loc to "ztw.carbiseo.LOC", tm to "ztw.carbiseo.TIME", sig to "ztw.carbiseo.SIGNAL")) {
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(rc, IntentFilter(action), Context.RECEIVER_EXPORTED) else registerReceiver(rc, IntentFilter(action))
             receivers += rc
         }

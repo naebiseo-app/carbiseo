@@ -346,14 +346,14 @@ private fun FirstRun() {
     }
 }
 
-/** 응대 모드 3택: 서버 저장이 성공해야 바뀐다. */
+/** 응대 모드 2택(끔 없음): 서버 저장이 성공해야 바뀐다. */
 @Composable
 private fun ModeButtons() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        for ((m, t) in listOf("ai" to "AI 응대", "ment" to "안내 멘트", "off" to "끔")) {
-            val on = RoomService.mode == m
+        for ((m, t) in listOf("ai" to "AI 응대", "ment" to "한 마디 안내")) {
+            val on = modeShown(RoomService.mode) == m
             Button({
                 scope.launch {
                     val ok = withContext(Dispatchers.IO) { Server.postMode(m).also { if (it) ctx.getSharedPreferences("car_ui", Context.MODE_PRIVATE).edit().putString("mode", m).apply() } }
@@ -553,7 +553,7 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
         Text("전화 응대", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         ModeButtons()
         OutlinedButton({ RoomService.reopenSetup(ctx); onClose() }, Tall) { Text("처음 설정(착신·방해 금지) 다시 보기", color = ParkInk, fontSize = 18.sp) }
-        NameField("내 호칭", owner) { owner = it }
+        NameField("내 이름(전화 인사에 나옴)", owner, "전화 받을 때 '○○님의 AI 비서입니다'로 소개해요") { owner = it }
         NameField("AI 비서 이름", assistant) { assistant = it }
         Button({
             val o = owner.trim(); val a = assistant.trim()
@@ -569,8 +569,8 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
 }
 
 @Composable
-private fun NameField(label: String, v: String, onChange: (String) -> Unit) = OutlinedTextField(
+private fun NameField(label: String, v: String, hint: String = "1~10자, 글자·숫자·공백만", onChange: (String) -> Unit) = OutlinedTextField(
     v, { onChange(it.take(10)) }, Modifier.fillMaxWidth(), singleLine = true, isError = v.isNotEmpty() && !validName(v),
-    label = { Text(label, fontSize = 18.sp) }, supportingText = { Text("1~10자, 글자·숫자·공백만") },
+    label = { Text(label, fontSize = 18.sp) }, supportingText = { Text(hint) },
     textStyle = TextStyle(color = ParkInk, fontSize = 22.sp),
 )

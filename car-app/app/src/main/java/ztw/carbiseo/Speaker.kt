@@ -49,7 +49,8 @@ class Speaker(private val ctx: Context) {
     private fun afterSpeech() = ui.post { then?.let { then = null; it() } }
 
     /** then: 다 읽은 뒤 할 일. 엔진 완료 콜백이 안 오면 글자 수로 어림한 시간 뒤. */
-    fun speak(text: String, then: (() -> Unit)? = null) {
+    fun speak(said: String, then: (() -> Unit)? = null) {
+        val text = spellDigits(said) // 모든 낭독이 지나는 한 곳: 번호는 한 자리씩
         this.then = then; val g = ++gen
         if (then != null) ui.postDelayed({ if (g == gen) afterSpeech() }, 1500L + text.length * 200L) // ponytail: 어림값, 콜백이 늘 오면 지워도 됨
         lastText = text
