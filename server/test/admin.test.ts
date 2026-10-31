@@ -30,7 +30,7 @@ test("데모 일정은 지금 이후 3건, 좌표 포함, 시간순", () => {
   const now = Date.UTC(2026, 9, 29, 5, 10);
   const s = demoSchedule(now);
   assert.equal(s.length, 3);
-  assert.ok(s.every((e) => e.start > now && e.lat && e.lng && e.place && e.title));
+  assert.ok(s.every((e) => e.start > now && e.lat && e.lng && e.place && e.title && e.contact && !/d{4}/.test(e.contact)));
   assert.equal(s[0].start, Date.UTC(2026, 9, 29, 6, 30)); // 05:30 올림 + 1h
   assert.ok(s[0].start < s[1].start && s[1].start < s[2].start);
 });

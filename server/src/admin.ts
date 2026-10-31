@@ -23,7 +23,7 @@ export function parseFakeCall(f: { get(k: string): unknown }): FakeCall | null {
   return { from_label: name, summary, urgent: !["", "0", "false", "off"].includes(String(f.get("urgent") ?? "").trim().toLowerCase()) || isUrgent(summary) ? 1 : 0 }; // 체크 또는 실제 요약과 같은 낱말 판정
 }
 
-export type DemoEvent = { title: string; start: number; place: string; lat: number; lng: number };
+export type DemoEvent = { title: string; start: number; place: string; lat: number; lng: number; contact: string }; // contact = 이름(번호 아님)
 
 // 오늘 일정 3건: 지금부터 30분 단위로 올림한 시각 + 1h·3h·5h. 시연을 언제 하든 다음 일정이 남아 있게.
 export function demoSchedule(nowMs: number): DemoEvent[] {
@@ -31,9 +31,9 @@ export function demoSchedule(nowMs: number): DemoEvent[] {
   const base = Math.ceil(nowMs / slot) * slot;
   const h = 3_600_000;
   return [
-    { title: "한빛물산 납품 미팅", start: base + h, place: "판교역", lat: 37.3948, lng: 127.1112 },
-    { title: "새봄상사 견적 상담", start: base + 3 * h, place: "수원시청", lat: 37.2636, lng: 127.0286 },
-    { title: "주간 팀 회의", start: base + 5 * h, place: "서울시청", lat: 37.5663, lng: 126.9779 },
+    { title: "한빛물산 납품 미팅", start: base + h, place: "판교역", lat: 37.3948, lng: 127.1112, contact: "김민수 과장" },
+    { title: "새봄상사 견적 상담", start: base + 3 * h, place: "수원시청", lat: 37.2636, lng: 127.0286, contact: "이서연 대리" },
+    { title: "주간 팀 회의", start: base + 5 * h, place: "서울시청", lat: 37.5663, lng: 126.9779, contact: "박지훈 팀장" },
   ];
 }
 
