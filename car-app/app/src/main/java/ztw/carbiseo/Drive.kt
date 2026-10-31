@@ -107,10 +107,23 @@ fun readiness(offline: Boolean, forwardOk: Boolean, mode: String): String = when
 }
 
 /** F6 데모 일정 1건(서버 /car/schedule). start = epoch ms. */
-data class Event(val title: String, val start: Long, val place: String, val at: LatLng)
+data class Event(val title: String, val start: Long, val place: String, val at: LatLng, val contact: String = "")
 
 /** F7: 아직 시작 안 한 일정 중 가장 이른 것. */
 fun nextEvent(events: List<Event>, nowMs: Long): Event? = events.filter { it.start > nowMs }.minByOrNull { it.start }
+
+const val LATE_GRACE_MS = 2 * 60_000L
+const val LATE_DONE_SPEECH = "정차하시면 보내기 버튼을 눌러 주세요"
+fun lateSpeech(min: Int) = "다음 일정에 약 ${min}분 늦을 것 같아요. 늦는다고 문자 보낼까요?"
+
+/** F4: 지금 + 남은 분 > 일정 시작 + 2분이면 늦을 분(반올림), 아니면 null. */
+fun lateBy(nowMs: Long, etaMin: Int?, eventStartMs: Long): Int? {
+    val over = nowMs + (etaMin ?: return null) * 60_000L - eventStartMs
+    return if (over > LATE_GRACE_MS) Math.round(over / 60_000.0).toInt() else null
+}
+
+/** F4: 지연 문자 초안 = 할 일 카드 본문(taskDraft 형식). 연락처가 일정에 있으면 번호로 들어간다. */
+fun lateTask(e: Event, min: Int) = "${e.title} 일정 지연 알림${if (e.contact.isNotBlank()) " ${e.contact}" else ""} / 내용: 운전 중이라 약 ${min}분 늦을 것 같습니다. 죄송합니다."
 
 /** 방이 바뀔 때 한 문장. PARK는 무음. */
 fun roomSpeech(r: Room): String? = when (r) {

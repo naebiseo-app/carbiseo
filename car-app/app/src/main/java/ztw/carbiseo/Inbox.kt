@@ -66,7 +66,10 @@ fun taskDraft(text: String): Pair<String, String> {
 }
 
 /** 서버에서 지워진 카드(관리자 inbox 비우기·30일 삭제)는 차에서도 뺀다. minId: 서버 최소 id(비었으면 Long.MAX_VALUE), null = 모름 → 그대로. */
-fun pruneGone(items: List<InboxItem>, minId: Long?): List<InboxItem> = if (minId == null) items else items.filter { it.id >= minId }
+fun pruneGone(items: List<InboxItem>, minId: Long?): List<InboxItem> = if (minId == null) items else items.filter { it.id >= minId || it.id >= LOCAL_ID_BASE }
+
+/** 차 안에서 만든 할 일 카드(서버에 없음)의 id 시작값. 서버 id와 겹치지 않고 서버 정리(pruneGone)에 지워지지 않는다. */
+const val LOCAL_ID_BASE = Long.MAX_VALUE / 2
 
 /** 마지막으로 본 id. 항목이 없으면 그대로. */
 fun nextSince(since: Long, items: List<InboxItem>): Long = maxOf(since, items.maxOfOrNull { it.id } ?: since)

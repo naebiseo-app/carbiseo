@@ -73,6 +73,11 @@ class RoomService : Service() {
     private val notifQueue = mutableListOf<InboxItem>()
     private val notifFresh = mutableSetOf<Long>()
     private val notifSaid = mutableSetOf<Long>()
+    // 음성으로 묻고 대답을 기다리는 질문(알림 묻기는 talk가 따로). 대답은 heard()가 받는다.
+    private enum class Ask { NONE, LATE }
+    private var pending = Ask.NONE
+    private var lateEvent: Pair<Event, Int>? = null
+    private val lateAsked = mutableSetOf<Long>() // 이미 물은 일정(start)
 
     private val poller = object : Runnable {
         override fun run() {
@@ -115,6 +120,24 @@ class RoomService : Service() {
         talk.offer(list, favs)?.let(::runTurn)
     }
 
+    /** 묻고 대답 듣기. 지금 말해도 되는 때(경고·통화·다른 대화 중 아님)에만 쓴다. */
+    private fun canAsk() = !quiet && pending == Ask.NONE && talk.step == NotifTalk.Step.NONE && !listening
+    private fun askVoice(text: String, a: Ask) { pending = a; speaker.speak(text, ::listenNow) }
+
+    /** 음성 인식 결과(또는 디버그 SAY) 한 곳 입구. 대기 중인 질문이 있으면 그 대답으로, 아니면 알림 대화로. */
+    private fun heard(said: String?) {
+        listening = false
+        val p = pending; pending = Ask.NONE
+        when (p) {
+            Ask.LATE -> lateEvent?.let { (ev, m) -> if (yesNo(said) == true) { addLocalTask(lateTask(ev, m)); say(LATE_DONE_SPEECH) } }
+            Ask.NONE -> runTurn(talk.hear(said, favs, machine.room == Room.PARK))
+        }
+    }
+
+    private fun addLocalTask(summary: String) {
+        inbox = listOf(InboxItem(LOCAL_ID_BASE + clock.millis(), "내비서", summary, false, System.currentTimeMillis(), "", kind = "task")) + inbox
+    }
+
     private fun runTurn(t: Turn) {
         t.send?.let { (id, text) -> net.execute { val ok = Server.reply(id, text); Log.i("ROOM", "reply $id -> ${if (ok) "ok" else "FAIL"}"); if (!ok) ui.post { speaker.speak("답장을 못 보냈어요. 잠시 뒤 다시 해 주세요.") } } }
         if (t.done.isNotEmpty()) markDone(this, t.done)
@@ -124,7 +147,7 @@ class RoomService : Service() {
 
     /** 음성 인식이 없고(path none) 주행 중이면 대답을 못 받으니 '나중에'(카드로 보관). */
     private fun listenNow() {
-        if (voice.path == "none") { if (!touchOk()) runTurn(talk.hear("나중에", favs)); return }
+        if (voice.path == "none") { if (!touchOk()) heard("나중에"); return }
         listening = true; voice.listen()
     }
 
@@ -185,6 +208,12 @@ class RoomService : Service() {
             val ago = System.currentTimeMillis() - ctxAt
             if ((carCtx().toString() != ctxSent && ago >= 10_000) || ago >= HEARTBEAT_MS) machine.room?.let { sendState(it.name, ++stateGen, false) }
             if (parkRemind.fire(machine.room == Room.PARK && parkedAt?.let { clock.millis() - it >= PARK_REMIND_MS } == true) && !passenger) parkReminder(inbox, seen)?.let(::say)
+            // F4: 업무 운전 중 도착 예상이 다음 일정 시작보다 늦으면 일정마다 한 번 묻는다
+            if (machine.room == Room.DRIVE_WORK && !passenger && canAsk()) System.currentTimeMillis().let { now ->
+                nextEvent(schedule, now)?.takeIf { it.start !in lateAsked }?.let { ev ->
+                    lateBy(now, e, ev.start)?.let { m -> lateAsked += ev.start; lateEvent = ev to m; askVoice(lateSpeech(m), Ask.LATE) }
+                }
+            }
             if (homeOnce.fire(homeSoon(machine.room, machine.signals.destination, machine.settings, e)) && !passenger) say(HOME_SOON_SPEECH)
             ui.postDelayed(this, 200)
         }
@@ -216,7 +245,7 @@ class RoomService : Service() {
             if (to == Room.PARK) {
                 parkedAt = now; restOffer = false; hold.clear(); parkRemind.reset()
                 // 정차 요약: 이번 실행에 와서 아직 안 알리고 안 본 알림(쉼 방 비즐겨찾기·피로·동승자 등으로 미룬 것)
-                notifQueue.clear(); talk.cancel(); listening = false
+                notifQueue.clear(); talk.cancel(); listening = false; pending = Ask.NONE
                 val left = inbox.filter { it.id in notifFresh && it.id !in notifSaid && it.id !in seen && !isAd(it) }.sortedBy { it.id }
                 if (left.isNotEmpty() && !passenger) offerNotifs(left)
             }
@@ -240,7 +269,7 @@ class RoomService : Service() {
         addHomeFavorite = { runCatching { adapters.navi?.requestNavigationScreen(NavigationScreenRequest.AddHomeFavorite) }.onFailure { Log.w("ROOM", "add home FAIL $it") } }
         adapters.onNaviReady = { pendingRoute?.let { pendingRoute = null; Log.i("ROOM", "navi ready -> route"); it() } }
         speaker = Speaker(applicationContext).also { it.start() }
-        voice = Voice(applicationContext) { heard -> listening = false; runTurn(talk.hear(heard, favs, machine.room == Room.PARK)) }.also { it.start() }
+        voice = Voice(applicationContext, ::heard).also { it.start() }
         answer = { if (it == "답장하기") { if (!listening) listenNow() } else voice.inject(it) } // '답장하기'는 대답이 아니라 다시 듣기
         ui.post(ticker)
         ui.post(poller)
@@ -401,6 +430,7 @@ class RoomService : Service() {
         /** H9: 이번 운전만. 저장하지 않고, 30분 넘게 세운 뒤 출발하면 자동 해제. */
         fun togglePassenger(on: Boolean) { passenger = on; passengerAt = clock.millis() }
         val clock = ShiftClock() // 프로세스 공통 시각(디버그 TIME 브로드캐스트만 offset을 바꾼다)
+        fun dropLocal(id: Long) { inbox = inbox.filter { it.id != id } }
         var seen by mutableStateOf(setOf<Long>()); private set // M5: 주차 화면에서 연 카드 id. prefs 저장(최근 300)
         var deferred by mutableStateOf(mapOf<Long, Long>()); private set // H7: 넘긴 통화 id -> 넘긴 날
         var forwardOk by mutableStateOf(false); private set // H13: 착신 설정 완료(사용자 체크 또는 실제 착신 1회)

@@ -151,4 +151,27 @@ class DriveTest {
         assertEquals(false, greenSoon(3, Gear.DRIVE, 0f, busy = true)) // 통화·경고·알림 대화 중
         assertEquals(false, greenSoon(-1, Gear.DRIVE, 0f, busy = false)) // 값 없음
     }
+
+    @Test fun 지각_예측은_일정_시작_2분_넘게_늦을때만() {
+        val now = 1_000_000L; val start = now + 30 * 60_000L
+        assertEquals(null, lateBy(now, 30, start))            // 딱 맞게 도착
+        assertEquals(null, lateBy(now, 32, start))            // 정확히 2분 = 유예
+        assertEquals(3, lateBy(now, 33, start))
+        assertEquals(15, lateBy(now, 45, start))
+        assertEquals(null, lateBy(now, null, start))          // 목적지 없음
+        assertEquals(null, lateBy(now, 10, start))
+    }
+
+    @Test fun 지연_문자는_할일_카드_형식이고_연락처가_번호로_들어간다() {
+        val e = Event("거래처 미팅", 0, "곳", LatLng(37.0, 127.0), "010-1234-5678")
+        assertEquals("01012345678" to "운전 중이라 약 7분 늦을 것 같습니다. 죄송합니다.", taskDraft(lateTask(e, 7)))
+        assertEquals("" to "운전 중이라 약 7분 늦을 것 같습니다. 죄송합니다.", taskDraft(lateTask(e.copy(contact = ""), 7)))
+        assertEquals("다음 일정에 약 7분 늦을 것 같아요. 늦는다고 문자 보낼까요?", lateSpeech(7))
+    }
+
+    @Test fun 응_아니_대답만_본다() {
+        assertEquals(true, yesNo("응")); assertEquals(true, yesNo("보내")); assertEquals(true, yesNo("네, 보내 주세요"))
+        assertEquals(false, yesNo("아니")); assertEquals(false, yesNo("괜찮아, 됐어"))
+        assertEquals(null, yesNo("글쎄")); assertEquals(null, yesNo(null))
+    }
 }

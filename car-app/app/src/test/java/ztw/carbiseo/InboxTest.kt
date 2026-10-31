@@ -142,4 +142,10 @@ class InboxTest {
         assertEquals(mapOf(1L to 2L), decodeDeferred("1:2,x:y,3"))
         assertEquals(300, decodeDeferred(encodeDeferred((1L..400L).associateWith { 1L })).size)
     }
+
+    @Test fun 차에서_만든_카드는_서버_정리에_안_지워진다() {
+        val local = item(LOCAL_ID_BASE + 5)
+        assertEquals(listOf(local.id, 7L), pruneGone(listOf(local, item(7), item(3)), 5).map { it.id })
+        assertEquals(listOf(local.id), pruneGone(listOf(local, item(7)), Long.MAX_VALUE).map { it.id })
+    }
 }

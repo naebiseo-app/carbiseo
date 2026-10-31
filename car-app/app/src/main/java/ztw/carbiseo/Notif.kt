@@ -60,6 +60,9 @@ fun voiceCmd(said: String?): Cmd {
     }
 }
 
+/** 응/아니 대답만 본다. 그 밖의 말·못 들음은 null. */
+fun yesNo(said: String?): Boolean? = when (voiceCmd(said)) { Cmd.Yes -> true; Cmd.No -> false; else -> null }
+
 /** 한 턴의 결과: 말할 문장, 이어서 들을지, 서버에 보낼 답장(알림 id, 내용), 다 읽어 준 알림 id(카드에서 뺀다). */
 data class Turn(val say: String?, val listen: Boolean = false, val send: Pair<Long, String>? = null, val done: List<Long> = emptyList())
 
