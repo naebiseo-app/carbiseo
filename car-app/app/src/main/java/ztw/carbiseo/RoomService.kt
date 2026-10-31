@@ -234,6 +234,7 @@ class RoomService : Service() {
             if (to == Room.DRIVE_WORK && !passenger && briefDay != today()) briefCarryOver()
             getSystemService(NotificationManager::class.java).notify(1, notification(room))
         }
+        machine.onClockBack = { b -> driveStart = driveStart?.minus(b); parkedAt = parkedAt?.minus(b); Log.i("ROOM", "clock back ${b / 1000}s") } // 짧은 정차·trip_min이 음수가 되지 않게
         adapters = CarAdapters(applicationContext, machine).also { it.start() }
         addHomeFavorite = { runCatching { adapters.navi?.requestNavigationScreen(NavigationScreenRequest.AddHomeFavorite) }.onFailure { Log.w("ROOM", "add home FAIL $it") } }
         adapters.onNaviReady = { pendingRoute?.let { pendingRoute = null; Log.i("ROOM", "navi ready -> route"); it() } }

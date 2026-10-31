@@ -237,4 +237,17 @@ class RoomStateMachineTest {
         m.update { copy(gear = Gear.PARK) }
         assertNull(events.first().first)
     }
+
+    @Test fun 시각이_되돌아가도_판정이_멈추지_않음() {
+        var back = 0L; m.onClockBack = { back += it }
+        m.update { copy(gear = Gear.PARK) }; drive(); settle()
+        assertEquals(Room.DRIVE_WORK, m.room)
+        m.update { copy(gear = Gear.PARK, distractionOptimized = false) } // 주차 유지 판정 중에
+        clock.ms -= 3_600_000; m.tick()                                     // 한 시간 되돌림
+        assertEquals(3_600_000L, back)
+        clock.ms += 2500; m.tick()
+        assertEquals(Room.PARK, m.room)                                     // parkHold가 음수로 막히지 않는다
+        drive(); clock.ms += 100; m.update { copy(gear = Gear.PARK, distractionOptimized = false) }; clock.ms += 2500; m.tick()
+        assertEquals(Room.PARK, m.room)
+    }
 }

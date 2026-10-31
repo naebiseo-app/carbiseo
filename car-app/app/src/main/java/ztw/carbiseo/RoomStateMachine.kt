@@ -57,6 +57,8 @@ class RoomStateMachine(
     private val clock: Clock,
     var settings: RoomSettings = RoomSettings(),
     var onChange: (from: Room?, to: Room) -> Unit = { _, _ -> },
+    /** 시각이 되돌아갔을 때 그만큼(ms). 호출자가 자기 기준 시각(운전 시작·정차 시작)도 같이 당긴다. */
+    var onClockBack: (backMs: Long) -> Unit = {},
 ) {
     var room: Room? = null
         private set
@@ -68,6 +70,7 @@ class RoomStateMachine(
     private var lastDest: LatLng? = null
     private var destLostAtMs: Long? = null
     private var parkSinceMs: Long? = null
+    private var lastNowMs: Long? = null
 
     fun update(f: Signals.() -> Signals) { signals = signals.f(); evaluate() }
     fun tick() = evaluate()
@@ -101,6 +104,9 @@ class RoomStateMachine(
 
     private fun evaluate() {
         val now = clock.millis()
+        // 시각이 되돌아가면(디버그 TIME·실제 시계 조정) 기준 시각도 같은 만큼 당긴다. 안 그러면 경과가 음수라 디바운스·유예가 안 풀려 판정이 멈춘다.
+        val back = (lastNowMs ?: now) - now; lastNowMs = now
+        if (back > 0) { lastChangeMs -= back; parkSinceMs = parkSinceMs?.minus(back); destLostAtMs = destLostAtMs?.minus(back); onClockBack(back) }
         val t = target(now)
         val cur = room
         parkSinceMs = if (t == Room.PARK) parkSinceMs ?: now else null
