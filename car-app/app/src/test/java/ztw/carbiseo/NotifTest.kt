@@ -107,4 +107,13 @@ class NotifTest {
         assertEquals(setOf("엄마", "아빠"), parseFavs(" 엄마, 아빠 ,,"))
         assertEquals(emptySet<String>(), parseFavs(""))
     }
+
+    @Test fun 정차_낭독뒤_바는_답장하기_닫기() {
+        val t = NotifTalk(); t.offer(listOf(n(1, "김부장")), favs); t.hear("읽어줘", favs, parked = true)
+        assertEquals(Turn(null), t.hear(null, favs, parked = true)) // 듣기 타임아웃 → 바 유지
+        assertEquals("답장하시려면 ‘답장하기’를 누르고 말씀하세요" to listOf("답장하기", "닫기"), askBar(t.step, listening = false, touch = true))
+        assertEquals(listOf("나중에"), askBar(t.step, listening = true, touch = false).second) // 주행 중은 그대로
+        assertEquals(Turn(null), t.hear("닫기", favs, parked = true)) // '닫기' 버튼 → 바 닫힘
+        assertEquals(NotifTalk.Step.NONE, t.step)
+    }
 }

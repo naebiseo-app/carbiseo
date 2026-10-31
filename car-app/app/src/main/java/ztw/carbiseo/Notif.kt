@@ -51,7 +51,7 @@ fun voiceCmd(said: String?): Cmd {
     if ("답장" in s) return REPLY.find(s)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }?.let { Cmd.Reply(it) } ?: Cmd.Unknown
     val n = s.replace(Regex("""[\s.,!?]"""), "")
     return when {
-        listOf("아니", "취소", "하지마", "보내지마", "됐어").any { it in n } -> Cmd.No
+        listOf("아니", "취소", "하지마", "보내지마", "됐어", "닫").any { it in n } -> Cmd.No
         "나중" in n || "이따" in n -> Cmd.Later
         "읽어" in n -> Cmd.Read
         listOf("응", "네", "예", "그래", "좋아", "보내", "오케이").any { n.startsWith(it) } -> Cmd.Yes
@@ -104,4 +104,13 @@ class NotifTalk {
     }
 
     fun cancel() { step = Step.NONE }
+}
+
+/** 알림 바 (문구, 버튼). 낭독 뒤 P(touch)에서 듣기가 끝나면 '답장하기'(다시 듣기)·'닫기'로 무엇을 기다리는지 보인다. 주행 중 문구는 그대로. */
+fun askBar(step: NotifTalk.Step, listening: Boolean, touch: Boolean): Pair<String, List<String>> {
+    if (step == NotifTalk.Step.AFTER_READ && touch) return (if (listening) "듣고 있어요 · ‘답장, ○○라고 해 줘’ / ‘닫기’"
+        else "답장하시려면 ‘답장하기’를 누르고 말씀하세요") to listOf("답장하기", "닫기")
+    val opts = when (step) { NotifTalk.Step.OFFER -> listOf("읽어줘", "나중에"); NotifTalk.Step.CONFIRM -> listOf("보내", "취소"); else -> listOf("나중에") }
+    return (if (listening) "듣고 있어요 · ${opts.joinToString(" / ") { "‘$it’" }}${if (step == NotifTalk.Step.AFTER_READ) " / ‘답장, ○○라고 해 줘’" else ""}"
+        else "폰 알림 · 대답을 기다려요") to opts
 }

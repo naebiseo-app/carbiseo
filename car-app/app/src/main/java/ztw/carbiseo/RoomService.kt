@@ -240,7 +240,7 @@ class RoomService : Service() {
         adapters.onNaviReady = { pendingRoute?.let { pendingRoute = null; Log.i("ROOM", "navi ready -> route"); it() } }
         speaker = Speaker(applicationContext).also { it.start() }
         voice = Voice(applicationContext) { heard -> listening = false; runTurn(talk.hear(heard, favs, machine.room == Room.PARK)) }.also { it.start() }
-        answer = { voice.inject(it) }
+        answer = { if (it == "답장하기") { if (!listening) listenNow() } else voice.inject(it) } // '답장하기'는 대답이 아니라 다시 듣기
         ui.post(ticker)
         ui.post(poller)
         if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) registerDebugRoute()

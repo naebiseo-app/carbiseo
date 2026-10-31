@@ -127,10 +127,9 @@ fun App() {
 private fun AskBar(m: Modifier) {
     val step = RoomService.askStep
     if (step == NotifTalk.Step.NONE) return
-    val opts = when (step) { NotifTalk.Step.OFFER -> listOf("읽어줘", "나중에"); NotifTalk.Step.CONFIRM -> listOf("보내", "취소"); else -> listOf("나중에") }
+    val (label, opts) = askBar(step, RoomService.listening, RoomService.askTouch)
     Column(m.fillMaxWidth().background(SheetBg).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(if (RoomService.listening) "듣고 있어요 · ${opts.joinToString(" / ") { "‘$it’" }}${if (step == NotifTalk.Step.AFTER_READ) " / ‘답장, ○○라고 해 줘’" else ""}"
-            else "폰 알림 · 대답을 기다려요", color = SheetInk, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = SheetInk, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         if (RoomService.askTouch) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             for (o in opts) Button({ RoomService.answer?.invoke(o) }, Modifier.weight(1f).heightIn(min = 96.dp), colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
                 Text(o, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black)
