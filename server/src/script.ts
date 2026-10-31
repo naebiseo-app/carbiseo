@@ -64,8 +64,9 @@ export function parseEta(v: unknown): number | null {
 export type Mode = "ai" | "ment" | "off";
 export const parseMode = (v: unknown): Mode | null => (["ai", "ment", "off"].includes(v as string) ? (v as Mode) : null);
 
+const DEFAULT_MENT = "운전 중이라 받을 수 없습니다. 정차 후 연락드리겠습니다.";
 const BY_MODE = {
-  ment: "전화가 연결되면 '운전 중이라 받을 수 없습니다. 정차 후 연락드리겠습니다.'라고만 말하고, 다른 말에는 답하지 않고 바로 통화를 종료합니다.",
+  ment: "전화가 연결되면 '" + DEFAULT_MENT + "'라고만 말하고, 다른 말에는 답하지 않고 바로 통화를 종료합니다.",
   off: "전화가 연결되면 '지금은 받을 수 없습니다.' 한 문장만 말하고 즉시 통화를 종료합니다.",
 };
 
@@ -88,9 +89,9 @@ export const restDay = (nowMs: number) => [0, 6].includes(new Date(nowMs + 9 * 3
 // M17: 저녁(18시~)·새벽(07시 전)·주말 정차는 '곧 회신' 대신 쉼 방 약속(차 업무시간 07~18과 같은 기준).
 export const offHours = (nowMs: number) => { const h = new Date(nowMs + 9 * 3_600_000).getUTCHours(); return h < 7 || h >= 18 || restDay(nowMs); };
 
-export function pickScript(room: Room | null, owner?: string, name?: string, eta?: number | null, mode: Mode = "ai", nextAt?: number | null, cc: Partial<CarCtx> | null = null, nowMs = Date.now()): { room: Room | null; instruction: string } {
+export function pickScript(room: Room | null, owner?: string, name?: string, eta?: number | null, mode: Mode = "ai", nextAt?: number | null, cc: Partial<CarCtx> | null = null, nowMs = Date.now(), ment?: string): { room: Room | null; instruction: string } {
   const r = room;
-  if (mode !== "ai") return { room: r, instruction: BY_MODE[mode] };
+  if (mode !== "ai") return { room: r, instruction: mode === "ment" && ment ? BY_MODE.ment.replace(DEFAULT_MENT, () => ment) : BY_MODE[mode] };
   if (!r) return { room: null, instruction: fillOwner(`${greeting(owner, name)} ${COMMON} ${NEUTRAL}`, owner) };
   const s = r === "PARK" && offHours(nowMs) ? "DRIVE_REST" : r;
   let byRoom = (r !== "PARK" && eta != null ? ETA_BY_ROOM[r].replace("{eta}", String(eta)) : BY_ROOM[s]).replace("{when}", nextWorkMorning(nowMs));
@@ -123,6 +124,8 @@ export const reportLine = (callId: string) =>
 // 숫자만 비교, +82 → 0
 const digits = (n: string) => n.replace(/\D/g, "").replace(/^82/, "0");
 export const sameNumber = (a: string, b: string | undefined) => !!b && digits(a).length >= 9 && digits(a) === digits(b);
+// 바로 연결 목록(settings.direct_numbers)에 발신번호가 있나
+export const isDirect = (list: unknown, from: string) => Array.isArray(list) && list.some((n) => sameNumber(from, n));
 
 export type Recent = { from_label: string | null; summary: string | null; urgent: number };
 
@@ -151,6 +154,14 @@ export function cleanName(v: unknown): string | null {
   if (typeof v !== "string") return null;
   const t = v.trim();
   return /^[\p{L}\p{N} ]{1,10}$/u.test(t) ? t : null;
+}
+
+// 응대 멘트: 따옴표·괄호류를 지운 뒤 1~60자 글자·숫자·공백·. , ? !만(대본 주입 방지). 빈 값은 "", 잘못되면 null
+export function cleanMent(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const t = v.replace(/['"‘’“”`()\[\]{}「」『』（）［］]/g, "").trim();
+  if (t === "" && v.trim() === "") return "";
+  return /^[\p{L}\p{N} .,?!]{1,60}$/u.test(t) ? t : null;
 }
 
 // 차가 /car/state에 함께 올리는 차량 맥락(SDK 값). 형식이 틀린 값은 버린다(대본 주입 방지).

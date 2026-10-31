@@ -1,4 +1,4 @@
-import { CALL_ID, carChip, callerNumber, cleanName, field, freshCtx, hhmm, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, reportLine, sameNumber, type Mode, type Recent } from "./script.ts";
+import { CALL_ID, carChip, callerNumber, cleanMent, cleanName, field, freshCtx, hhmm, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, reportLine, isDirect, sameNumber, type Mode, type Recent } from "./script.ts";
 import { adminPage, basicOk, demoSchedule, parseFakeCall, REPLAY_SAID, replayCards, type MailRow, type ReplyRow } from "./admin.ts";
 import { parseNotify, parseReply, TAKE_REPLIES_SQL, type Notif } from "./notif.ts";
 
@@ -75,8 +75,10 @@ const fromCols = (n: string) => {
 type Card = ReturnType<typeof fromCols> & { call_id: string; summary: string; urgent: number };
 // 같은 통화의 카드는 1장만: 웹훅 재전송, report_call 뒤 오는 summary.completed는 건너뛴다
 // ponytail: 칩은 카드 만든 시점의 차량 맥락. 정확히 하려면 call-context 때 값을 ring meta에 남겨 call_id로 잇기
-async function saveCallCard(db: D1Database, c: Card, extra: object = {}) {
+// from = 발신번호 원문. 바로 연결 목록(settings.direct_numbers)에 있으면 urgent=1·meta.direct (차는 피로·퇴근 중에도 읽음)
+async function saveCallCard(db: D1Database, c: Card, extra: object = {}, from = "") {
   const cc = await kvGet(db, "car_context");
+  if (isDirect((await kvGet(db, "settings"))?.direct_numbers, from)) { c = { ...c, urgent: 1 }; extra = { ...extra, direct: true }; }
   await db.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,from_number,summary,urgent,created_at,meta) SELECT 'call','summarized',?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='call' AND call_id=?)")
     .bind(parseRoom(cc?.room) ?? null, c.call_id, c.from_label, c.from_number, c.summary, c.urgent, now(), JSON.stringify({ car: carChip(cc, now()), ...extra }), c.call_id).run();
 }
@@ -92,7 +94,7 @@ export async function reportCall(env: Env, a: Record<string, unknown>): Promise<
   if (sameNumber(from, env.OWNER_NUMBER) && !(await kvGet(env.DB, "owner_as_guest"))) return "ok"; // 주인 통화는 기존 할 일 경로
   const summary = (s("summary", 300) || [s("caller", 100), s("purpose", 200)].filter(Boolean).join(", ")).slice(0, 300);
   await saveCallCard(env.DB, { call_id: id, ...fromCols(from), summary, urgent: a.urgent === true || isUrgent(summary) ? 1 : 0 },
-    { via: "mcp", caller: s("caller", 100), purpose: s("purpose", 200), callback_by: s("callback_by", 50) });
+    { via: "mcp", caller: s("caller", 100), purpose: s("purpose", 200), callback_by: s("callback_by", 50) }, from);
   console.log("report_call", id);
   return "ok";
 }
@@ -239,9 +241,22 @@ export default {
         else if (v && /^\d{10,11}$/.test(v)) cur.family_number = v;
         else return json({ error: "bad family_number" }, 400);
       }
+      if ("direct_numbers" in b) { // 바로 연결 목록: 숫자 10~11자리 문자열 최대 10개, 빈 배열이면 삭제
+        const a = Array.isArray(b.direct_numbers) ? b.direct_numbers.map((x) => (typeof x === "string" ? x.replace(/-/g, "") : "")) : null;
+        if (a && a.length === 0) delete cur.direct_numbers;
+        else if (a && a.length <= 10 && a.every((x) => /^\d{10,11}$/.test(x))) cur.direct_numbers = a;
+        else return json({ error: "bad direct_numbers" }, 400);
+      }
+      if ("ment_text" in b) { // 응대 멘트 직접 편집: 빈 값이면 기본 문구
+        const v = cleanMent(b.ment_text);
+        if (v === "") delete cur.ment_text;
+        else if (v) cur.ment_text = v;
+        else return json({ error: "bad ment_text" }, 400);
+      }
       await env.DB.prepare("INSERT OR REPLACE INTO kv(key,value,updated_at) VALUES('settings',?,?)").bind(JSON.stringify(cur), Date.now()).run();
       const out = { ...cur }; // 응답엔 끝 4자리만(차 화면 표시용)
       if (cur.family_number) out.family_number = out.family_label = `****${cur.family_number.slice(-4)}`;
+      if (cur.direct_numbers) { delete out.direct_numbers; out.direct_labels = cur.direct_numbers.map((n: string) => `****${n.slice(-4)}`); }
       return json({ ok: true, settings: out });
     }
 
@@ -265,6 +280,8 @@ export default {
       let mode: Mode = "ai";
       let schedule = null;
       let cc: Record<string, any> | null = null; // car_context: 방·ETA·차량 맥락
+      let direct = false; // 바로 연결 목록에 있는 발신자
+      let ment: string | undefined;
       let isOwner = sameNumber(callerNumber(raw), env.OWNER_NUMBER);
       let recent: Recent[] = [];
       let clk = now(); // 대본의 요일·시각(평일/저녁/주말). 녹화용 시연 시각이 있으면 그만큼 민다
@@ -278,6 +295,8 @@ export default {
         owner = st?.owner_label;
         name = st?.assistant_name;
         mode = parseMode(st?.mode) ?? "ai";
+        ment = st?.ment_text;
+        direct = isDirect(st?.direct_numbers, callerNumber(raw));
         schedule = await kvGet(env.DB, "schedule");
         if (isOwner) recent = (await env.DB.prepare("SELECT from_label,summary,urgent FROM inbox WHERE kind='call' AND summary IS NOT NULL ORDER BY id DESC LIMIT 5").all<Recent>()).results;
         await saveInbox(env.DB, "ring", "ringing", room, raw, { ct: req.headers.get("content-type"), owner: isOwner });
@@ -288,10 +307,11 @@ export default {
         const instruction = ownerScript({ owner, name, room, eta, schedule, recent, nowMs: now(), passenger: cc?.passenger === true });
         return json({ CallContext: { Instruction: instruction, Variables: { room: room ?? "UNKNOWN", owner_mode: "1" } } });
       }
-      const s = pickScript(room, owner, name, eta, mode, nextEventAt(schedule, now()), cc, clk);
+      const s = pickScript(room, owner, name, eta, mode, nextEventAt(schedule, now()), cc, clk, ment);
       const callId = field(raw, ["callid", "callsid", "call_id"]);
       const report = mode === "ai" && CALL_ID.test(callId) ? reportLine(callId) : ""; // 안내 멘트(ment·off)는 대화가 없어 생략
-      return json({ CallContext: { Instruction: s.instruction + report, Variables: { room: s.room ?? "UNKNOWN", car: carChip(cc, now()) } } });
+      const dl = direct && mode === "ai" ? ` 이 분은 ${owner ?? "주인"}님이 바로 연결 목록에 넣은 분입니다. 용건만 짧게 듣고 '바로 전해 드리겠습니다'로 끝냅니다.` : ""; // ment·off는 대화가 없어 생략
+      return json({ CallContext: { Instruction: s.instruction + dl + report, Variables: { room: s.room ?? "UNKNOWN", car: carChip(cc, now()), ...(direct ? { direct: "1" } : {}) } } });
     }
 
     // ClawOps 에이전트 MCP 연결(report_call). 비밀은 경로에(authType none)
@@ -333,7 +353,7 @@ export default {
         const cc = await kvGet(env.DB, "car_context");
         await env.DB.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,summary,created_at) SELECT 'task','open',?,?,'주인',?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='task' AND call_id=?)")
           .bind(parseRoom(cc?.room) ?? null, card.call_id, taskText(raw), now(), card.call_id).run();
-      } else if (card) await saveCallCard(env.DB, card);
+      } else if (card) await saveCallCard(env.DB, card, {}, new URLSearchParams(raw).get("From") ?? "");
       return json({ ok: true });
     }
 
