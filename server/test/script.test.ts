@@ -46,7 +46,7 @@ test("호칭 미설정이면 '주인님' 없이 호칭 없는 인사", () => {
   for (const r of ["PARK", "DRIVE_WORK", "DRIVE_REST"] as const) {
     const s = pickScript(r, undefined, undefined, 12, "ai", null, { trip_min: 130 }).instruction;
     assert.doesNotMatch(s, /주인|\{owner\}|님은|님의/, r);
-    assert.match(s, /^전화가 연결되면 첫 마디로 정확히 '안녕하세요, 이 번호로 대신 전화 받는 AI 비서입니다\. 통화 내용은 요약해서 전해 드립니다\.'/);
+    assert.match(s, /^전화가 연결되면 첫 마디로 정확히 '안녕하세요, 이 번호로 대신 전화 받는 AI 비서입니다\. 어느 분이세요\?'/);
   }
   assert.match(pickScript("PARK", undefined, "하루").instruction, /대신 전화 받는 AI 비서 하루입니다/);
   assert.match(pickScript("DRIVE_WORK").instruction, /당신은 휴대폰을 대신 받는 AI 비서입니다.*지금 운전 중입니다/);
