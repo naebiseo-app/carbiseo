@@ -36,8 +36,23 @@ const val REST_DEFAULT_MIN = 120
 // H10: 음성으로 '누르라'고 지시하지 않는다. 버튼은 화면에 그대로 둔다.
 const val REST_SPEECH = "오래 운전하셨어요. 쉬어 가실래요? 전화는 제가 받아 둘게요."
 
-/** S2: 이번 운전(PARK에서 나온 뒤) 연속 주행이 설정 분 이상. startMs = null이면 정차 중. */
-fun restDue(startMs: Long?, nowMs: Long, thresholdMin: Int): Boolean = startMs != null && nowMs - startMs >= thresholdMin * 60_000L
+// 음성 승인용: 끝이 질문이라 대답을 바로 받는다. 못 듣는 때(경고·통화 중)엔 위의 REST_SPEECH만.
+const val REST_ASK = "오래 운전하셨어요. 전화는 제가 받아 둘게요. 가까운 휴게소를 경유지로 넣을까요?"
+const val REST_SNOOZE_MS = 30 * 60_000L
+
+/** S2: 이번 운전(PARK에서 나온 뒤) 연속 주행이 설정 분 이상(+ '아니' 대답 뒤 30분은 쉰다). startMs = null이면 정차 중. */
+fun restDue(startMs: Long?, nowMs: Long, thresholdMin: Int, snoozeUntilMs: Long = 0): Boolean =
+    startMs != null && nowMs - startMs >= thresholdMin * 60_000L && nowMs >= snoozeUntilMs
+
+/** Q3 "급해요/화장실": 운전 중 이 말이 들리면 가까운 휴게소(화장실 있음). 답장 문장 속 '급해서'는 제외. */
+fun urgentNeed(said: String?): Boolean {
+    val n = said.orEmpty().replace(Regex("""\s"""), "")
+    return "답장" !in n && ("급해" in n || "화장실" in n)
+}
+
+/** 휴게소를 넣은 뒤 한 문장. 목적지가 없으면 그 휴게소가 곧 목적지. */
+fun restStopSpeech(stop: RestStop, waypoint: Boolean) =
+    if (waypoint) "가장 가까운 ${stop.name}를 경유지로 넣었어요" else "가장 가까운 ${stop.name}로 길 안내를 시작해요"
 
 data class RestStop(val name: String, val at: LatLng)
 

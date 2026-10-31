@@ -74,10 +74,11 @@ class RoomService : Service() {
     private val notifFresh = mutableSetOf<Long>()
     private val notifSaid = mutableSetOf<Long>()
     // 음성으로 묻고 대답을 기다리는 질문(알림 묻기는 talk가 따로). 대답은 heard()가 받는다.
-    private enum class Ask { NONE, LATE }
+    private enum class Ask { NONE, LATE, REST }
     private var pending = Ask.NONE
     private var lateEvent: Pair<Event, Int>? = null
     private val lateAsked = mutableSetOf<Long>() // 이미 물은 일정(start)
+    private var restSnoozeUntil = 0L // 휴식 제안에 '아니'라고 한 뒤 30분(시뮬 시각)
 
     private val poller = object : Runnable {
         override fun run() {
@@ -128,8 +129,15 @@ class RoomService : Service() {
     private fun heard(said: String?) {
         listening = false
         val p = pending; pending = Ask.NONE
+        // Q3: 운전 중 '급해요/화장실'은 어느 대답 대기에서든 먼저 본다(상시 듣기는 없다 — 듣는 중이거나 디버그 SAY일 때만 들어온다)
+        if (urgentNeed(said) && machine.room.let { it != null && it != Room.PARK }) { talk.cancel(); askStep = talk.step; return addRestStop(true) }
         when (p) {
             Ask.LATE -> lateEvent?.let { (ev, m) -> if (yesNo(said) == true) { addLocalTask(lateTask(ev, m)); say(LATE_DONE_SPEECH) } }
+            Ask.REST -> when (yesNo(said)) {
+                true -> addRestStop(true)
+                false -> { restSnoozeUntil = clock.millis() + REST_SNOOZE_MS; restOnce.reset(); restOffer = false }
+                null -> {}
+            }
             Ask.NONE -> runTurn(talk.hear(said, favs, machine.room == Room.PARK))
         }
     }
@@ -197,8 +205,8 @@ class RoomService : Service() {
             val e = adapters.etaMin
             if (e != sentEta) machine.room?.let { sentEta = e; sendState(it.name, ++stateGen, true) }
             // 짧은 P 동안은 driveStart가 남아 있으니 주행 중일 때만 센다(M4). 휴식·피로가 같은 순간이면 한 문장만(H10).
-            val restNow = restOnce.fire(restDue(driveStart.takeIf { machine.room != Room.PARK }, clock.millis(), restMin))
-            if (restNow) { restOffer = true; say(REST_SPEECH) }
+            val restNow = restOnce.fire(restDue(driveStart.takeIf { machine.room != Room.PARK }, clock.millis(), restMin, restSnoozeUntil))
+            if (restNow) { restOffer = true; if (canAsk()) askVoice(REST_ASK, Ask.REST) else say(REST_SPEECH) }
             // 안전 안내라 동승자 모드에서도. 피로 보관이 켜지면 휴게소 버튼도 같이 띄운다(휴식 기준을 더 길게 잡았어도).
             if (fatigueOnce.fire(fatigued(machine.room, tripMin()))) { restOffer = true; if (!restNow) say(fatigueSpeech(machine.signals.gear)) }
             seat.update(adapters.passengerSeat)?.let { passengerOffer = it && !passenger }
@@ -253,7 +261,7 @@ class RoomService : Service() {
                 val parked = parkedAt?.let { now - it }; parkedAt = null
                 if (from == Room.PARK && talk.step != NotifTalk.Step.NONE) { talk.cancel(); askStep = talk.step; listening = false } // P에서 남겨 둔 바는 출발하면 닫는다(카드는 남음)
                 // M4: 2분 미만 P는 같은 운전 — 휴식·피로·집 문턱 1회 안내와 운전 시작 시각을 유지
-                if (newDrive(parked)) { homeOnce.reset(); restOnce.reset(); fatigueOnce.reset(); trip.reset(); driveStart = now }
+                if (newDrive(parked)) { homeOnce.reset(); restOnce.reset(); fatigueOnce.reset(); trip.reset(); driveStart = now; restSnoozeUntil = 0 }
                 else Log.i("ROOM", "short park ${parked!! / 1000}s -> same drive")
                 // H9: 오래 세운 뒤의 출발이면 그 전에 켠 동승자 모드는 끈다
                 if (passenger && parked != null && parked >= PASSENGER_RESET_PARK_MS && passengerAt < now - parked) { togglePassenger(false); say("동승자 모드를 껐어요") }
@@ -374,7 +382,7 @@ class RoomService : Service() {
     }
 
     /** S2 버튼: 경로상 앞쪽 휴게소를 첫 경유지로. 목적지가 없으면 그 휴게소로 경로를 연다. */
-    private fun addRestStop() {
+    private fun addRestStop(speak: Boolean = false) {
         restOffer = false
         val s = machine.signals
         val n = adapters.navi ?: return
@@ -387,6 +395,7 @@ class RoomService : Service() {
         Log.i("ROOM", "rest stop ${stop.name} dest=${s.destination}")
         if (s.destination != null) n.addWaypoint(RequestWaypointInfo(stop.at.lat, stop.at.lng, stop.name, WaypointIndex.FIRST, "", "", "", ""))
         else route(stop.at, stop.name)
+        if (speak) say(restStopSpeech(stop, s.destination != null))
     }
 
     /** 경로 계산에 12~15초 걸린다(에뮬 실측). 재요청은 진행 중 경로를 취소시키므로(onRouteCancelled) 확인만 하고, 20초 뒤에도 안 잡혔으면 알린다. */

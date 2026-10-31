@@ -174,4 +174,23 @@ class DriveTest {
         assertEquals(false, yesNo("아니")); assertEquals(false, yesNo("괜찮아, 됐어"))
         assertEquals(null, yesNo("글쎄")); assertEquals(null, yesNo(null))
     }
+
+    @Test fun 급해요_화장실은_운전중_휴게소_요청() {
+        assertTrue(urgentNeed("급해요")); assertTrue(urgentNeed("나 급해")); assertTrue(urgentNeed("화장실 가고 싶어"))
+        assertFalse(urgentNeed("급한 전화")); assertFalse(urgentNeed("답장, 급해서 못 받는다고 해줘"))
+        assertFalse(urgentNeed(null)); assertFalse(urgentNeed("응"))
+        val stop = nearestRestStop(LatLng(37.30, 127.10), LatLng(36.5, 127.3))!!  // 죽전은 지나온 곳(목적지에서 더 멀다), 기흥이 앞쪽 가장 가까운 곳
+        assertEquals("기흥휴게소", stop.name)
+        assertEquals("가장 가까운 기흥휴게소를 경유지로 넣었어요", restStopSpeech(stop, true))
+        assertEquals("가장 가까운 기흥휴게소로 길 안내를 시작해요", restStopSpeech(stop, false))
+    }
+
+    @Test fun 휴식_제안_아니라고_하면_30분_쉰다() {
+        val th = REST_DEFAULT_MIN; val t = th * 60_000L
+        assertTrue(restDue(0, t, th))
+        assertFalse(restDue(0, t, th, snoozeUntilMs = t + REST_SNOOZE_MS))
+        assertFalse(restDue(0, t + REST_SNOOZE_MS - 1, th, t + REST_SNOOZE_MS))
+        assertTrue(restDue(0, t + REST_SNOOZE_MS, th, t + REST_SNOOZE_MS))
+        assertFalse(REST_ASK.contains("누르")); assertTrue(REST_ASK.endsWith("?"))
+    }
 }
