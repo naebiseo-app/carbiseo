@@ -1,4 +1,4 @@
-import { carChip, callerNumber, cleanName, freshCtx, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, sameNumber, type Mode, type Recent } from "./script.ts";
+import { CALL_ID, carChip, callerNumber, cleanName, field, freshCtx, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, reportLine, sameNumber, type Mode, type Recent } from "./script.ts";
 import { adminPage, basicOk, demoSchedule, parseFakeCall, REPLAY_SAID, replayCards, type ReplyRow } from "./admin.ts";
 import { parseNotify, parseReply, TAKE_REPLIES_SQL, type Notif } from "./notif.ts";
 
@@ -62,10 +62,75 @@ export function summaryCard(raw: string) {
   let j: { coreSummary?: string; decisions?: string[]; followUps?: string[] } = {};
   try { j = JSON.parse(f.get("SummaryJson") ?? "{}"); } catch { /* 빈 요약 */ }
   const summary = (j.coreSummary ?? "").slice(0, 300);
-  const from = (f.get("From") ?? "").replace(/\D/g, "");
   const urgent = isUrgent([summary, ...(j.decisions ?? []), ...(j.followUps ?? [])].join(" ")) ? 1 : 0;
-  // H15: 회신용 전체 번호도 보관(행은 30일 뒤 삭제, retention). 화면·라벨엔 끝 4자리만.
-  return { call_id: f.get("CallId") ?? "", from_label: from.length >= 4 ? `끝번호 ${from.slice(-4)}` : "", from_number: /^\d{9,11}$/.test(from) ? from : null, summary, urgent };
+  return { call_id: f.get("CallId") ?? "", ...fromCols(f.get("From") ?? ""), summary, urgent };
+}
+
+// H15: 회신용 전체 번호도 보관(행은 30일 뒤 삭제, retention). 화면·라벨엔 끝 4자리만.
+const fromCols = (n: string) => {
+  const d = n.replace(/\D/g, "");
+  return { from_label: d.length >= 4 ? `끝번호 ${d.slice(-4)}` : "", from_number: /^\d{9,11}$/.test(d) ? d : null };
+};
+
+type Card = ReturnType<typeof fromCols> & { call_id: string; summary: string; urgent: number };
+// 같은 통화의 카드는 1장만: 웹훅 재전송, report_call 뒤 오는 summary.completed는 건너뛴다
+// ponytail: 칩은 카드 만든 시점의 차량 맥락. 정확히 하려면 call-context 때 값을 ring meta에 남겨 call_id로 잇기
+async function saveCallCard(db: D1Database, c: Card, extra: object = {}) {
+  const cc = await kvGet(db, "car_context");
+  await db.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,from_number,summary,urgent,created_at,meta) SELECT 'call','summarized',?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='call' AND call_id=?)")
+    .bind(parseRoom(cc?.room) ?? null, c.call_id, c.from_label, c.from_number, c.summary, c.urgent, now(), JSON.stringify({ car: carChip(cc, now()), ...extra }), c.call_id).run();
+}
+
+// MCP report_call: AI가 끝맺음 직전에 요약을 보낸다 → 끊는 순간 카드. 결과 "ok" 또는 오류 문구.
+export async function reportCall(env: Env, a: Record<string, unknown>): Promise<string> {
+  const id = String(a.call_id ?? "");
+  if (!CALL_ID.test(id)) return "bad call_id";
+  const s = (k: string, max: number) => (typeof a[k] === "string" ? (a[k] as string).trim().slice(0, max) : "");
+  // 발신번호는 AI 입력이 아니라 그 통화의 ring 행(call-context 원문)에서. id는 위 검사로 영숫자만이라 LIKE에 그대로 넣어도 된다
+  const ring = await env.DB.prepare("SELECT raw FROM inbox WHERE kind='ring' AND raw LIKE ? ORDER BY id DESC LIMIT 1").bind(`%${id}%`).first<{ raw: string }>();
+  const from = callerNumber(ring?.raw ?? "");
+  if (sameNumber(from, env.OWNER_NUMBER) && !(await kvGet(env.DB, "owner_as_guest"))) return "ok"; // 주인 통화는 기존 할 일 경로
+  const summary = (s("summary", 300) || [s("caller", 100), s("purpose", 200)].filter(Boolean).join(", ")).slice(0, 300);
+  await saveCallCard(env.DB, { call_id: id, ...fromCols(from), summary, urgent: a.urgent === true || isUrgent(summary) ? 1 : 0 },
+    { via: "mcp", caller: s("caller", 100), purpose: s("purpose", 200), callback_by: s("callback_by", 50) });
+  console.log("report_call", id);
+  return "ok";
+}
+
+const STR = { type: "string" };
+const REPORT_TOOL = {
+  name: "report_call",
+  description: "끝맺음 말 직전에 한 번 호출. 이 통화에서 들은 내용만 보낸다(지어내지 않음).",
+  inputSchema: {
+    type: "object", required: ["call_id"],
+    properties: {
+      call_id: { ...STR, description: "대본에 적힌 이 통화의 call_id" },
+      caller: { ...STR, description: "이름·소속 한 줄" }, purpose: { ...STR, description: "용건" },
+      urgent: { type: "boolean", description: "급하다고 했으면 true" },
+      callback_by: { ...STR, description: "회신 희망 시각, 없으면 빈 문자열" },
+      summary: { ...STR, description: "한두 문장 한국어 요약" },
+    },
+  },
+};
+
+// 최소 MCP streamable HTTP(JSON-RPC 2.0, 단일 JSON 응답). 배치·SSE·세션은 안 씀
+async function mcp(req: Request, env: Env): Promise<Response> {
+  const msg = (await req.json().catch(() => null)) as { id?: unknown; method?: unknown; params?: any } | null;
+  if (!msg || typeof msg.method !== "string") return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } }, 400);
+  if (msg.id === undefined) return new Response(null, { status: 202 }); // 알림(notifications/initialized 등)
+  const ok = (result: unknown) => json({ jsonrpc: "2.0", id: msg.id, result });
+  const p = msg.params ?? {};
+  if (msg.method === "initialize") return ok({ protocolVersion: p.protocolVersion ?? "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "carbiseo", version: "1.0.0" } });
+  if (msg.method === "ping") return ok({});
+  if (msg.method === "tools/list") return ok({ tools: [REPORT_TOOL] });
+  if (msg.method === "tools/call") {
+    // ClawOps가 MCP 요청마다 X-ClawOps-Call-Id를 싣는다(docs voice-agent/call-variables) → AI가 옮겨 적은 값보다 우선
+    const hdr = req.headers.get("x-clawops-call-id") ?? "";
+    const args = { ...(p.arguments ?? {}), ...(CALL_ID.test(hdr) ? { call_id: hdr } : {}) };
+    const text = p.name === "report_call" ? await reportCall(env, args) : "unknown tool";
+    return ok({ content: [{ type: "text", text }], isError: text !== "ok" });
+  }
+  return json({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
 }
 
 /** 주인 모드 통화 요약 → 할 일 카드 본문: 핵심 요약 + 후속 조치. */
@@ -214,7 +279,16 @@ export default {
         return json({ CallContext: { Instruction: instruction, Variables: { room: room ?? "UNKNOWN", owner_mode: "1" } } });
       }
       const s = pickScript(room, owner, name, eta, mode, nextEventAt(schedule, now()), cc);
-      return json({ CallContext: { Instruction: s.instruction, Variables: { room: s.room ?? "UNKNOWN", car: carChip(cc, now()) } } });
+      const callId = field(raw, ["callid", "callsid", "call_id"]);
+      const report = mode === "ai" && CALL_ID.test(callId) ? reportLine(callId) : ""; // 안내 멘트(ment·off)는 대화가 없어 생략
+      return json({ CallContext: { Instruction: s.instruction + report, Variables: { room: s.room ?? "UNKNOWN", car: carChip(cc, now()) } } });
+    }
+
+    // ClawOps 에이전트 MCP 연결(report_call). 비밀은 경로에(authType none)
+    if (pathname.startsWith("/mcp/")) {
+      if (pathname.slice("/mcp/".length) !== env.CALL_CONTEXT_SECRET) return json({ error: "not found" }, 404);
+      if (m !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
+      return mcp(req, env);
     }
 
     // 번호 statusCallback: 통화가 끝나는 즉시 받아쓰기 요청 → 약 16초 뒤 summary.completed(카드). managed_agent 모드는 agent.disconnected 웹훅이 안 와서(10-31 실측) 이 경로가 주 경로
@@ -249,13 +323,7 @@ export default {
         const cc = await kvGet(env.DB, "car_context");
         await env.DB.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,summary,created_at) SELECT 'task','open',?,?,'주인',?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='task' AND call_id=?)")
           .bind(parseRoom(cc?.room) ?? null, card.call_id, taskText(raw), now(), card.call_id).run();
-      } else if (card) {
-        const cc = await kvGet(env.DB, "car_context");
-        // 웹훅 재전송 대비: 같은 통화의 카드는 1장만
-        // ponytail: 칩은 요약 도착 시점의 차량 맥락(통화 후 수십 초 차이). 정확히 하려면 call-context 때 값을 ring meta에 남겨 call_id로 잇기
-        await env.DB.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,from_number,summary,urgent,created_at,meta) SELECT 'call','summarized',?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='call' AND call_id=?)")
-          .bind(parseRoom(cc?.room) ?? null, card.call_id, card.from_label, card.from_number, card.summary, card.urgent, now(), JSON.stringify({ car: carChip(cc, now()) }), card.call_id).run();
-      }
+      } else if (card) await saveCallCard(env.DB, card);
       return json({ ok: true });
     }
 

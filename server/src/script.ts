@@ -106,13 +106,19 @@ type Ev = { title: string; start: number; place?: string };
 export const nextEventAt = (s: Ev[] | null, nowMs: number) =>
   (s ?? []).map((e) => e.start).filter((t) => t > nowMs).sort((a, b) => a - b)[0] ?? null;
 
-// call-context 본문(폼 또는 JSON)에서 발신번호. 키 대소문자 무시.
-export function callerNumber(raw: string): string {
+// call-context 본문(폼 또는 JSON)에서 한 필드. 키 대소문자 무시.
+export function field(raw: string, keys: string[]): string {
   let o: Record<string, unknown> = {};
   try { o = JSON.parse(raw); } catch { o = Object.fromEntries(new URLSearchParams(raw)); }
-  const hit = Object.entries(o ?? {}).find(([k]) => ["from", "caller", "callernumber", "from_number"].includes(k.toLowerCase()));
+  const hit = Object.entries(o ?? {}).find(([k]) => keys.includes(k.toLowerCase()));
   return hit ? String(hit[1]) : "";
 }
+export const callerNumber = (raw: string) => field(raw, ["from", "caller", "callernumber", "from_number"]);
+export const CALL_ID = /^CA[0-9a-f]{20,40}$/i;
+
+// 손님 대본 끝: 끝맺음 직전 요약을 MCP report_call로 → 끊는 순간 카드가 이미 있다(받아쓰기 약 40초를 안 기다림)
+export const reportLine = (callId: string) =>
+  ` [6] 끝맺음 말을 하기 직전에 report_call 도구를 한 번 호출합니다(call_id: "${callId}", 들은 내용만, 지어내지 않음). 도구 결과를 기다리지 말고 바로 끝맺음 말을 합니다.`;
 
 // 숫자만 비교, +82 → 0
 const digits = (n: string) => n.replace(/\D/g, "").replace(/^82/, "0");
