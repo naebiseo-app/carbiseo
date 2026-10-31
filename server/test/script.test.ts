@@ -89,8 +89,8 @@ test("밤·새벽·주말 정차는 '곧 회신' 대신 다음 평일 오전 약
 
 test("손님 대본: 한 번에 하나, 다시 묻지 않음, 급하면 바로 전달·날짜 약속 없음", () => {
   const s = pickScript("DRIVE_REST", "주인", "하루").instruction;
-  assert.match(s, /인사와 자기소개는 첫 마디에만/);
-  assert.match(s, /이미 말한 것은 절대 다시 묻지 않습니다/);
+  assert.match(s, /인사는 첫 마디에 한 번만/);
+  assert.match(s, /같은 질문을 두 번 하지 않습니다/);
   assert.match(s, /어디서 전화 주셨어요/);
   assert.match(s, /급한 건으로 바로 전해 드리겠습니다/);
   assert.match(s, /말씀하신 내용 전해 드리겠습니다/);
