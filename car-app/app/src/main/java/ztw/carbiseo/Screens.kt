@@ -517,6 +517,39 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
         }, Tall, enabled = family.isEmpty() || family.length in 10..11, colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
             Text("가족 번호 저장", fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
+        // 바로 연결: 입력한 번호들로 목록을 통째로 바꾼다(원본은 서버에만, 앱엔 가려진 표시). 쉼·피로 중에도 이 번호의 전화는 차가 읽는다.
+        var direct by rememberSaveable { mutableStateOf("") }
+        var directLabels by rememberSaveable { mutableStateOf(prefs.getString("direct_labels", "") ?: "") }
+        val directList = parseDirect(direct)
+        fun saveDirect(l: List<String>) = scope.launch {
+            val r = withContext(Dispatchers.IO) { Server.postDirectNumbers(l) }
+            if (r != null) { directLabels = r.joinToString(", "); direct = ""; prefs.edit().putString("direct_labels", directLabels).apply() }
+            toast(ctx, if (r != null) "저장했어요" else "저장 실패 — 번호를 확인하고 다시 시도해 주세요")
+        }
+        OutlinedTextField(direct, { direct = it.take(150) }, Modifier.fillMaxWidth(), singleLine = true, isError = direct.isNotBlank() && directList == null,
+            label = { Text("바로 연결 번호(쉼표로 여러 개)", fontSize = 18.sp) },
+            supportingText = { Text(if (directLabels.isNotEmpty()) "저장됨 $directLabels · 새로 저장하면 이 목록으로 바뀌어요" else "숫자 10~11자리, 최대 10개") }, textStyle = TextStyle(color = ParkInk, fontSize = 22.sp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button({ directList?.let(::saveDirect) }, Tall, enabled = !directList.isNullOrEmpty(), colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
+                Text("바로 연결 저장", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
+            OutlinedButton({ saveDirect(emptyList()) }, Tall, enabled = directLabels.isNotEmpty()) { Text("목록 비우기", color = ParkInk, fontSize = 18.sp) }
+        }
+        // 응대 멘트: 응대 모드가 '멘트'일 때 전화 건 사람에게 들려주는 문구(빈 값 = 기본 문구)
+        var ment by rememberSaveable { mutableStateOf(prefs.getString("ment_text", "") ?: "") }
+        var mentErr by rememberSaveable { mutableStateOf(false) }
+        OutlinedTextField(ment, { ment = it.take(60); mentErr = false }, Modifier.fillMaxWidth(), singleLine = true, isError = mentErr, label = { Text("응대 멘트(멘트 모드일 때)", fontSize = 18.sp) },
+            supportingText = { Text(if (mentErr) MENT_BAD else "비우고 저장하면 기본 문구예요") }, textStyle = TextStyle(color = ParkInk, fontSize = 22.sp))
+        Button({
+            scope.launch {
+                val (v, err) = withContext(Dispatchers.IO) { Server.postMent(ment) }
+                if (v != null) { ment = v; prefs.edit().putString("ment_text", v).apply() }
+                mentErr = err == "bad ment_text"
+                toast(ctx, if (v != null) "저장했어요" else if (mentErr) MENT_BAD else "저장 실패 — 다시 시도해 주세요")
+            }
+        }, Tall, colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
+            Text("멘트 저장", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        }
         Text("전화 응대", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         ModeButtons()
         OutlinedButton({ RoomService.reopenSetup(ctx); onClose() }, Tall) { Text("처음 설정(착신·방해 금지) 다시 보기", color = ParkInk, fontSize = 18.sp) }

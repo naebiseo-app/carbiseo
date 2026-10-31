@@ -137,8 +137,31 @@ fun lateBy(nowMs: Long, etaMin: Int?, eventStartMs: Long): Int? {
     return if (over > LATE_GRACE_MS) Math.round(over / 60_000.0).toInt() else null
 }
 
+const val LATE_DEST_RADIUS_M = 1000.0
+/** F4 오탐 줄이기: 지금 가는 목적지가 그 일정 장소(1km 안)일 때만 지각을 묻는다. 목적지를 모르면 묻지 않는다. */
+fun headingTo(dest: LatLng?, e: Event): Boolean = dest != null && distanceM(dest, e.at) <= LATE_DEST_RADIUS_M
+
 /** F4: 지연 문자 초안 = 할 일 카드 본문(taskDraft 형식). 연락처가 일정에 있으면 번호로 들어간다. */
 fun lateTask(e: Event, min: Int) = "${e.title} 일정 지연 알림${if (e.contact.isNotBlank()) " ${e.contact}" else ""} / 내용: 운전 중이라 약 ${min}분 늦을 것 같습니다. 죄송합니다."
+
+/** O4 예약 대행: 목적지 이름이 식당·주차장류인가. 이름을 모르면 false. */
+private val RESERVE_NAME = Regex("식당|맛집|카페|레스토랑|주차장|파킹|한정식|횟집|고기")
+fun reservable(name: String?): Boolean = name != null && RESERVE_NAME.containsMatchIn(name)
+
+/** 지금 + 남은 분의 도착 시각 HH:MM. */
+fun arriveAt(nowMs: Long, etaMin: Int, zone: java.time.ZoneId): String =
+    java.time.format.DateTimeFormatter.ofPattern("HH:mm").format(java.time.Instant.ofEpochMilli(nowMs + etaMin * 60_000L).atZone(zone))
+
+fun reserveSpeech(name: String, hhmm: String) = "${name}에 도착 시각 ${hhmm}쯤이에요. 예약 문자 초안 만들어 둘까요?"
+const val RESERVE_DONE_SPEECH = "정차하시면 할 일에서 확인해 주세요"
+/** O4: 예약 문자 초안 = 할 일 카드 본문(taskDraft 형식, 번호는 정차 후 입력). */
+fun reserveTask(name: String, hhmm: String) = "$name 예약 / 내용: 안녕하세요, ${hhmm}쯤 도착 예정인데 ○명 자리(주차) 가능할까요?"
+
+/** 설정 "바로 연결 번호": 쉼표·공백으로 나눠 하이픈을 뗀 숫자 10~11자리, 최대 10개. 하나라도 틀리면 null. */
+fun parseDirect(text: String): List<String>? =
+    text.split(Regex("""[,，\s]+""")).map { it.replace("-", "") }.filter { it.isNotEmpty() }.takeIf { l -> l.size <= 10 && l.all { Regex("""\d{10,11}""").matches(it) } }
+
+const val MENT_BAD = "60자 이하, 글자·숫자·. , ? !만 쓸 수 있어요"
 
 /** 방이 바뀔 때 한 문장. PARK는 무음. */
 fun roomSpeech(r: Room): String? = when (r) {

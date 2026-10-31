@@ -193,4 +193,39 @@ class DriveTest {
         assertTrue(restDue(0, t + REST_SNOOZE_MS, th, t + REST_SNOOZE_MS))
         assertFalse(REST_ASK.contains("누르")); assertTrue(REST_ASK.endsWith("?"))
     }
+
+    @Test fun 지각_예측은_목적지가_그_일정_장소_1km_안일때만() {
+        val e = Event("미팅", 0, "판교역", LatLng(37.3948, 127.1112))
+        assertTrue(headingTo(LatLng(37.3950, 127.1115), e))      // 거의 같은 곳
+        assertTrue(headingTo(LatLng(37.4030, 127.1112), e))      // 약 0.9km
+        assertFalse(headingTo(LatLng(37.4100, 127.1112), e))     // 약 1.7km: 다른 곳으로 가는 중
+        assertFalse(headingTo(null, e))                          // 목적지 모름 = 묻지 않는다
+    }
+
+    @Test fun 예약_대행은_식당_주차장류_이름만() {
+        for (n in listOf("판교 한정식", "대박 횟집", "스타 카페", "공영주차장", "OO파킹", "맛집 거리", "숯불고기", "이탈리안 레스토랑", "착한식당")) assertTrue(n, reservable(n))
+        for (n in listOf("판교역", "한빛물산", "", "우리집")) assertFalse(n, reservable(n))
+        assertFalse(reservable(null))
+    }
+
+    @Test fun 예약_초안은_할일_카드_형식_도착시각_포함() {
+        val now = java.time.Instant.parse("2026-11-02T03:50:00Z").toEpochMilli()
+        assertEquals("04:20", arriveAt(now, 30, java.time.ZoneOffset.UTC))
+        assertEquals("13:20", arriveAt(now, 30, java.time.ZoneId.of("Asia/Seoul")))
+        assertEquals("판교 한정식에 도착 시각 04:20쯤이에요. 예약 문자 초안 만들어 둘까요?", reserveSpeech("판교 한정식", "04:20"))
+        val t = reserveTask("판교 한정식", "04:20")
+        assertEquals("" to "안녕하세요, 04:20쯤 도착 예정인데 ○명 자리(주차) 가능할까요?", taskDraft(t))
+        assertTrue(t.startsWith("판교 한정식 예약 / "))
+        assertFalse(RESERVE_DONE_SPEECH.contains("누르"))
+    }
+
+    @Test fun 바로_연결_번호_입력_파싱() {
+        assertEquals(listOf("01000001234", "0212345678"), parseDirect("010-0000-1234, 0212345678"))
+        assertEquals(listOf("01000001234", "01000005678"), parseDirect("01000001234 01000005678"))
+        assertEquals(emptyList<String>(), parseDirect("  "))
+        assertEquals(null, parseDirect("01000001234, 123"))           // 자릿수 틀림
+        assertEquals(null, parseDirect("01000001234, 김과장"))
+        assertEquals(null, parseDirect((1..11).joinToString(",") { "0100000%04d".format(it) })) // 11개
+        assertEquals(10, parseDirect((1..10).joinToString(",") { "0100000%04d".format(it) })!!.size)
+    }
 }

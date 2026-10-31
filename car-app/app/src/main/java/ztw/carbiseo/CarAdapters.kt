@@ -55,6 +55,7 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
     var cameraOverspeed = false; private set
     var cautionZone = false; private set
     var etaMin: Int? = null; private set // 목적지까지 남은 분. null = 목적지 없음.
+    var destName: String? = null; private set // 목적지 이름(내비 DestinationInfo.name). 비었거나 목적지 없음 = null
     // C: Pleos Vehicle SDK 값(메인 스레드에서만 씀). null = 모름/권한 없음.
     var turnOn = false; private set
     var steerDeg: Float? = null; private set
@@ -212,13 +213,13 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
                 naviAnswered()
                 val none = i.latitude == 0.0 && i.longitude == 0.0
                 val e = if (none) null else etaMinutes(i.remainTime)
-                ui.post { etaMin = e }
+                ui.post { etaMin = e; destName = if (none) null else i.name?.takeIf { it.isNotBlank() } }
                 set { copy(destination = if (none) null else LatLng(i.latitude, i.longitude)) }
             }
             override fun onCurrentLocationInfo(i: CurrentLocationInfo) { naviAnswered(); set { copy(location = forcedLocation ?: LatLng(i.latitude, i.longitude)) } }
             // 취소/종료만 목적지 해제로 본다. 경유지 추가 직후의 취소->재개 깜빡임은 상태머신 2초 유예가 흡수한다.
-            override fun onRouteCancelled() { Log.i(TAG, "onRouteCancelled"); ui.post { etaMin = null }; set { copy(destination = null) } }
-            override fun onRouteEnded() { ui.post { etaMin = null }; set { copy(destination = null) } }
+            override fun onRouteCancelled() { Log.i(TAG, "onRouteCancelled"); ui.post { etaMin = null; destName = null }; set { copy(destination = null) } }
+            override fun onRouteEnded() { ui.post { etaMin = null; destName = null }; set { copy(destination = null) } }
             override fun onDestinationChanged() { n.getDestinationInfo() }
             override fun onWaypointChanged(i: WaypointChangedInfo) { n.getDestinationInfo() }
             // 0 이하 = 제한속도 모름. 목록이 비면 경고/주의구간 해제로 본다.

@@ -157,4 +157,20 @@ class InboxTest {
         assertNull(mailDraft("메일: park@example.com / 제목만"))               // 칸 모자람
         assertNull(mailDraft("메일: / 제목 / 내용"))                           // 받는 사람 없음
     }
+
+    @Test fun 바로_연결_전화는_피로여도_한_줄로_읽는다() {
+        val d = item(1, urgent = true, label = "김민수", summary = "견적 확인 부탁")
+        assertEquals("바로 연결: 김민수님 전화, 용건 견적 확인 부탁.", directSpeech(listOf(d)))
+        assertEquals("바로 연결: 김민수님 전화, 용건 견적 확인 부탁.", directSpeech(listOf(item(1, label = "김민수", summary = "견적 확인 부탁").copy(direct = true)))) // meta.direct만 있어도
+        assertEquals("바로 연결: 알 수 없는 번호님 전화.", directSpeech(listOf(item(2, urgent = true, label = " ", summary = ""))))
+        assertEquals(2, directSpeech(listOf(d, item(3, urgent = true, label = "박", summary = "급함")))!!.split("바로 연결").size - 1)
+        assertNull(directSpeech(listOf(item(4)))) // 일반 부재중은 피로에 읽지 않는다
+        assertNull(directSpeech(listOf(d.copy(kind = "hint"))))
+        assertNull(directSpeech(listOf(d), "off"))
+        assertEquals("바로 연결: 김민수님 전화, 용건 견적 확인 부탁.", directSpeech(listOf(d, d)))  // 같은 id는 한 번
+    }
+
+    @Test fun 퇴근길도_direct_카드는_읽는다() {
+        assertEquals("급한 전화 한 건, AI가 용건을 받아 두었습니다.", speechFor(listOf(item(1), item(2).copy(direct = true)), Room.DRIVE_REST))
+    }
 }

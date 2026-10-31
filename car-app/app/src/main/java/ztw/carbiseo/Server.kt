@@ -52,6 +52,17 @@ object Server {
     fun postFamilyNumber(number: String): String? =
         postJson("/car/settings", JSONObject().put("family_number", number))?.takeIf { it.optBoolean("ok") }?.optJSONObject("settings")?.str("family_label")
 
+    /** 바로 연결 번호 목록 통째 교체(각 숫자 10~11자리·최대 10개, []=삭제). 성공하면 가려진 표시 목록, 실패 null. 원본은 서버에만 둔다. */
+    fun postDirectNumbers(numbers: List<String>): List<String>? =
+        postJson("/car/settings", JSONObject().put("direct_numbers", org.json.JSONArray(numbers)))?.takeIf { it.optBoolean("ok") }
+            ?.let { j -> j.optJSONObject("settings")?.optJSONArray("direct_labels")?.let { a -> List(a.length()) { a.getString(it) } } ?: emptyList() }
+
+    /** 응대 멘트 저장(1~60자, ""=기본 문구). 결과 = (서버가 정리한 값("" = 기본 문구), 오류). 오류는 "bad ment_text"(400)·"network" 등. */
+    fun postMent(text: String): Pair<String?, String?> {
+        val j = postJson("/car/settings", JSONObject().put("ment_text", text)) ?: return null to "network"
+        return if (j.optBoolean("ok")) (j.optJSONObject("settings")?.str("ment_text") ?: "") to null else null to j.str("error")
+    }
+
     /** H1 집 문턱: 가족에게 도착 예상 문자(서버가 번호 없으면 skipped). 결과 문자열은 로그용. */
     fun postFamilyEta(etaMin: Int): String =
         postJson("/car/family-eta", JSONObject().put("eta_min", etaMin))?.let { if (it.optBoolean("skipped")) "skipped" else if (it.optBoolean("ok")) "ok" else it.str("code").ifEmpty { it.str("error") } } ?: "FAIL"
@@ -74,7 +85,7 @@ object Server {
                 InboxItem(it.getLong("id"), it.str("from_label"), it.str("summary"),
                     it.optInt("urgent") != 0, it.optLong("created_at"), it.str("raw"), it.str("kind").ifEmpty { "call" },
                     it.str("status"), meta?.str("code") ?: "", meta?.str("car") ?: "", it.str("room"), it.str("from_number"),
-                    meta?.str("app") ?: "", meta?.optBoolean("replyable") == true)
+                    meta?.str("app") ?: "", meta?.optBoolean("replyable") == true, meta?.optBoolean("direct") == true)
             } to minId
         } finally { c.disconnect() }
     }.getOrNull()

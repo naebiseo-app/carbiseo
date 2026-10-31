@@ -74,10 +74,13 @@ class RoomService : Service() {
     private val notifFresh = mutableSetOf<Long>()
     private val notifSaid = mutableSetOf<Long>()
     // 음성으로 묻고 대답을 기다리는 질문(알림 묻기는 talk가 따로). 대답은 heard()가 받는다.
-    private enum class Ask { NONE, LATE, REST }
+    private enum class Ask { NONE, LATE, REST, RESERVE }
     private var pending = Ask.NONE
     private var lateEvent: Pair<Event, Int>? = null
     private val lateAsked = mutableSetOf<Long>() // 이미 물은 일정(start)
+    private val reserveOnce = Once() // O4: 운전 1회당 한 번
+    private var reserve: Pair<String, String>? = null // 예약 초안을 물은 (목적지 이름, 도착 HH:MM)
+    private var forcedDest: String? = null // 디버그 ROUTE의 --es name (에뮬은 내비가 목적지 이름을 안 줄 수 있어서)
     private var familyDay = -1L // 가족에게 도착 예상을 보낸 날(하루 한 번)
     private var restSnoozeUntil = 0L // 휴식 제안에 '아니'라고 한 뒤 30분(시뮬 시각)
 
@@ -111,8 +114,11 @@ class RoomService : Service() {
         }
         inbox = (fresh.filter { it.kind in SHOWN_KINDS } + inbox).sortedByDescending { it.id }.take(50)
         Log.i("ROOM", "inbox ${if (initial) "initial" else "new"} ${fresh.size}")
-        // 피로 모드면 음성 없이 보관만(카드는 쌓인다)
-        if (!initial && !passenger && !fatigued(machine.room, tripMin())) hold.offerItems(fresh, machine.room, quiet)?.let { speaker.speak(it) }
+        // 피로 모드면 음성 없이 보관만(카드는 쌓인다). 바로 연결(급함·direct) 전화만 예외로 한 줄(조작·경고·통화 중 보류는 say가 그대로 적용)
+        if (!initial && !passenger) {
+            if (fatigued(machine.room, tripMin())) directSpeech(fresh, mode)?.let(::say)
+            else hold.offerItems(fresh, machine.room, quiet)?.let { speaker.speak(it) }
+        }
         if (!initial) fresh.filter { it.kind == "notif" }.let { n -> notifFresh += n.map { it.id }; notifQueue += notifNow(n.sortedBy { it.id }, machine.room, favs, off) } // 도착 순(서버는 최신순)
     }
 
@@ -134,6 +140,7 @@ class RoomService : Service() {
         if (urgentNeed(said) && machine.room.let { it != null && it != Room.PARK }) { talk.cancel(); askStep = talk.step; return addRestStop(true) }
         when (p) {
             Ask.LATE -> lateEvent?.let { (ev, m) -> if (yesNo(said) == true) { addLocalTask(lateTask(ev, m)); say(LATE_DONE_SPEECH) } }
+            Ask.RESERVE -> reserve?.let { (n, t) -> if (yesNo(said) == true) { addLocalTask(reserveTask(n, t)); say(RESERVE_DONE_SPEECH) } }
             Ask.REST -> when (yesNo(said)) {
                 true -> addRestStop(true)
                 false -> { restSnoozeUntil = clock.millis() + REST_SNOOZE_MS; restOnce.reset(); restOffer = false }
@@ -220,10 +227,14 @@ class RoomService : Service() {
             if (parkRemind.fire(machine.room == Room.PARK && parkedAt?.let { clock.millis() - it >= PARK_REMIND_MS } == true) && !passenger) parkReminder(inbox, seen)?.let(::say)
             // F4: 업무 운전 중 도착 예상이 다음 일정 시작보다 늦으면 일정마다 한 번 묻는다
             if (machine.room == Room.DRIVE_WORK && !passenger && canAsk()) System.currentTimeMillis().let { now ->
-                nextEvent(schedule, now)?.takeIf { it.start !in lateAsked }?.let { ev ->
+                nextEvent(schedule, now)?.takeIf { it.start !in lateAsked && headingTo(machine.signals.destination, it) }?.let { ev ->
                     lateBy(now, e, ev.start)?.let { m -> lateAsked += ev.start; lateEvent = ev to m; askVoice(lateSpeech(m), Ask.LATE) }
                 }
             }
+            // O4: 식당·주차장류 목적지로 출발하면 한 번 "도착 시각쯤, 예약 문자 초안 만들어 둘까요?"(업무·쉼 방 상관없이)
+            val dn = forcedDest ?: adapters.destName
+            if (machine.room.let { it != null && it != Room.PARK } && !passenger && e != null && reservable(dn) && canAsk() &&
+                reserveOnce.fire(true)) arriveAt(clock.millis(), e, clock.zone).let { t -> reserve = dn!! to t; askVoice(reserveSpeech(dn, t), Ask.RESERVE) }
             if (homeOnce.fire(homeSoon(machine.room, machine.signals.destination, machine.settings, e))) {
                 if (!passenger) say(HOME_SOON_SPEECH)
                 notifyFamily(e)
@@ -267,7 +278,7 @@ class RoomService : Service() {
                 val parked = parkedAt?.let { now - it }; parkedAt = null
                 if (from == Room.PARK && talk.step != NotifTalk.Step.NONE) { talk.cancel(); askStep = talk.step; listening = false } // P에서 남겨 둔 바는 출발하면 닫는다(카드는 남음)
                 // M4: 2분 미만 P는 같은 운전 — 휴식·피로·집 문턱 1회 안내와 운전 시작 시각을 유지
-                if (newDrive(parked)) { homeOnce.reset(); restOnce.reset(); fatigueOnce.reset(); trip.reset(); driveStart = now; restSnoozeUntil = 0 }
+                if (newDrive(parked)) { homeOnce.reset(); reserveOnce.reset(); restOnce.reset(); fatigueOnce.reset(); trip.reset(); driveStart = now; restSnoozeUntil = 0 }
                 else Log.i("ROOM", "short park ${parked!! / 1000}s -> same drive")
                 // H9: 오래 세운 뒤의 출발이면 그 전에 켠 동승자 모드는 끈다
                 if (passenger && parked != null && parked >= PASSENGER_RESET_PARK_MS && passengerAt < now - parked) { togglePassenger(false); say("동승자 모드를 껐어요") }
@@ -315,14 +326,15 @@ class RoomService : Service() {
         .setContentTitle("내비서 실행 중 — 방: $r")
         .setOngoing(true).build()
 
-    // 디버그 빌드 전용: adb shell am broadcast -a ztw.carbiseo.ROUTE --ef lat 37.4979 --ef lng 127.0276
+    // 디버그 빌드 전용: adb shell am broadcast -a ztw.carbiseo.ROUTE --ef lat 37.4979 --ef lng 127.0276 [--es name "판교 한정식" = O4 예약 초안용 목적지 이름]
     private fun registerDebugRoute() {
         val r = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
                 val lat = i.getFloatExtra("lat", 0f).toDouble()
                 val lng = i.getFloatExtra("lng", 0f).toDouble()
-                Log.i("ROOM", "debug requestRoute $lat,$lng")
-                adapters.navi?.requestRoute(RouteInfo(lat, lng, null, null, "debug", "", "", "", RouteOption.RECOMMENDED, "", false))
+                forcedDest = i.getStringExtra("name")
+                Log.i("ROOM", "debug requestRoute $lat,$lng name=$forcedDest")
+                adapters.navi?.requestRoute(RouteInfo(lat, lng, null, null, forcedDest ?: "debug", "", "", "", RouteOption.RECOMMENDED, "", false))
             }
         }
         val wp = object : BroadcastReceiver() {

@@ -14,6 +14,7 @@ data class InboxItem(
     val room: String = "", // 서버가 받을 때의 차 방(PARK|DRIVE_WORK|DRIVE_REST|"")
     val fromNumber: String = "", // H15 회신용 전체 번호(화면엔 끝 4자리만). 30일 보관 후 행째 삭제
     val app: String = "", val replyable: Boolean = false, // notif: 폰 알림 앱 이름·답장 가능
+    val direct: Boolean = false, // 서버 바로 연결 목록에 있는 발신자(meta.direct). 쉼·피로 중에도 읽는다
 )
 
 /**
@@ -85,9 +86,9 @@ fun nextSince(since: Long, items: List<InboxItem>): Long = maxOf(since, items.ma
 fun speechFor(items: List<InboxItem>, room: Room?, mode: String = "ai"): String? {
     if (mode == "off") return null
     val calls = items.filter { it.kind == "call" }.distinctBy { it.id } // 웹훅 이벤트·힌트·할 일은 세지 않는다
-    val newItems = if (room == Room.DRIVE_REST) calls.filter { it.urgent } else calls
+    val newItems = if (room == Room.DRIVE_REST) calls.filter { it.urgent || it.direct } else calls
     if (newItems.isEmpty() || (room != Room.DRIVE_WORK && room != Room.DRIVE_REST)) return null
-    val n = newItems.size; val u = newItems.count { it.urgent }
+    val n = newItems.size; val u = newItems.count { it.urgent || it.direct }
     val head = when {
         n == 1 -> if (u == 1) "급한 전화 한 건" else "부재중 전화 한 건"
         u == n -> "급한 전화 ${n}건"
@@ -95,6 +96,14 @@ fun speechFor(items: List<InboxItem>, room: Room?, mode: String = "ai"): String?
         else -> "부재중 전화 ${n}건"
     }
     return "$head, ${if (mode == "ment") "안내 멘트로 응대했어요." else "AI가 용건을 받아 두었습니다."}"
+}
+
+/** 바로 연결(급함·direct) 전화 한 줄씩(최대 3). 방·피로 필터를 통과시키려고 따로 둔다 — 호출자가 안전 미루기(조작·경고·통화 중)는 그대로 거친다. 끔 모드는 무음. */
+fun directSpeech(items: List<InboxItem>, mode: String = "ai"): String? {
+    if (mode == "off") return null
+    val d = items.filter { it.kind == "call" && (it.urgent || it.direct) }.distinctBy { it.id }.take(3)
+    if (d.isEmpty()) return null
+    return sentences(*d.map { "바로 연결: ${it.fromLabel.ifBlank { "알 수 없는 번호" }}님 전화${if (it.summary.isNotBlank()) ", 용건 ${it.summary}" else ""}" }.toTypedArray())
 }
 
 /** M12: 세운 지 30초 뒤, 안 본 급한 통화가 남았으면 정차마다 한 문장. */
