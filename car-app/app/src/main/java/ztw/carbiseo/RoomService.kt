@@ -197,8 +197,9 @@ class RoomService : Service() {
             if (q != quiet) { quiet = q; Log.i("ROOM", "quiet $q"); hold.release(q, machine.room)?.let { speaker.speak(it) } }
             if (passenger) { hold.clear(); notifQueue.clear() } // 동승자 모드면 보류분도 버린다
             // 폰 알림: 미루기 조건(경고·깜빡이·후진·큰 조향·통화·피로)이 다 풀리고 대화 중이 아니면 쌓인 것을 묶어서 한 번
-            if (!q && talk.step == NotifTalk.Step.NONE && notifQueue.isNotEmpty() && machine.room != null && !passenger && !fatigued(machine.room, tripMin())) {
-                offerNotifs(notifQueue.toList()); notifQueue.clear()
+            // 대답 없이 남은 묻기(P의 바)도 새 알림이 오면 닫고, 못 읽어 준 알림과 합쳐 다시 묻는다(같은 알림은 한 번만)
+            if (!q && (talk.step == NotifTalk.Step.NONE || talk.waiting && !listening) && pending == Ask.NONE && notifQueue.isNotEmpty() && machine.room != null && !passenger && !fatigued(machine.room, tripMin())) {
+                offerNotifs((talk.dropStale() + notifQueue).distinctBy { it.id }.sortedBy { it.id }); notifQueue.clear()
             }
             askTouch = touchOk(); voicePath = voice.path
             // 정수 분이라 != 가 곧 "1분 이상 변화". 방 판정 전이면 첫 방 변경이 같이 올린다.

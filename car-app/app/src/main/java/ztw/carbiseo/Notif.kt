@@ -108,6 +108,12 @@ class NotifTalk {
     }
 
     fun cancel() { step = Step.NONE }
+
+    /** 묻기만 해 두고 대답이 없는 상태(P에서 바를 그대로 둔 경우). 이대로면 새 알림을 음성으로 못 묻는다. */
+    val waiting get() = step == Step.OFFER || step == Step.AFTER_READ
+
+    /** 무응답 묻기를 닫고(NONE), 아직 안 읽어 준 알림(묻기 단계만)을 돌려준다 — 새 알림과 합쳐 다시 묻는 용도. */
+    fun dropStale(): List<InboxItem> = (if (step == Step.OFFER) items else emptyList()).also { step = Step.NONE }
 }
 
 /** 알림 바 (문구, 버튼). 낭독 뒤 P(touch)에서 듣기가 끝나면 '답장하기'(다시 듣기)·'닫기'로 무엇을 기다리는지 보인다. 주행 중 문구는 그대로. */

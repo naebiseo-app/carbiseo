@@ -117,4 +117,23 @@ class NotifTest {
         assertEquals(Turn(null), t.hear("닫기", favs, parked = true)) // '닫기' 버튼 → 바 닫힘
         assertEquals(NotifTalk.Step.NONE, t.step)
     }
+
+    @Test fun 무응답_묻기는_닫고_새_알림과_합쳐_다시_묻는다() {
+        val t = NotifTalk()
+        val first = n(1, "김부장")
+        t.offer(listOf(first), favs)
+        t.hear(null, favs, parked = true) // P에서 못 들음 → 바는 남는다(예전엔 여기서 새 알림을 못 물었다)
+        assertEquals(true, t.waiting)
+        val merged = (t.dropStale() + listOf(first, n(2, "박대리"))).distinctBy { it.id }.sortedBy { it.id } // 같은 알림은 한 번만
+        assertEquals(NotifTalk.Step.NONE, t.step)
+        assertEquals("카톡 2건, 김부장님 외 1명. 읽어드릴까요?", t.offer(merged, favs)?.say)
+    }
+
+    @Test fun 읽어준_뒤_대기는_합칠_알림이_없다() {
+        val t = NotifTalk()
+        t.offer(listOf(n(1, "김부장")), favs); t.hear("읽어줘", favs)
+        assertEquals(true, t.waiting) // 답장 대기
+        assertEquals(emptyList<InboxItem>(), t.dropStale())
+        assertEquals(false, t.waiting)
+    }
 }
