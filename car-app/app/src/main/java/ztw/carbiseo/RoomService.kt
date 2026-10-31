@@ -105,7 +105,7 @@ class RoomService : Service() {
         Log.i("ROOM", "inbox ${if (initial) "initial" else "new"} ${fresh.size}")
         // 피로 모드면 음성 없이 보관만(카드는 쌓인다)
         if (!initial && !passenger && !fatigued(machine.room, tripMin())) hold.offerItems(fresh, machine.room, quiet)?.let { speaker.speak(it) }
-        if (!initial) fresh.filter { it.kind == "notif" }.let { n -> notifFresh += n.map { it.id }; notifQueue += notifNow(n.sortedBy { it.id }, machine.room, favs) } // 도착 순(서버는 최신순)
+        if (!initial) fresh.filter { it.kind == "notif" }.let { n -> notifFresh += n.map { it.id }; notifQueue += notifNow(n.sortedBy { it.id }, machine.room, favs, off) } // 도착 순(서버는 최신순)
     }
 
     /** 알림 묶음 제안 "카톡 3건, ○○님 외 2명. 읽어드릴까요?" → 대답 듣기. */
@@ -165,7 +165,7 @@ class RoomService : Service() {
             if (q != quiet) { quiet = q; Log.i("ROOM", "quiet $q"); hold.release(q, machine.room)?.let { speaker.speak(it) } }
             if (passenger) { hold.clear(); notifQueue.clear() } // 동승자 모드면 보류분도 버린다
             // 폰 알림: 미루기 조건(경고·깜빡이·후진·큰 조향·통화·피로)이 다 풀리고 대화 중이 아니면 쌓인 것을 묶어서 한 번
-            if (!q && talk.step == NotifTalk.Step.NONE && notifQueue.isNotEmpty() && machine.room.let { it != null && it != Room.PARK } && !passenger && !fatigued(machine.room, tripMin())) {
+            if (!q && talk.step == NotifTalk.Step.NONE && notifQueue.isNotEmpty() && machine.room != null && !passenger && !fatigued(machine.room, tripMin())) {
                 offerNotifs(notifQueue.toList()); notifQueue.clear()
             }
             askTouch = touchOk(); voicePath = voice.path

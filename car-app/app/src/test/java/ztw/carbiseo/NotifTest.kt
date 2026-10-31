@@ -16,11 +16,12 @@ class NotifTest {
         assertEquals(false, isAd(n(1, "김부장", "광고 시안 확인 부탁"))) // 본문 중간의 '광고'는 업무일 수 있다
     }
 
-    @Test fun 업무방은_광고외_전부_쉼방은_즐겨찾기만_정차는_없음() {
+    @Test fun 업무방은_광고외_전부_쉼방은_즐겨찾기만_정차는_시각따라() {
         val l = listOf(n(1, "김부장"), n(2, "엄마"), n(3, "쇼핑몰", "(광고) 할인"), InboxItem(4, "이", "x", false, 0L, ""))
         assertEquals(listOf(1L, 2L), notifNow(l, Room.DRIVE_WORK, favs).map { it.id })
         assertEquals(listOf(2L), notifNow(l, Room.DRIVE_REST, favs).map { it.id })
-        assertEquals(emptyList<Long>(), notifNow(l, Room.PARK, favs).map { it.id })
+        assertEquals(listOf(1L, 2L), notifNow(l, Room.PARK, favs).map { it.id }) // P 업무 시간 = 업무 규칙
+        assertEquals(listOf(2L), notifNow(l, Room.PARK, favs, off = true).map { it.id }) // P 퇴근 뒤 = 즐겨찾기만
         assertEquals(emptyList<Long>(), notifNow(l, null, favs).map { it.id })
     }
 

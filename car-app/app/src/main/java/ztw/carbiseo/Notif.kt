@@ -8,9 +8,10 @@ fun parseFavs(s: String) = s.split(",", "，").map { it.trim() }.filter { it.isN
 /** 광고성: 앱·보낸이 이름에 '광고', 또는 본문이 '(광고)'로 시작(정보통신망법 표기). ponytail: 표기만 본다, 스팸 판정은 안 한다. */
 fun isAd(i: InboxItem) = "광고" in i.app || "광고" in i.fromLabel || i.summary.trimStart().startsWith("(광고)")
 
-/** 지금 바로 알릴 알림. 업무 방 = 광고 외 전부, 쉼 방 = 즐겨찾기 발신자만(나머지는 정차 요약), 정차·판정 전 = 없음(카드). */
-fun notifNow(items: List<InboxItem>, room: Room?, favs: Set<String>): List<InboxItem> = items.filter { it.kind == "notif" && !isAd(it) }.filter {
-    when (room) { Room.DRIVE_WORK -> true; Room.DRIVE_REST -> it.fromLabel in favs; else -> false }
+/** 지금 바로 알릴 알림. 업무 방 = 광고 외 전부, 쉼 방 = 즐겨찾기 발신자만(나머지는 정차 요약), 판정 전 = 없음(카드).
+ *  정차(P)도 음성으로 묻는다(서서 화면 보다 신호 놓치지 않게): 퇴근 시각(off)이면 쉼 규칙, 아니면 업무 규칙. */
+fun notifNow(items: List<InboxItem>, room: Room?, favs: Set<String>, off: Boolean = false): List<InboxItem> = items.filter { it.kind == "notif" && !isAd(it) }.filter {
+    when (room) { Room.DRIVE_WORK -> true; Room.DRIVE_REST -> it.fromLabel in favs; Room.PARK -> !off || it.fromLabel in favs; null -> false }
 }
 
 private fun appShort(a: String) = when {
