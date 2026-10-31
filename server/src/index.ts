@@ -202,8 +202,10 @@ export const retention = (t: number): [string, number][] => [
   ["DELETE FROM inbox WHERE created_at < ?", t - 30 * DAY],
 ];
 
+const HANGUP_MS = 12_000; // 멘트(약 8초) + 연결 지연. Workers waitUntil은 응답 뒤 30초까지
+
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx?: { waitUntil(p: Promise<unknown>): void }): Promise<Response> {
     const { pathname } = new URL(req.url);
     const m = req.method;
     const authed = req.headers.get("authorization") === `Bearer ${env.CAR_TOKEN}`;
@@ -310,6 +312,11 @@ export default {
       const s = pickScript(room, owner, name, eta, mode, nextEventAt(schedule, now()), cc, clk, ment);
       const callId = field(raw, ["callid", "callsid", "call_id"]);
       const report = mode === "ai" && CALL_ID.test(callId) ? reportLine(callId) : ""; // 안내 멘트(ment·off)는 대화가 없어 생략
+      // 멘트·끔: 모델이 끊기를 미루는 일이 있어(장면 9) 멘트 길이만큼 기다렸다가 서버가 통화를 끝낸다. ponytail: 고정 12초, 긴 사용자 멘트면 길이 비례로
+      if (mode !== "ai" && CALL_ID.test(callId) && env.CLAWOPS_API_KEY)
+        ctx?.waitUntil(new Promise((ok) => setTimeout(ok, HANGUP_MS)).then(() => fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls/${callId}`,
+          { method: "POST", headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ Status: "completed" }) }))
+          .then((r) => console.log("ment hangup", r.status)).catch((e) => console.log("ment hangup error", String(e))));
       const dl = direct && mode === "ai" ? ` 이 분은 ${owner ?? "주인"}님이 바로 연결 목록에 넣은 분입니다. 용건만 짧게 듣고 '바로 전해 드리겠습니다'로 끝냅니다.` : ""; // ment·off는 대화가 없어 생략
       return json({ CallContext: { Instruction: s.instruction + dl + report, Variables: { room: s.room ?? "UNKNOWN", car: carChip(cc, now()), ...(direct ? { direct: "1" } : {}) } } });
     }

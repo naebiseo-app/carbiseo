@@ -35,8 +35,13 @@ test("주인 대본: 일정·최근 전화·문자 안내, 4000자 이하", () =
 test("응대 모드: ment·off는 짧은 안내만, ai는 기존 대본", () => {
   assert.equal(parseMode("ment"), "ment");
   assert.equal(parseMode("x"), null);
-  assert.match(pickScript("PARK", "주인", undefined, null, "ment").instruction, /^전화가 연결되면 '운전 중이라 받을 수 없습니다. 정차 후 연락드리겠습니다.'라고만/);
-  assert.match(pickScript("DRIVE_WORK", "주인", undefined, null, "off").instruction, /'지금은 받을 수 없습니다.' 한 문장만/);
+  assert.match(pickScript("PARK", "주인", undefined, null, "ment").instruction, /^전화가 연결되면 인사 없이 첫 마디로 '주인님이 지금 운전 중이라 전화를 받을 수 없습니다. 정차하시면 연락드리겠습니다.'라고만 말하고, 말을 마치면 상대 대답을 기다리지 않고 즉시 통화를 종료합니다/);
+  assert.match(pickScript("DRIVE_WORK", "김도윤", undefined, 25, "ment").instruction, /'김도윤님이 지금 운전 중이라 전화를 받을 수 없습니다. 약 25분 뒤 도착하시면 연락드리겠습니다.'라고만/);
+  // 끔 = 기존 저장값 호환, 멘트와 같은 대본(사용자 멘트는 안 씀)
+  assert.equal(pickScript("DRIVE_WORK", "주인", undefined, 7, "off", null, null, Date.now(), "회의 중").instruction, pickScript("DRIVE_WORK", "주인", undefined, 7, "ment").instruction);
+  assert.doesNotMatch(pickScript("DRIVE_WORK", undefined, undefined, null, "off").instruction, /지금은 받을 수 없습니다|{owner}|님이/);
+  assert.match(pickScript("DRIVE_WORK", "주인", undefined, 9, "ment", null, null, Date.now(), "회의 중이에요.").instruction, /'회의 중이에요. 약 9분 뒤 도착하시면 연락드리겠습니다.'라고만/);
+  assert.match(pickScript("DRIVE_WORK", "주인", undefined, null, "ment", null, null, Date.now(), "회의 중이에요.").instruction, /'회의 중이에요.'라고만/);
   assert.equal(pickScript("PARK", "주인", undefined, null, "ai").instruction, pickScript("PARK", "주인").instruction);
 });
 

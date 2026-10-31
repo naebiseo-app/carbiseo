@@ -3,13 +3,17 @@ export const ROOMS: Room[] = ["PARK", "DRIVE_WORK", "DRIVE_REST"];
 
 // 모든 방 공통 규칙 (설계서 ④)
 const COMMON =
-  "당신은 {owner}님 휴대폰을 대신 받는 AI 비서입니다. 아래 대본을 순서대로, 문장 그대로만 말합니다. 대본에 없는 설명·맞장구·되풀이는 하지 않습니다. " +
-  "한 줄을 말한 뒤에는 상대 대답이 완전히 끝날 때까지 기다립니다. 인사는 첫 마디에 한 번만 하고 다시 하지 않습니다. 같은 질문을 두 번 하지 않습니다. " +
+  "당신은 {owner}님 휴대폰을 대신 받는 AI 비서입니다. 처음부터 끝까지 같은 차분하고 친절한 톤으로 말합니다. 질문이 바뀌어도 감정 연기·강조 억양·말투 변화 없이 평소 대화하듯 말합니다. " +
+  "아래 대본 순서를 지키되, 표현은 상대 말에 맞춰 자연스럽게 다듬어도 됩니다. 한 번에 한 가지만 묻습니다. 대답 앞에 '네,' 같은 짧은 맞장구는 한 번 붙여도 되지만, 상대 말을 길게 되풀이하거나 대본에 없는 설명은 하지 않습니다. " +
+  "상대가 말하는 중에는 끼어들지 않습니다. 말이 잠깐 멈춰도 끝까지 다 들은 뒤 이어 갑니다. 상대가 한꺼번에 여러 가지를 말했으면 들은 것은 다시 묻지 않고 남은 것만 묻습니다. " +
+  "인사는 첫 마디에 한 번만 하고 다시 하지 않습니다. 같은 질문을 두 번 하지 않습니다(아래 [2-1] 이름 확인은 예외). " +
+  "전화번호나 숫자를 말할 때는 한 자리씩 끊어 읽습니다(예: 6000은 '육, 공, 공, 공'. '육천'처럼 읽지 않습니다). " +
   "대본: [1] 위 인사. " +
-  "[2] '어디서 전화 주셨어요?' — 상대가 이름과 소속을 함께 말했으면(예: '한빛물산 김민수입니다') 건너뜁니다. " +
+  "[2] '어디서 전화 주셨어요?' — 상대가 이름과 소속을 이미 말했으면 건너뜁니다. " +
+  "[2-1] 이름이나 소속을 들으면 들은 그대로 한 번 되읽어 확인합니다(예: '한빛물산 김민수 님, 맞으시죠?'). 맞다고 하면 다음으로 갑니다. 틀렸다고 하면 '죄송합니다, 한 번만 다시 말씀해 주시겠어요?'라고 다시 듣고, 고친 이름으로 한 번 더 확인합니다. 그 뒤로는 고친 이름·소속만 씁니다. " +
   "[3] '어떤 일로 전화 주셨어요?' — 이미 용건을 말했으면 건너뜁니다. " +
-  "[4] '급한 일이세요?' — 이미 급한지 말했으면 건너뜁니다. " +
-  "[5] '언제까지 연락드리면 될까요?' — 이미 말했으면 건너뜁니다. " +
+  "[4] '급한 일이세요?' — 상대가 '급하다', '급하게'처럼 급하다는 말을 직접 했을 때만 건너뜁니다. 그 외에는 반드시 묻습니다. " +
+  "[5] '언제까지 연락드리면 될까요?' — 상대가 '세 시 전까지', '이번 주 안으로'처럼 구체적인 시각이나 기한을 직접 말했을 때만 건너뜁니다. '빨리', '급해요'만으로는 건너뛰지 않고 반드시 묻습니다. " +
   "[6] 급하다고 했으면 '네, 급한 건으로 바로 전해 드리겠습니다.', 아니면 아래 마무리 안내 뒤 '말씀하신 내용 전해 드리겠습니다.'라고 말합니다. 이 마지막 문장은 상대가 마지막 질문에 답한 직후 반드시 말하고, 말하기 전에는 절대 통화를 끊지 않습니다. 말한 뒤에는 상대가 끊을 때까지 기다리고, 상대가 더 말하면 '네, 전해 드릴게요.'라고만 답합니다. " +
   "상대가 대본 밖 질문을 하면 '제가 답드리기는 어려워요, 그대로 전해 드릴게요.'라고만 답하고 다음 줄로 갑니다. 회신 날짜·시간은 약속하지 않습니다. " +
   "약속이나 일정을 확정하지 않고, 금액·가격·계약은 답하지 않으며, {owner}님의 위치는 말하지 않습니다.";
@@ -38,14 +42,15 @@ export function parseRoom(v: unknown): Room | null {
   return ROOMS.includes(v as Room) ? (v as Room) : null;
 }
 
-// 첫 마디: 누구의 AI 비서인지 밝힌다(AI임을 숨기지 않음). 이름은 사용자가 정한다.
-// 호칭을 안 정했으면 '주인님' 대신 호칭 없는 인사(거래처·가족이 '주인님'을 듣지 않게).
-export function greeting(owner?: string, name?: string): string {
+// 첫 마디: 누구의 AI 비서인지(AI임을 숨기지 않음), 왜 대신 받았는지, 몇 가지 묻는다는 걸 밝힌다. 이름은 사용자가 정한다.
+// 호칭을 안 정했으면 '주인님' 대신 호칭 없는 인사(거래처·가족이 '주인님'을 듣지 않게). {owner}는 pickScript의 fillOwner가 채우거나 지운다.
+export function greeting(owner?: string, name?: string, sit = "지금 바로 받기 어려우셔서"): string {
   const ai = name ? `AI 비서 ${name}입니다` : "AI 비서입니다";
-  return owner
-    ? `전화가 연결되면 첫 마디로 정확히 '안녕하세요, ${owner}님의 ${ai}. 어느 분이세요?'라고 말합니다.`
-    : `전화가 연결되면 첫 마디로 정확히 '안녕하세요, 이 번호로 대신 전화 받는 ${ai}. 어느 분이세요?'라고 말합니다.`;
+  const who = owner ? `${owner}님의 ${ai}` : `이 번호로 대신 전화 받는 ${ai}`;
+  return `전화가 연결되면 첫 마디로 '안녕하세요, ${who}. {owner}님이 ${sit} 제가 대신 받았어요. 몇 가지만 여쭤보고 정리해서 바로 전해 드릴게요. 어느 분이세요?'라고 말합니다.`;
 }
+// 인사 속 방별 상황(BY_ROOM 의미 그대로)
+const SIT: Record<Room, string> = { DRIVE_WORK: "지금 운전 중이셔서", DRIVE_REST: "오늘 업무를 마치셔서", PARK: "잠시 자리를 비우셔서" };
 
 // 호칭 없으면 '{owner}님은/의/이 '를 지워 주어 없는 문장으로.
 const fillOwner = (s: string, owner?: string) => (owner ? s.replaceAll("{owner}", owner) : s.replace(/\{owner\}님(은|의|이)? ?/g, ""));
@@ -64,10 +69,12 @@ export function parseEta(v: unknown): number | null {
 export type Mode = "ai" | "ment" | "off";
 export const parseMode = (v: unknown): Mode | null => (["ai", "ment", "off"].includes(v as string) ? (v as Mode) : null);
 
-const DEFAULT_MENT = "운전 중이라 받을 수 없습니다. 정차 후 연락드리겠습니다.";
-const BY_MODE = {
-  ment: "전화가 연결되면 '" + DEFAULT_MENT + "'라고만 말하고, 다른 말에는 답하지 않고 바로 통화를 종료합니다.",
-  off: "전화가 연결되면 '지금은 받을 수 없습니다.' 한 문장만 말하고 즉시 통화를 종료합니다.",
+// 멘트·끔: 이유 + 도착 시각(없으면 정차 후)을 한 번 말하고 바로 끊는다. '끔'은 기존 저장값 호환으로 기본 멘트와 같은 대본.
+// 사용자 멘트는 그대로 + eta가 있을 때만 도착 안내(멘트에 이미 '정차 후 연락'이 있을 수 있어 eta 없으면 붙이지 않음).
+const arrive = (eta?: number | null) => (eta != null ? `약 ${eta}분 뒤 도착하시면 연락드리겠습니다.` : "정차하시면 연락드리겠습니다.");
+const mentScript = (eta?: number | null, ment?: string) => {
+  const line = ment ? (eta != null ? `${ment} ${arrive(eta)}` : ment) : `{owner}님이 지금 운전 중이라 전화를 받을 수 없습니다. ${arrive(eta)}`;
+  return `전화가 연결되면 인사 없이 첫 마디로 '${line}'라고만 말하고, 말을 마치면 상대 대답을 기다리지 않고 즉시 통화를 종료합니다. 다른 말에는 답하지 않습니다.`;
 };
 
 // 방을 모르면(차 상태 없음·10분 넘게 갱신 없음) 위치·도착 시각·운전 여부를 말하지 않는 중립 대본.
@@ -91,13 +98,14 @@ export const offHours = (nowMs: number) => { const h = new Date(nowMs + 9 * 3_60
 
 export function pickScript(room: Room | null, owner?: string, name?: string, eta?: number | null, mode: Mode = "ai", nextAt?: number | null, cc: Partial<CarCtx> | null = null, nowMs = Date.now(), ment?: string): { room: Room | null; instruction: string } {
   const r = room;
-  if (mode !== "ai") return { room: r, instruction: mode === "ment" && ment ? BY_MODE.ment.replace(DEFAULT_MENT, () => ment) : BY_MODE[mode] };
+  if (mode !== "ai") return { room: r, instruction: fillOwner(mentScript(eta, mode === "ment" ? ment : undefined), owner) };
   if (!r) return { room: null, instruction: fillOwner(`${greeting(owner, name)} ${COMMON} ${NEUTRAL}`, owner) };
   const s = r === "PARK" && offHours(nowMs) ? "DRIVE_REST" : r;
+  const sit = s === "DRIVE_REST" && restDay(nowMs) ? "오늘 쉬는 날이라" : SIT[s];
   let byRoom = (r !== "PARK" && eta != null ? ETA_BY_ROOM[r].replace("{eta}", String(eta)) : BY_ROOM[s]).replace("{when}", nextWorkMorning(nowMs));
   if (s === "DRIVE_REST" && restDay(nowMs)) byRoom = byRoom.replaceAll("오늘 업무는 마치셨습니다", "오늘은 쉬는 날입니다").replaceAll("오늘 업무는 마치셨어요", "오늘은 쉬는 날이에요").replaceAll("오늘 업무는 마치셨고", "오늘은 쉬는 날이고");
   const next = r === "DRIVE_WORK" && nextAt != null ? ` 다음 일정 ${hhmm(nextAt)} 이후 연락 가능.` : "";
-  return { room: r, instruction: fillOwner(`${greeting(owner, name)} ${COMMON} ${byRoom}${next}${ctxLine(cc, r)}`, owner) };
+  return { room: r, instruction: fillOwner(`${greeting(owner, name, sit)} ${COMMON} ${byRoom}${next}${ctxLine(cc, r)}`, owner) };
 }
 
 // KST HH:mm

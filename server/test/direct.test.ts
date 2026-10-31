@@ -85,14 +85,14 @@ test("카드: report_call·summary.completed 모두 목록 번호면 urgent=1·m
 test("ment_text: 저장·따옴표 괄호 제거·ment 대본 반영·빈 값이면 기본 문구·잘못된 값 400", async () => {
   const env = mkEnv();
   await settings(env, { mode: "ment" });
-  assert.ok((await ring(env, OTHER)).Instruction.includes("'운전 중이라 받을 수 없습니다. 정차 후 연락드리겠습니다.'라고만"));
+  assert.ok((await ring(env, OTHER)).Instruction.includes("'지금 운전 중이라 전화를 받을 수 없습니다. 정차하시면 연락드리겠습니다.'라고만"));
   const r = (await (await settings(env, { ment_text: " 지금 회의 중이에요. '곧' (연락) 드릴게요! " })).json()) as any;
   assert.equal(r.settings.ment_text, "지금 회의 중이에요. 곧 연락 드릴게요!");
   const ins = (await ring(env, OTHER)).Instruction;
-  assert.ok(ins.includes("'지금 회의 중이에요. 곧 연락 드릴게요!'라고만 말하고, 다른 말에는 답하지 않고 바로 통화를 종료합니다."));
+  assert.ok(ins.includes("'지금 회의 중이에요. 곧 연락 드릴게요!'라고만 말하고, 말을 마치면 상대 대답을 기다리지 않고 즉시 통화를 종료합니다."));
   assert.ok(!ins.includes("운전 중이라"));
   for (const bad of ["가".repeat(61), "()", "a\nb", "a; b", "a:b", 5, "a<b>"])
     assert.equal((await settings(env, { ment_text: bad })).status, 400);
   assert.equal((await settings(env, { ment_text: "" })).status, 200);
-  assert.ok((await ring(env, OTHER)).Instruction.includes("운전 중이라 받을 수 없습니다."));
+  assert.ok((await ring(env, OTHER)).Instruction.includes("운전 중이라 전화를 받을 수 없습니다."));
 });
