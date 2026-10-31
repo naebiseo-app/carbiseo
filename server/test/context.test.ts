@@ -48,7 +48,7 @@ test("차 상태가 10분 넘게 오래되면 방을 모름 → 중립 대본", 
   assert.equal(freshCtx({ value: "{깨짐", updated_at: t }, t), null);
   const s = pickScript(null, "김민수", undefined, null);
   assert.equal(s.room, null);
-  assert.match(s.instruction, /지금 바로 받기 어려우셔서 제가 대신 받았습니다/);
+  assert.match(s.instruction, /제가 대신 받았어요/);
   assert.doesNotMatch(s.instruction, /운전 중이라|도착 예정|자리를 비우|업무는 마치/);
 });
 
