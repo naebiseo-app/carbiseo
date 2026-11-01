@@ -272,4 +272,12 @@ class DriveTest {
         assertEquals("다음 일정은 오후 12시 30분 점심이에요", nextEventSpeech(Event("점심", at(12, 30), "", LatLng(0.0, 0.0)), z))
         assertEquals("다음 일정이 없어요", nextEventSpeech(null))
     }
+
+    @Test fun 알림_제목은_사람이_읽는_말() {
+        assertEquals("내비서 · 업무 운전 중", notifTitle("DRIVE_WORK"))
+        assertEquals("내비서 · 업무 시간 밖 운전", notifTitle("DRIVE_REST"))
+        assertEquals("내비서 · 정차 중", notifTitle("PARK"))
+        assertEquals("내비서 · 실행 중", notifTitle("(판정 전)"))
+        for (r in Room.values()) assertFalse(notifTitle(r.name).contains(r.name)) // 영문 방 이름이 새지 않는다
+    }
 }

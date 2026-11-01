@@ -208,6 +208,11 @@ fun parseDirect(text: String): List<String>? =
 
 const val MENT_BAD = "60자 이하, 글자·숫자·. , ? !만 쓸 수 있어요"
 
+/** L1: 포그라운드 알림 제목. Room 이름(DRIVE_WORK 등)을 사람이 읽는 말로. */
+fun notifTitle(room: String) = when (room) {
+    "DRIVE_WORK" -> "내비서 · 업무 운전 중"; "DRIVE_REST" -> "내비서 · 업무 시간 밖 운전"; "PARK" -> "내비서 · 정차 중"; else -> "내비서 · 실행 중"
+}
+
 /** 방이 바뀔 때 한 문장. PARK는 무음. */
 fun roomSpeech(r: Room): String? = when (r) {
     Room.DRIVE_WORK -> "업무 운전 모드예요"

@@ -370,7 +370,7 @@ class RoomService : Service() {
 
     private fun notification(r: String) = Notification.Builder(this, CH)
         .setSmallIcon(android.R.drawable.ic_menu_directions)
-        .setContentTitle("내비서 실행 중 — 방: $r")
+        .setContentTitle(notifTitle(r))
         .setOngoing(true).build()
 
     // 디버그 빌드 전용: adb shell am broadcast -a ztw.carbiseo.ROUTE --ef lat 37.4979 --ef lng 127.0276 [--es name "판교 한정식" = O4 예약 초안용 목적지 이름]
