@@ -195,12 +195,16 @@ private fun Park(onImage: Boolean, onSettings: () -> Unit) {
     var sel by rememberSaveable { mutableStateOf<Long?>(null) }
     val ink = if (onImage) Color.White else ParkInk
     Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 12.dp)) {
+        val ctx = LocalContext.current
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(roomName("PARK"), Modifier.weight(1f), color = if (onImage) Color.White else ParkAcc, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            // F5: 차 음성 입구. 한 마디 듣고 '아까 전화 뭐 왔어'·'다음 일정'·'급해요' 에 답한다
+            Button({ ctx.startService(Intent(ctx, RoomService::class.java).setAction(RoomService.ACTION_TALK)) }, Tall, colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
+                Text(if (RoomService.listening) "듣는 중…" else "말하기", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
             PassengerToggle(ink)
             TextButton(onSettings, Tall) { Text("설정", color = ink, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
         }
-        val ctx = LocalContext.current
         val unseen = todo(items, RoomService.seen)
         Text(if (unseen == 0) "세워 둔 동안, 볼 건 없어요" else "확인할 게 ${unseen}건 있어요",
             color = ink, fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Black)

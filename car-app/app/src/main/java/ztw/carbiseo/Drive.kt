@@ -50,6 +50,39 @@ fun urgentNeed(said: String?): Boolean {
     return "답장" !in n && ("급해" in n || "화장실" in n)
 }
 
+/** F5 차 음성 입구: [말하기]로 한 마디 듣고 키워드로만 가른다(LLM 없음). 급해·화장실(Q3) > 아까 전화 > 일정. */
+enum class CarIntent { RECENT_CALLS, URGENT, NEXT_EVENT, UNKNOWN }
+private val RECENT_CALL_WORDS = Regex("아까전화|전화뭐|누구전화")
+fun carIntent(said: String?): CarIntent {
+    val n = said.orEmpty().replace(Regex("""\s"""), "")
+    return when { urgentNeed(said) -> CarIntent.URGENT; RECENT_CALL_WORDS.containsMatchIn(n) -> CarIntent.RECENT_CALLS; "일정" in n -> CarIntent.NEXT_EVENT; else -> CarIntent.UNKNOWN }
+}
+const val TALK_PROMPT = "말씀하세요"
+const val REASK_SPEECH = "다시 말씀해 주세요"
+const val NO_VOICE_SPEECH = "지금은 음성 인식을 쓸 수 없어요"
+
+/** 요약의 첫 문장(최대 80자). */
+fun firstSentence(s: String): String = s.trim().split(Regex("""(?<=[.!?。])\s+|\n""")).first().take(80)
+
+/** "아까 전화 뭐 왔어?": 최근 통화 카드 최대 3건을 이름 + 요약 한 문장씩. 이름이 없으면 '모르는 번호'. */
+fun recentCallsSpeech(items: List<InboxItem>): String {
+    val calls = items.filter { it.kind == "call" }.sortedByDescending { it.id }.take(3)
+    if (calls.isEmpty()) return "최근 전화는 없어요"
+    return sentences("최근 전화 ${calls.size}건이에요", *calls.map { c ->
+        "${if (c.fromLabel.isBlank()) "모르는 번호" else "${c.fromLabel}님"}, ${c.summary.ifBlank { "용건을 정리하고 있어요" }.let(::firstSentence)}"
+    }.toTypedArray())
+}
+
+/** '오후 2시 30분' 식 읽기용 시각. */
+fun koTime(ms: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String {
+    val t = java.time.Instant.ofEpochMilli(ms).atZone(zone)
+    return "${if (t.hour < 12) "오전" else "오후"} ${if (t.hour % 12 == 0) 12 else t.hour % 12}시${if (t.minute > 0) " ${t.minute}분" else ""}"
+}
+
+/** "다음 일정이 뭐야?": 다음 일정 한 문장. */
+fun nextEventSpeech(e: Event?, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String =
+    if (e == null) "다음 일정이 없어요" else "다음 일정은 ${koTime(e.start, zone)} ${e.title}${if (e.place.isNotBlank()) ", ${e.place}" else ""}이에요"
+
 /** 휴게소를 넣은 뒤 한 문장. 목적지가 없으면 그 휴게소가 곧 목적지. */
 fun restStopSpeech(stop: RestStop, waypoint: Boolean) =
     if (waypoint) "가장 가까운 ${stop.name}를 경유지로 넣었어요" else "가장 가까운 ${stop.name}로 길 안내를 시작해요"

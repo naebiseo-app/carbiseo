@@ -74,7 +74,7 @@ class RoomService : Service() {
     private val notifFresh = mutableSetOf<Long>()
     private val notifSaid = mutableSetOf<Long>()
     // 음성으로 묻고 대답을 기다리는 질문(알림 묻기는 talk가 따로). 대답은 heard()가 받는다.
-    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND }
+    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, INTENT, INTENT_RETRY }
     private class PendingSend(val label: String, val number: String, val body: String, val task: String) // 보낼 문자(label·number·body)와 못 보냈을 때 남길 할 일 본문
     private var pending = Ask.NONE
     private var lateEvent: Pair<Event, Int>? = null
@@ -150,6 +150,13 @@ class RoomService : Service() {
             Ask.RESERVE -> reserve?.let { (n, t) -> if (yesNo(said) == true) { addLocalTask(reserveTask(n, t)); say(RESERVE_DONE_SPEECH) } }
             // 질문이 이미 초안을 읽어 줬으니 '응'이면 바로 발송(한 번 더 묻지 않는다)
             Ask.CALLBACK -> callback?.let { (i, m) -> if (yesNo(said) == true) sendOrCard(PendingSend(i.fromLabel, i.fromNumber, m, callbackTask(i, m)), CALLBACK_DONE_SPEECH, false) }
+            // F5: [말하기] 뒤 한 마디. 못 알아들으면 "다시 말씀해 주세요" 한 번만, 그래도 못 알아들으면 끝.
+            Ask.INTENT, Ask.INTENT_RETRY -> when (carIntent(said)) {
+                CarIntent.URGENT -> addRestStop(true)
+                CarIntent.RECENT_CALLS -> say(recentCallsSpeech(cards()))
+                CarIntent.NEXT_EVENT -> say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis())))
+                CarIntent.UNKNOWN -> if (p == Ask.INTENT) askVoice(REASK_SPEECH, Ask.INTENT_RETRY)
+            }
             Ask.SEND -> sending?.let { s -> if (yesNo(said) == true) doSend(s) else { addLocalTask(s.task); say(SEND_KEEP_SPEECH) } }
             Ask.REST -> when (yesNo(said)) {
                 true -> addRestStop(true)
@@ -184,6 +191,13 @@ class RoomService : Service() {
         if (t.done.isNotEmpty()) markDone(this, t.done)
         t.say?.let { speaker.speak(it, if (t.listen) ::listenNow else null) }
         askStep = talk.step
+    }
+
+    /** F5 [말하기] 버튼(ACTION_TALK, adb로도 시작 가능): 다른 대화·듣기 중이 아니면 "말씀하세요" 뒤 한 마디 듣기. */
+    private fun startTalk() {
+        if (listening || pending != Ask.NONE || talk.step != NotifTalk.Step.NONE) return
+        if (voice.path == "none") return speaker.speak(NO_VOICE_SPEECH)
+        askVoice(TALK_PROMPT, Ask.INTENT)
     }
 
     /** 음성 인식이 없고(path none) 주행 중이면 대답을 못 받으니 '나중에'(카드로 보관). */
@@ -440,6 +454,7 @@ class RoomService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_REST) addRestStop()
+        if (intent?.action == ACTION_TALK) startTalk()
         if (intent?.action == ACTION_GO) intent.run {
             val lat = getDoubleExtra("lat", 0.0); val lng = getDoubleExtra("lng", 0.0); val name = getStringExtra("name") ?: ""
             Log.i("ROOM", "go $name $lat,$lng")
@@ -497,6 +512,7 @@ class RoomService : Service() {
         private const val CH = "room"
         private const val HEARTBEAT_MS = 5 * 60_000L
         const val ACTION_REST = "ztw.carbiseo.REST"
+        const val ACTION_TALK = "ztw.carbiseo.TALK" // F5: [말하기] 버튼
         const val ACTION_GO = "ztw.carbiseo.GO" // F7: extras lat, lng, name
         private const val NAVI_PKG = "ai.umos.maps.android.navigation.app" // Pleos 내비 앱(26 실측)
         var restOffer by mutableStateOf(false); private set // S2: 화면에 휴게소 버튼

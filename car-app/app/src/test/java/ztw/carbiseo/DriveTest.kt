@@ -245,4 +245,31 @@ class DriveTest {
         assertEquals(null, sendable(taskDraft(lateTask(e.copy(contactNumber = ""), 7)).first)) // 번호 모름 = 카드만
         assertFalse(SEND_KEEP_SPEECH.contains("누르라")); assertTrue(SEND_FAIL_SPEECH.contains("할 일"))
     }
+
+    @Test fun 차_음성_입구_의도는_키워드로만_가른다() {
+        for (s in listOf("아까 전화 뭐 왔어", "아까전화 누구였지", "전화 뭐 왔어?", "누구 전화 왔어")) assertEquals(s, CarIntent.RECENT_CALLS, carIntent(s))
+        for (s in listOf("급해요", "화장실 가고 싶어", "나 급해")) assertEquals(s, CarIntent.URGENT, carIntent(s))
+        for (s in listOf("다음 일정 알려줘", "일정이 뭐야", "오늘 일정")) assertEquals(s, CarIntent.NEXT_EVENT, carIntent(s))
+        for (s in listOf("날씨 어때", "", "안녕", "전화 걸어줘")) assertEquals(s, CarIntent.UNKNOWN, carIntent(s))
+        assertEquals(CarIntent.UNKNOWN, carIntent(null))
+        assertEquals(CarIntent.UNKNOWN, carIntent("답장 급해서 늦는다고 해줘")) // 답장 속 '급해서'는 휴게소로 가지 않는다
+        assertEquals(CarIntent.URGENT, carIntent("급해요 일정은 나중에")) // 안전(휴게소)이 먼저
+    }
+
+    @Test fun 최근_통화는_최대_3건_이름과_요약_한_문장씩() {
+        fun c(id: Long, name: String, sum: String, kind: String = "call") = InboxItem(id, name, sum, false, 0, "", kind = kind)
+        val l = listOf(c(1, "오래된", "옛날 일"), c(2, "김부장", "3시 30분까지 연락 주세요. 급한 건 아니에요."), c(3, "", "견적 문의"), c(4, "박대리", ""), c(5, "x", "문자", "notif"))
+        assertEquals("최근 전화 3건이에요. 박대리님, 용건을 정리하고 있어요. 모르는 번호, 견적 문의. 김부장님, 3시 30분까지 연락 주세요.", recentCallsSpeech(l))
+        assertEquals("최근 전화는 없어요", recentCallsSpeech(emptyList()))
+        assertEquals("최근 전화 1건이에요. 김님, 하나.", recentCallsSpeech(listOf(c(1, "김", "하나. 둘"))))
+    }
+
+    @Test fun 다음_일정_한_문장() {
+        val z = java.time.ZoneOffset.UTC
+        val at = { h: Int, m: Int -> java.time.LocalDateTime.of(2026, 11, 2, h, m).toInstant(z).toEpochMilli() }
+        assertEquals("다음 일정은 오후 2시 30분 거래처 미팅, 판교역이에요", nextEventSpeech(Event("거래처 미팅", at(14, 30), "판교역", LatLng(0.0, 0.0)), z))
+        assertEquals("다음 일정은 오전 12시 점심이에요", nextEventSpeech(Event("점심", at(0, 0), "", LatLng(0.0, 0.0)), z))
+        assertEquals("다음 일정은 오후 12시 30분 점심이에요", nextEventSpeech(Event("점심", at(12, 30), "", LatLng(0.0, 0.0)), z))
+        assertEquals("다음 일정이 없어요", nextEventSpeech(null))
+    }
 }
