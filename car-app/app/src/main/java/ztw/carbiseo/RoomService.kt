@@ -461,7 +461,7 @@ class RoomService : Service() {
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(rc, IntentFilter(action), Context.RECEIVER_EXPORTED) else registerReceiver(rc, IntentFilter(action))
             receivers += rc
         }
-        // 디버그 빌드만: 화면만 다른 방으로 그려 보기(판정·서버 상태는 그대로). adb shell am broadcast -a ztw.carbiseo.SCREEN --es room DRIVE_WORK (빈 값 = 해제)
+        // 디버그 빌드만: 화면만 다른 방으로 그려 보기(판정·서버 상태는 그대로). adb shell am broadcast -a ztw.carbiseo.SCREEN --es room DRIVE_WORK (extra 없이 보내면 해제)
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
             val scr = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) { screenOverride = i.getStringExtra("room")?.takeIf { it.isNotBlank() } } }
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(scr, IntentFilter("ztw.carbiseo.SCREEN"), Context.RECEIVER_EXPORTED) else registerReceiver(scr, IntentFilter("ztw.carbiseo.SCREEN"))

@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -429,7 +430,10 @@ private fun Focus(i: InboxItem, carryTag: String?, a: Float, onSms: () -> Unit) 
         if (i.car.isNotBlank()) FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("쓴 차량 데이터", Modifier.align(Alignment.CenterVertically), color = DMute, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
             for (c in i.car.split(" · ").filter { it.isNotBlank() })
-                Text(c, Modifier.clip(RoundedCornerShape(20.dp)).background(DS2).padding(horizontal = 16.dp, vertical = 6.dp), color = Color(0xFFD7DADF), fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Row(Modifier.clip(RoundedCornerShape(20.dp)).background(DS2).padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    carChipIcon(c)?.let { Icon(painterResource(it), null, Modifier.size(18.dp), tint = Color(0xFFD7DADF)) }
+                    Text(c, color = Color(0xFFD7DADF), fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                }
         }
         if (i.kind == "call" || i.kind == "task") Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             // H15: 서버가 보관한 실제 번호로 회신(화면엔 끝 4자리만). 문자는 보내기 전 확인 시트에서.
@@ -440,6 +444,17 @@ private fun Focus(i: InboxItem, carryTag: String?, a: Float, onSms: () -> Unit) 
             Pill("내일 아침에", Icons.Filled.DateRange) { RoomService.snooze(ctx, i.id) }
         }
     }
+}
+
+/** '쓴 차량 데이터' 칩 글머리(서버 carChip 문구 기준). 모르는 칩은 아이콘 없이. */
+private fun carChipIcon(c: String): Int? = when {
+    c.startsWith("기어") -> R.drawable.ic_car_gear
+    c.startsWith("도착") -> R.drawable.ic_car_flag
+    c.endsWith("운전") -> R.drawable.ic_car_trip
+    c == "동승자" -> R.drawable.ic_car_people
+    c == "경고등" -> R.drawable.ic_car_warn
+    c.startsWith("배터리") -> R.drawable.ic_car_batt
+    else -> null
 }
 
 /** 한 줄 대기열. 줄을 누르면 포커스로 올린다. */
@@ -738,8 +753,10 @@ private fun Drive(r: String) {
         Box(Modifier.width(776.dp)) { Ring(rest, ready, acc, title, sub) }
         Column(Modifier.weight(1f).fillMaxHeight().padding(vertical = 20.dp)) {
             Row(Modifier.height(68.dp).clip(RoundedCornerShape(34.dp)).background(if (rest) Color(0xFF0F3A33) else Color(0xFF3A1D10)).padding(horizontal = 30.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Text(when (r) { "DRIVE_REST" -> "쉼 방"; "DRIVE_WORK" -> "업무 방"; else -> "방 판정 전" }, color = if (rest) Color(0xFF7FE3CB) else Color(0xFFFFB48C), fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                val tc = if (rest) Color(0xFF7FE3CB) else Color(0xFFFFB48C)
+                when (r) { "DRIVE_REST" -> R.drawable.ic_room_rest; "DRIVE_WORK" -> R.drawable.ic_room_work; else -> null }?.let { Icon(painterResource(it), null, Modifier.size(22.dp), tint = tc) }
+                Text(when (r) { "DRIVE_REST" -> "쉼 방"; "DRIVE_WORK" -> "업무 방"; else -> "방 판정 전" }, color = tc, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
             }
             Text("$n", Modifier.padding(top = 56.dp), color = acc, fontSize = 200.sp, lineHeight = 170.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-10).sp)
             // H7: 쉼 방의 업무 건은 다음 첫 업무 운전에 '어제 넘긴 건'으로 말하고 P 화면 맨 앞에 묶는다
