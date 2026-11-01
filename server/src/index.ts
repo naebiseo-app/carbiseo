@@ -153,6 +153,13 @@ export function taskText(raw: string): string {
 }
 
 /** /car/send 본문 검증(중계와 같은 한도). 수신번호 숫자 10~11자리, 내용 1~1000자, confirmed=true 필수. */
+// 설계 29: 차 카드 버튼 결과(완료·내일 아침에)를 서버 행에도 남긴다. 경로 /car/inbox/<id>, 본문 {action}
+export function parseInboxAction(path: string, b: Record<string, unknown>): { id: number; status: string } | null {
+  const id = Number(path.slice("/car/inbox/".length));
+  const status = ({ done: "done", tomorrow: "tomorrow" } as Record<string, string>)[String(b.action)];
+  return Number.isInteger(id) && id > 0 && status ? { id, status } : null;
+}
+
 export function parseSend(b: Record<string, unknown>) {
   const to = String(b.to_number ?? "").replace(/-/g, "");
   const body = typeof b.body === "string" ? b.body.trim() : "";
@@ -393,6 +400,14 @@ export default {
     }
 
     // 차 앱 '보내기' 버튼: 확인된 문자만 중계로 발송, 결과를 inbox kind='sent'로 기록
+    if (m === "POST" && pathname.startsWith("/car/inbox/")) {
+      if (!authed) return json({ error: "unauthorized" }, 401);
+      const p = parseInboxAction(pathname, (await req.json().catch(() => ({}))) as Record<string, unknown>);
+      if (!p) return json({ error: "bad request" }, 400);
+      await env.DB.prepare("UPDATE inbox SET status=? WHERE id=?").bind(p.status, p.id).run();
+      return json({ ok: true });
+    }
+
     if (m === "POST" && pathname === "/car/send") {
       if (!authed) return json({ error: "unauthorized" }, 401);
       const p = parseSend((await req.json().catch(() => ({}))) as Record<string, unknown>);
