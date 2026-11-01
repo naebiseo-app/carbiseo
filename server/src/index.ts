@@ -159,7 +159,7 @@ export function parseSend(b: Record<string, unknown>) {
   if (b.confirmed !== true) return { error: "confirmed must be true" };
   if (!/^\d{10,11}$/.test(to)) return { error: "bad to_number" };
   if (body.length < 1 || body.length > 1000) return { error: "bad body" };
-  if (isBlocked(body)) return { error: "blocked body" }; // 사용자가 확인한 문장이라 자르지 않고 금칙어·번호만 막는다
+  if (isBlocked(body, false)) return { error: "blocked body" }; // 사용자가 확인한 문장이라 자르지 않고 금칙어만 막는다
   return { to, body, label: cleanName(b.to_label) ?? `끝번호 ${to.slice(-4)}` };
 }
 
@@ -414,7 +414,7 @@ export default {
       if (to.length < 1 || to.length > 100) return json({ error: "bad to" }, 400);
       if (body.length < 1 || body.length > 2000) return json({ error: "bad body" }, 400);
       if (subject.length > 100) return json({ error: "bad subject" }, 400);
-      if (isBlocked(body) || isBlocked(subject)) return json({ error: "blocked body" }, 400);
+      if (isBlocked(body, false) || isBlocked(subject, false)) return json({ error: "blocked body" }, 400);
       const r = await env.DB.prepare("INSERT INTO inbox(kind,status,from_label,summary,created_at,meta) VALUES('sent','sent',?,?,?,?)")
         .bind(to, body, now(), JSON.stringify({ channel: "mail", subject })).run();
       return json({ ok: true, id: r.meta.last_row_id });

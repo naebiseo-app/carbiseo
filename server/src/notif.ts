@@ -21,7 +21,7 @@ export function parseReply(b: Record<string, unknown>) {
   if (b.confirmed !== true) return { error: "confirmed must be true" };
   if (!Number.isInteger(id) || id <= 0) return { error: "bad notif_id" };
   if (text.length < 1 || text.length > 500) return { error: "bad text" };
-  if (isBlocked(text)) return { error: "blocked text" }; // 사용자가 확인한 답장: 자르지 않고 금칙어·번호만
+  if (isBlocked(text, false)) return { error: "blocked text" }; // 사용자가 확인한 답장: 자르지 않고 금칙어만
   return { id, text };
 }
 

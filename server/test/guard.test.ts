@@ -38,3 +38,8 @@ test("보내는 문자·답장은 금칙어만 막고 길어도 자르지 않는
 test("할 일 본문도 가드(taskText 자체는 그대로)", () => {
   assert.equal(guardText("summary", taskText("SummaryJson=%7B")), FALLBACK.summary);
 });
+
+test("사용자가 확인한 본문(numbers=false)은 회신 번호를 막지 않고 금칙어만 막는다", () => {
+  assert.equal(isBlocked("010-0000-0000으로 연락 주세요.", false), false);
+  assert.equal(isBlocked("씨발", false), true);
+});
