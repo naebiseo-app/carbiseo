@@ -220,6 +220,15 @@ class DriveTest {
         assertEquals("가장 가까운 기흥휴게소로 길 안내를 시작해요", restStopSpeech(stop, false))
     }
 
+    // S1: 피로 중 [말하기]는 급해·화장실만 통과. 피로가 아니면 전부 통과.
+    @Test fun 피로_중_업무_말은_거절_급해요만_통과() {
+        for (said in listOf("아까 전화 뭐 왔어", "다음 일정 알려줘", "문자 보내줘", "음", null)) assertEquals(FATIGUE_BLOCK_SPEECH, fatigueGate(carIntent(said), true))
+        assertEquals(null, fatigueGate(carIntent("급해요"), true)); assertEquals(null, fatigueGate(carIntent("화장실 어디야"), true))
+        for (said in listOf("아까 전화 뭐 왔어", "다음 일정 알려줘", "음")) assertEquals(null, fatigueGate(carIntent(said), false))
+        assertTrue(FATIGUE_BLOCK_SPEECH.contains("화장실") && FATIGUE_BLOCK_SPEECH.contains("급해"))
+        assertTrue(fatigued(Room.DRIVE_WORK, 120)); assertFalse(fatigued(Room.DRIVE_WORK, 119)); assertFalse(fatigued(Room.PARK, 300))
+    }
+
     @Test fun 휴식_제안_아니라고_하면_30분_쉰다() {
         val th = REST_DEFAULT_MIN; val t = th * 60_000L
         assertTrue(restDue(0, t, th))

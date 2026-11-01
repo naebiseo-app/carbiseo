@@ -198,12 +198,13 @@ class RoomService : Service() {
                     else unsure(p, (if (p == Ask.RESERVE) "만들기" else "보내기") to { answerYn(p, true) }, "그만두기" to { answerYn(p, false) }, { answerYn(p, false) })
             }
             // F5: [말하기] 뒤 한 마디. 못 알아들으면 "다시 말씀해 주세요" 한 번만, 그다음은 화면 2택(주행 중엔 그냥 끝).
-            Ask.INTENT -> when (carIntent(said)) {
+            // S1 피로 중엔 급해·화장실만 통과, 업무 말은 한 문장으로 거절(fatigueGate)
+            Ask.INTENT -> carIntent(said).let { ci -> fatigueGate(ci, fatigued(machine.room, tripMin()))?.let(::say) ?: when (ci) {
                 CarIntent.URGENT -> addRestStop(true, true)
                 CarIntent.RECENT_CALLS -> say(recentCallsSpeech(cards()))
                 CarIntent.NEXT_EVENT -> say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis())))
                 CarIntent.UNKNOWN -> unsure(p, "아까 전화" to { say(recentCallsSpeech(cards())) }, "다음 일정" to { say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis()))) }, {}, "어떤 걸 알려 드릴까요?")
-            }
+            } }
             Ask.NONE -> {
                 // 알림 묻기(제안·보낼까요)도 같은 규칙: 못 알아들으면 한 번만 다시 묻고, 그다음은 P의 화면 버튼(읽어줘/나중에·보내/취소)·주행 중엔 카드로
                 val st = talk.step
@@ -330,7 +331,10 @@ class RoomService : Service() {
             val restNow = restOnce.fire(restDue(driveStart.takeIf { machine.room != Room.PARK }, clock.millis(), restMin, restSnoozeUntil))
             if (restNow) { restOffer = true; if (canAsk()) askVoice(REST_ASK, Ask.REST) else say(REST_SPEECH) }
             // 안전 안내라 동승자 모드에서도. 피로 보관이 켜지면 휴게소 버튼도 같이 띄운다(휴식 기준을 더 길게 잡았어도).
-            if (fatigueOnce.fire(fatigued(machine.room, tripMin()))) { restOffer = true; if (!restNow) say(fatigueSpeech(machine.signals.gear)) }
+            if (fatigueOnce.fire(fatigued(machine.room, tripMin()))) {
+                restOffer = true; if (!restNow) say(fatigueSpeech(machine.signals.gear))
+                if (talk.step != NotifTalk.Step.NONE) { talk.cancel(); askStep = talk.step; listening = false } // 폰 알림 대화는 피로 진입 때 조용히 닫는다(카드는 남음)
+            }
             seat.update(adapters.passengerSeat)?.let { passengerOffer = it && !passenger }
             if (passenger) passengerOffer = false
             adapters.telltale.let { t -> if (t != lastTell) { lastTell = t; telltale = t; if (t != null && machine.room != Room.PARK) say(TELLTALE_SPEECH) } }
