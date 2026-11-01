@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 말풍선(둥근 사각 + 왼쪽 아래 꼬리) #FF7A33, 음성 막대 3개 #16181C. 512 격자, 안전 영역(66dp 원) 안에 들도록 축소. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="512" android:viewportHeight="512">
+    <group android:pivotX="256" android:pivotY="256" android:scaleX="0.74" android:scaleY="0.74" android:translateY="-9">
+        <path android:fillColor="#FF7A33"
+            android:pathData="M168,132H344A72,72 0,0 1,416 204V276A72,72 0,0 1,344 348H168A72,72 0,0 1,96 276V204A72,72 0,0 1,168 132ZM168,330L134,404L230,348Z" />
+        <path android:strokeColor="#16181C" android:strokeWidth="26" android:strokeLineCap="round"
+            android:pathData="M191,219V261M256,195V285M321,227V253" />
+    </group>
+</vector>
