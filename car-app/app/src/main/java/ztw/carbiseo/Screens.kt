@@ -134,10 +134,11 @@ private val hhmm = DateTimeFormatter.ofPattern("HH:mm")
 
 
 private fun roomName(r: String) = when (r) { "PARK" -> "5분 사무실"; "DRIVE_WORK" -> "업무 운전"; "DRIVE_REST" -> "업무 시간 밖"; else -> "판정 전" }
+private fun sentKind(i: InboxItem) = if ('@' in i.fromLabel) "보낸 메일" else "보낸 문자" // 데모 메일함(O2)은 받는 사람이 주소
 private fun toast(c: Context, s: String) = Toast.makeText(c, s, Toast.LENGTH_SHORT).show()
 private fun label(i: InboxItem) = when (i.kind) {
     "task" -> "할 일"
-    "sent" -> "보낸 문자 · ${i.fromLabel}"
+    "sent" -> "${sentKind(i)} · ${i.fromLabel}"
     "notif" -> "${i.app} · ${i.fromLabel}"
     else -> i.fromLabel.ifBlank { "모르는 번호" }
 }
@@ -314,7 +315,7 @@ private fun dayTime(ms: Long): String {
 /** 카드 머리: (이름, 보조 줄). 회신 번호는 끝 4자리만(H15). */
 private fun head(i: InboxItem): Pair<String, String?> = when (i.kind) {
     "task" -> "할 일" to null
-    "sent" -> "보낸 문자" to "받는 사람 · ${i.fromLabel}"
+    "sent" -> sentKind(i) to "받는 사람 · ${i.fromLabel}"
     "notif" -> i.fromLabel.ifBlank { i.app } to i.app.takeIf { it.isNotBlank() && i.fromLabel.isNotBlank() }
     else -> i.fromLabel.ifBlank { "모르는 번호" } to i.fromNumber.takeLast(4).takeIf { it.length == 4 && "끝번호" !in i.fromLabel }?.let { "끝번호 $it" }
 }

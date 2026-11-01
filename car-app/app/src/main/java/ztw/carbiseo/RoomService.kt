@@ -510,11 +510,11 @@ class RoomService : Service() {
         val say = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { Log.i("ROOM", "debug say"); voice.inject(i.getStringExtra("t").orEmpty()) }
         }
-        // adb shell am broadcast -a ztw.carbiseo.CALLCARD --es from 김부장 --es num 01000000000 --es sum "3시 30분까지 연락 주세요" (새 통화 카드 주입, 서버 호출 없음. 정차 상태에서 확인)
+        // adb shell am broadcast -a ztw.carbiseo.CALLCARD --es from 김부장 --es num 01000000000 --es sum "3시 30분까지 연락 주세요" (새 통화 카드 주입, 서버 호출 없음. 정차 상태에서 확인. --es kind task = 할 일 카드, sum에 "메일: 받는이 / 제목 / 본문"이면 메일 시트)
         val cc = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
                 val id = LOCAL_ID_BASE + clock.millis()
-                inbox = listOf(InboxItem(id, i.getStringExtra("from").orEmpty(), i.getStringExtra("sum").orEmpty(), false, System.currentTimeMillis(), "", fromNumber = i.getStringExtra("num").orEmpty())) + inbox
+                inbox = listOf(InboxItem(id, i.getStringExtra("from").orEmpty(), i.getStringExtra("sum").orEmpty(), false, System.currentTimeMillis(), "", fromNumber = i.getStringExtra("num").orEmpty(), kind = i.getStringExtra("kind") ?: "call")) + inbox
                 callFresh += id; Log.i("ROOM", "debug callcard $id")
             }
         }
