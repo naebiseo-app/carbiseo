@@ -50,6 +50,23 @@ class RoomStateMachineTest {
         assertEquals(Room.DRIVE_REST, m.room)
     }
 
+    @Test fun 업무_끝_시각_설정이_방_판정에_쓰인다() {
+        for (h in WORK_END_CHOICES) {
+            val mm = RoomStateMachine(clock, RoomSettings(workEnd = workEndTime(h))).also { it.onChange = { _, _ -> } }
+            at(h, 0); mm.update { copy(destination = far, gear = Gear.DRIVE, distractionOptimized = true) }
+            assertEquals("$h 시 정각은 퇴근", Room.DRIVE_REST, mm.room)
+            at(h - 1, 59); settle(); mm.tick()
+            assertEquals("$h 시 직전은 업무", Room.DRIVE_WORK, mm.room)
+        }
+        // 기본(18시)에선 19시가 퇴근이지만 20시로 늘리면 업무 중
+        at(19, 0, day = 4) // 월요일
+        assertEquals(Room.DRIVE_REST, RoomStateMachine(clock).also { it.update { copy(destination = far, gear = Gear.DRIVE, distractionOptimized = true) } }.room)
+        assertEquals(Room.DRIVE_WORK, RoomStateMachine(clock, RoomSettings(workEnd = workEndTime(20))).also { it.update { copy(destination = far, gear = Gear.DRIVE, distractionOptimized = true) } }.room)
+        assertEquals(false, offDuty(java.time.LocalDateTime.of(2026, 11, 2, 19, 30), RoomSettings(workEnd = workEndTime(20))))
+        assertEquals(true, offDuty(java.time.LocalDateTime.of(2026, 11, 2, 20, 0), RoomSettings(workEnd = workEndTime(20))))
+        assertEquals(LocalTime.of(18, 0), workEndTime(99)) // 모르는 값은 기본 18시
+    }
+
     // M16: 업무 시간 중 집 목적지(점심·서류 가지러)는 업무. 거래처가 정오에 '오늘 업무 마치셨습니다'를 듣지 않게.
     // C①: 내비 즐겨찾기 '회사'가 목적지면 저녁·주말이어도 업무(야근·주말 출근)
     @Test fun 저녁_주말_목적지_회사면_WORK() {

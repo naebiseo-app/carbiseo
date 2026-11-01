@@ -42,6 +42,10 @@ fun distanceM(a: LatLng, b: LatLng): Double {
     return 2 * r * asin(sqrt(h))
 }
 
+/** 설정 화면에서 고르는 업무 끝 시각(시). 기본 18. 그 밖의 값은 18로 본다. */
+val WORK_END_CHOICES = listOf(17, 18, 19, 20)
+fun workEndTime(hour: Int): LocalTime = LocalTime.of(if (hour in WORK_END_CHOICES) hour else 18, 0)
+
 /** 새벽 이 시각 전까지는 '전날 저녁'으로 본다(밤샘 귀가). */
 val NIGHT_END: LocalTime = LocalTime.of(4, 0)
 

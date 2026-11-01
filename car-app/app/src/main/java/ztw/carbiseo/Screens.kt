@@ -225,7 +225,7 @@ private fun Park(onImage: Boolean, onSettings: () -> Unit) {
         val rest = items.filter { it !in carry }
         // M6: 저녁·주말 P(집 차고 등)는 급한 것만 펼치고 업무 카드는 접는다. 1탭으로 펼침
         var showAll by rememberSaveable { mutableStateOf(false) }
-        val shown = if (offDuty(java.time.LocalDateTime.now(RoomService.clock), RoomSettings()) && !showAll) rest.filter { it.urgent } else rest
+        val shown = if (offDuty(java.time.LocalDateTime.now(RoomService.clock), RoomSettings(workEnd = workEndTime(RoomService.workEndHour))) && !showAll) rest.filter { it.urgent } else rest
         val tap = { i: InboxItem -> sel = if (sel == i.id) null else i.id; RoomService.markSeen(ctx, i.id) }
         LazyColumn(Modifier.weight(1f).padding(top = 16.dp), list, verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
             if (carry.isNotEmpty()) item(key = "carry") {
@@ -502,6 +502,15 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
                 Button({ RoomService.restMin = min; if (min != 1) prefs.edit().putInt("rest_min", min).apply() }, Tall, // 시연값은 저장 안 함
                     colors = ButtonDefaults.buttonColors(containerColor = if (on) ParkAcc else ParkNote)) {
                     Text(t, color = if (on) Color.White else ParkInk, fontSize = 18.sp)
+                }
+            }
+        }
+        Text("업무 끝 시각: ${RoomService.workEndHour}시", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            for (h in WORK_END_CHOICES) {
+                val on = RoomService.workEndHour == h
+                Button({ RoomService.setWorkEnd(ctx, h) }, Tall, colors = ButtonDefaults.buttonColors(containerColor = if (on) ParkAcc else ParkNote)) {
+                    Text("${h}시", color = if (on) Color.White else ParkInk, fontSize = 18.sp)
                 }
             }
         }

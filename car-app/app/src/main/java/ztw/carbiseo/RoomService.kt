@@ -198,6 +198,7 @@ class RoomService : Service() {
 
     private val ticker = object : Runnable {
         override fun run() {
+            workEndTime(workEndHour).let { if (machine.settings.workEnd != it) machine.settings = machine.settings.copy(workEnd = it) } // 설정 화면의 업무 끝 시각
             machine.tick()
             val t = machine.signals.toString()
             if (t != sig) Log.i("ROOM", "signals $t") // 입력 신호가 바뀔 때만
@@ -264,13 +265,14 @@ class RoomService : Service() {
             // H9: 동승자 모드는 저장하지 않는다(이번 운전만). M5·H7: 본 카드·넘긴 건은 재시작해도 유지.
             val sn = p.getString("seen", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
             val nd = p.getString("notif_done", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
+            val we = p.getInt("work_end", 18)
             val sz = decodeDeferred(p.getString("snoozed", ""))
             val cd = p.getString("card_done", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
             val df = decodeDeferred(p.getString("deferred", "")); val fw = p.getBoolean("forward_ok", false)
             val fv = p.getString("fav_senders", "").orEmpty(); ui.post { favs = parseFavs(fv) }
             val fd = p.getLong("family_day", -1); ui.post { familyDay = fd }
             val sd = p.getBoolean("setup_done", false); val md = p.getString("mode", "ai") ?: "ai"; val bd = p.getLong("brief_day", -1)
-            ui.post { restMin = r; seen = sn + seen; notifDone = nd + notifDone; cardDone = cd + cardDone; snoozed = sz + snoozed; deferred = df + deferred; forwardOk = forwardOk || fw; setupDone = sd; mode = md; briefDay = bd }
+            ui.post { restMin = r; workEndHour = we; seen = sn + seen; notifDone = nd + notifDone; cardDone = cd + cardDone; snoozed = sz + snoozed; deferred = df + deferred; forwardOk = forwardOk || fw; setupDone = sd; mode = md; briefDay = bd }
         }
         latch = AlertLatch(Clock.systemDefaultZone())
         machine = RoomStateMachine(clock) // settings = 기본 상수. 설정 화면이 machine.settings를 덮어쓴다.
@@ -479,6 +481,8 @@ class RoomService : Service() {
         private const val NAVI_PKG = "ai.umos.maps.android.navigation.app" // Pleos 내비 앱(26 실측)
         var restOffer by mutableStateOf(false); private set // S2: 화면에 휴게소 버튼
         var restMin by mutableIntStateOf(REST_DEFAULT_MIN) // 연속 주행 기준(분). 설정 화면이 바꾼다.
+        var workEndHour by mutableIntStateOf(18) // 업무 끝 시각(시, 17~20). 설정 화면이 바꾼다. 방 판정·업무 외 판정이 이 값을 쓴다.
+        fun setWorkEnd(c: Context, h: Int) { workEndHour = h; save(c) { putInt("work_end", h) } }
         var passenger by mutableStateOf(false); private set // H3: 켜면 업무 TTS(부재중 낭독)·쉼 방 선언(H1)을 끈다. 휴식 제안(S2)은 안전이라 유지.
         var passengerAt = 0L; private set
         /** H9: 이번 운전만. 저장하지 않고, 30분 넘게 세운 뒤 출발하면 자동 해제. */
