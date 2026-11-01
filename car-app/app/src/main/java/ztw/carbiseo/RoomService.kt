@@ -641,13 +641,17 @@ class RoomService : Service() {
             cardDone = cardDone + id
             val s = cardDone.sorted().takeLast(300).joinToString(",")
             save(c) { putString("card_done", s) }
+            sync(id, "done")
         }
+        /** 설계 29: 카드 버튼 결과를 서버 행에도(차 로컬 카드는 서버에 없으니 뺌). 실패해도 차 화면엔 영향 없음 */
+        private fun sync(id: Long, action: String) { if (id < LOCAL_ID_BASE) Thread { Server.postCardAction(id, action) }.start() }
         var snoozed by mutableStateOf(mapOf<Long, Long>()); private set // H2: [내일 아침에] 카드 id -> 미룬 날(그날만 숨김). prefs 저장
         fun snooze(c: Context, id: Long) {
             val (d, z, s) = snoozeCard(deferred, snoozed, seen, id, LocalDate.now(clock).toEpochDay())
             deferred = d; snoozed = z; seen = s
             val ds = encodeDeferred(d); val zs = encodeDeferred(z); val ss = s.sorted().takeLast(300).joinToString(",")
             save(c) { putString("deferred", ds).putString("snoozed", zs).putString("seen", ss) }
+            sync(id, "tomorrow")
         }
         /** 화면·건수·정차 알림이 보는 카드 목록: 읽어 준 알림·[완료]한 카드·오늘 미룬 카드를 뺀 것. */
         fun cards(today: Long = LocalDate.now(clock).toEpochDay()): List<InboxItem> = hideCards(unread(inbox, notifDone), cardDone, snoozed, today)

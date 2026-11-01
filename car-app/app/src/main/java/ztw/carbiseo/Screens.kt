@@ -480,6 +480,7 @@ private fun Focus(i: InboxItem, carryTag: String?, a: Float, onSms: () -> Unit) 
             Pill("완료", Icons.Filled.Check) { RoomService.markCardDone(ctx, i.id) }
             Pill("내일 아침에", Icons.Filled.DateRange) { RoomService.snooze(ctx, i.id) }
         }
+        if (i.kind == "hint") Pill("완료", Icons.Filled.Check) { RoomService.markCardDone(ctx, i.id) } // 통화 정리도 치울 수 있게(안 그러면 쌓이기만 함)
     }
 }
 
