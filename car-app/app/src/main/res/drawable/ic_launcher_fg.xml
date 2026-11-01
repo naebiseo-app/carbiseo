@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 내비서 아이콘 전경: 시안 A 로고(둥근 사각 말풍선 + 왼쪽 아래 꼬리 + 음성 막대 3개)를 B 색으로.
+     원본 512 격자를 0.175배로 줄여 108dp 가운데(마스크 안전 원 지름 66dp 안)에 둔다. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <group android:scaleX="0.175" android:scaleY="0.175" android:translateX="9.2" android:translateY="7.1">
+        <path android:fillColor="#FF7A33"
+            android:pathData="M168,132H344A72,72 0,0 1,416 204V276A72,72 0,0 1,344 348H168A72,72 0,0 1,96 276V204A72,72 0,0 1,168 132Z" />
+        <path android:fillColor="#FF7A33" android:pathData="M168,330L134,404L230,348Z" />
+        <path android:strokeColor="#16181C" android:strokeWidth="26" android:strokeLineCap="round"
+            android:pathData="M191,219V261M256,195V285M321,227V253" />
+    </group>
+</vector>
