@@ -280,4 +280,12 @@ class DriveTest {
         assertEquals("내비서 · 실행 중", notifTitle("(판정 전)"))
         for (r in Room.values()) assertFalse(notifTitle(r.name).contains(r.name)) // 영문 방 이름이 새지 않는다
     }
+
+    @Test fun 첫마디는_서버_대본과_같은_문장() {
+        assertEquals("안녕하세요, 김민수 과장님의 AI 비서 하나입니다. 김민수 과장님이 지금 운전 중이셔서 제가 대신 받았어요. 몇 가지만 여쭤보고 내용을 기록해 정리해서 전해 드릴게요. 어느 분이세요?",
+            firstWords("김민수 과장", "하나", "ai"))
+        assertTrue(firstWords("", "", "ai").startsWith("안녕하세요, 이 번호로 대신 전화 받는 AI 비서입니다. 지금 운전 중이셔서"))
+        assertEquals("김민수님이 지금 운전 중이라 전화를 받을 수 없습니다. 정차하시면 연락드리겠습니다.", firstWords("김민수", "", "off"))
+        assertEquals("회의 중입니다.", firstWords("김민수", "", "ment", " 회의 중입니다. "))
+    }
 }

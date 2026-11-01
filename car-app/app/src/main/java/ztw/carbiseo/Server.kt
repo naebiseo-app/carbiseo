@@ -25,6 +25,8 @@ object Server {
     fun postSettings(ownerLabel: String, assistantName: String) =
         post("/car/settings", JSONObject().put("owner_label", ownerLabel).put("assistant_name", assistantName))
 
+    fun postOwner(ownerLabel: String) = post("/car/settings", JSONObject().put("owner_label", ownerLabel)) // 첫 실행: 비서 이름은 안 건드린다
+
     fun postMode(mode: String) = post("/car/settings", JSONObject().put("mode", mode))
 
     /** 확인된 문자 발송. 결과 code(queued·sent·overseas_ip_blocked 등), 네트워크 실패면 null. */

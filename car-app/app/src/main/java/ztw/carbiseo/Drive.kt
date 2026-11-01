@@ -149,6 +149,15 @@ class ShiftClock(@Volatile var offsetMs: Long = 0, private val base: java.time.C
 /** 응대 모드 '끔'은 선택지에서 뺐다: 저장값이 off면 화면엔 한 마디 안내(ment)로 보이고 다음 저장 때 ment가 된다. */
 fun modeShown(mode: String) = if (mode == "off") "ment" else mode
 
+/** 첫 실행 미리 듣기: 상대가 듣게 될 첫 마디. 서버 script.ts의 greeting(운전 중)·mentScript(도착 시각 없음)와 같은 문장. 호칭이 없으면 주어 없이. */
+fun firstWords(owner: String, assistant: String, mode: String, ment: String = ""): String {
+    val o = owner.trim(); val a = assistant.trim(); val subj = if (o.isNotEmpty()) "${o}님이 " else ""
+    if (modeShown(mode) == "ment") return ment.trim().ifEmpty { "${subj}지금 운전 중이라 전화를 받을 수 없습니다. 정차하시면 연락드리겠습니다." }
+    val ai = if (a.isNotEmpty()) "AI 비서 ${a}입니다" else "AI 비서입니다"
+    val who = if (o.isNotEmpty()) "${o}님의 $ai" else "이 번호로 대신 전화 받는 $ai"
+    return "안녕하세요, $who. ${subj}지금 운전 중이셔서 제가 대신 받았어요. 몇 가지만 여쭤보고 내용을 기록해 정리해서 전해 드릴게요. 어느 분이세요?"
+}
+
 fun readiness(offline: Boolean, forwardOk: Boolean, mode: String): String = when {
     offline -> "서버 연결 끊김 · 알림이 늦어져요"
     !forwardOk -> "AI 응대 준비 안 됨(착신 설정 필요)"

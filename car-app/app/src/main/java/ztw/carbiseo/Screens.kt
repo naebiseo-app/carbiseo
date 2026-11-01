@@ -11,6 +11,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.snap
@@ -119,7 +123,7 @@ private val ParkBg = Color(0xFFF3EEE4); private val ParkInk = Color(0xFF2B2620);
 private val ParkAcc = Color(0xFFC2410C); private val ParkNote = Color(0xFFFFFDF8) // Brand: 흰 글자 대비 5.2:1
 // 확정 시안(1B·2B·5A) 토큰. 창 1700x1210dp(밀도 160) = 시안 px 1:1
 private val Ink = Color(0xFF14161A); private val Brand = Color(0xFFC2410C); private val BrandHi = Color(0xFFFF7A33)
-private val RestHi = Color(0xFF4FD1B5); private val Urgent = Color(0xFFB42318)
+private val RestC = Color(0xFF1F6B5E); private val RestHi = Color(0xFF4FD1B5); private val Urgent = Color(0xFFB42318)
 private val DBg = Color(0xFF111316); private val DS1 = Color(0xFF1A1D22); private val DS2 = Color(0xFF23272E); private val DLine = Color(0xFF2E333B)
 private val DTx = Color(0xFFF2F3F5); private val DMute = Color(0xFFA6ACB4); private val DOut = Color(0xFF3B414A); private val DriveBg = Color(0xFF0D0F12)
 private val Paper = Color(0xFFEEEFF1); private val Mute = Color(0xFF5B616A); private val Line = Color(0xFFDFE1E5)
@@ -282,7 +286,7 @@ private fun head(i: InboxItem): Pair<String, String?> = when (i.kind) {
 // ── 1B 정차 화면: 왼쪽 오늘 요약 레일 + 오른쪽 지금 처리할 1건 + 한 줄 대기열 + [말하기] ──
 @Composable
 private fun Park(onImage: Boolean, onSettings: () -> Unit) {
-    if (!RoomService.setupDone) { Box(Modifier.fillMaxSize().background(ParkBg).padding(24.dp)) { FirstRun() }; return }
+    if (!RoomService.setupDone) { FirstRun(); return }
     val ctx = LocalContext.current
     val items = parkOrder(RoomService.cards())
     // H7: 어제(업무 외 시간에) 넘긴 통화를 맨 앞에. 열면 본 것으로 저장(M5).
@@ -496,32 +500,145 @@ private fun PassengerToggle(light: Boolean = false) {
     }
 }
 
-/** H13 첫 실행 안내 1장: ①응대 모드 ②착신 설정 ③방해 금지 + 반복 전화 허용. P에서만 보인다. */
+/** 응대 모드 저장: 서버 저장이 성공해야 바뀐다(끔 없음, 2택). */
+private fun saveMode(ctx: Context, scope: kotlinx.coroutines.CoroutineScope, m: String, t: String) = scope.launch {
+    val ok = withContext(Dispatchers.IO) { Server.postMode(m).also { if (it) ctx.getSharedPreferences("car_ui", Context.MODE_PRIVATE).edit().putString("mode", m).apply() } }
+    if (ok) RoomService.mode = m
+    toast(ctx, if (ok) "$t(으)로 바꿨어요" else "저장 실패 — 다시 시도해 주세요")
+}
+private val MODES = listOf(
+    Triple("ai", "AI가 대신 받기", "용건을 묻고 정리해서 카드로 남겨요"),
+    Triple("ment", "한 마디 안내", "운전 중이라고만 알리고 끊어요. 문구는 설정에서 바꿔요"),
+)
+private val TITLES = listOf("님", "과장", "대표", "직접 입력")
+
+// ── 5A 첫 실행(H13): 왼쪽 입력 3단계(①이름·호칭·응대 방식 ②착신 전환 ③방해 금지), 오른쪽 '상대가 듣게 될 첫 마디' ──
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FirstRun() {
     val ctx = LocalContext.current
-    val step: @Composable (String, String) -> Unit = { n, t -> Text("$n $t", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold) }
-    val body: @Composable (String) -> Unit = { t -> Text(t, color = ParkBody, fontSize = 18.sp, lineHeight = 26.sp) }
-    Column(Modifier.fillMaxWidth().padding(top = 12.dp).verticalScroll(rememberScrollState()).clip(RoundedCornerShape(14.dp)).background(ParkNote).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("처음 한 번만 · 설정 3가지", color = ParkAcc, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        step("①", "전화 응대 방식")
-        ModeButtons()
-        step("②", "폰에서 착신 전환 설정")
-        body("폰 설정 > 착신 전환 > '통화 중일 때'·'응답 없을 때' → ${RoomService.serviceNumber.ifBlank { "(서비스 번호 불러오는 중)" }}")
-        if (RoomService.forwardOk) body("착신 설정 확인됨")
-        else OutlinedButton({ RoomService.confirmForward(ctx) }, Tall) { Text("착신 설정 했어요", color = ParkInk, fontSize = 20.sp) }
-        body("실제 착신 전화가 한 번 들어오면 자동으로 확인돼요.")
-        step("③", "운전 중 방해 금지 자동 켜기 + 가족·반복 전화 허용")
-        body("폰 설정 > 방해 금지(운전 모드) > 차 블루투스 연결 시 자동 켜기, '즐겨찾기 허용'에 가족 번호, '반복 전화 허용' 켜기. 가족과 바로 다시 건 급한 분은 폰이 직접 울리고, 나머지는 AI가 받아요.")
-        body("벨은 폰에서 먼저 울려요. 앱이 막을 수는 없어서, 통신사 착신 '응답 없을 때' 대기 시간을 가장 짧게 해 두세요.")
-        Button({ RoomService.finishSetup(ctx) }, Tall, colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
-            Text("다 했어요", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+    val scope = rememberCoroutineScope()
+    val prefs = remember { ctx.getSharedPreferences("car_ui", Context.MODE_PRIVATE) } // App이 IO에서 이미 읽어 둔 캐시
+    var page by rememberSaveable { mutableIntStateOf(0) }
+    var name by rememberSaveable { mutableStateOf(prefs.getString("owner_label", "") ?: "") }
+    var title by rememberSaveable { mutableIntStateOf(0) }
+    var custom by rememberSaveable { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    val owner = listOf(name.trim(), when (title) { 0 -> ""; 3 -> custom.trim(); else -> TITLES[title] }).filter { it.isNotEmpty() }.joinToString(" ")
+    val ok = owner.isEmpty() || validName(owner)
+    val words = firstWords(owner, prefs.getString("assistant_name", "") ?: "", RoomService.mode, prefs.getString("ment_text", "") ?: "")
+    val next = {
+        if (page < 2) {
+            val saved = prefs.getString("owner_label", "") ?: ""
+            if (page == 0 && owner.isNotEmpty() && owner != saved) {
+                busy = true
+                scope.launch {
+                    val done = withContext(Dispatchers.IO) { Server.postOwner(owner).also { if (it) prefs.edit().putString("owner_label", owner).apply() } }
+                    busy = false
+                    if (!done) toast(ctx, "이름 저장 실패 — 설정에서 다시 저장할 수 있어요")
+                    page = 1
+                }
+            } else page++
+        } else RoomService.finishSetup(ctx)
+    }
+    Row(Modifier.fillMaxSize()) {
+        Column(Modifier.weight(1f).fillMaxHeight().background(Paper).padding(start = 60.dp, end = 60.dp, top = 56.dp, bottom = 40.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                for (k in 0..2) Box(Modifier.size(48.dp, 8.dp).clip(RoundedCornerShape(4.dp)).background(if (k <= page) Brand else Color(0xFFD2D5DA)))
+                Text("${page + 1} / 3", Modifier.padding(start = 8.dp), color = Mute, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            }
+            // 키보드가 올라오면 창이 줄고(adjustResize) 이 부분만 스크롤된다. 아래 버튼 줄은 항상 보인다.
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+                Text(listOf("전화를 대신 받을 때\n뭐라고 소개할까요?", "폰에서 착신 전환을\n설정해 주세요", "운전 중 방해 금지를\n켜 두세요")[page],
+                    Modifier.padding(top = 34.dp, bottom = 40.dp), color = Ink, fontSize = 54.sp, lineHeight = 64.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-1.5).sp)
+                val label: @Composable (String) -> Unit = { Text(it, Modifier.padding(bottom = 12.dp), color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold) }
+                val body: @Composable (String) -> Unit = { Text(it, Modifier.padding(bottom = 16.dp), color = Ink.copy(alpha = 0.82f), fontSize = 26.sp, lineHeight = 39.sp) }
+                when (page) {
+                    0 -> {
+                        label("이름")
+                        Field(name, "예: 김민수", 38.sp, 96.dp) { name = it.take(10) }
+                        FlowRow(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            TITLES.forEachIndexed { k, t ->
+                                val on = title == k
+                                Box(Modifier.height(76.dp).clip(RoundedCornerShape(38.dp)).background(if (on) Ink else Color.White)
+                                    .then(if (on) Modifier else Modifier.border(2.dp, Line, RoundedCornerShape(38.dp))).press { title = k }.padding(horizontal = 28.dp), Alignment.Center) {
+                                    Text(t, color = if (on) Color.White else Ink, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                        if (title == 3) Box(Modifier.padding(top = 12.dp)) { Field(custom, "호칭(예: 팀장)", 28.sp, 76.dp) { custom = it.take(6) } }
+                        if (!ok) Text("이름과 호칭을 합쳐 10자 이내, 글자·숫자·공백만 쓸 수 있어요", Modifier.padding(top = 10.dp), color = Urgent, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                        Box(Modifier.height(34.dp))
+                        label("응대 방식")
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            for ((m, t, d) in MODES) {
+                                val on = modeShown(RoomService.mode) == m
+                                val shape = RoundedCornerShape(24.dp)
+                                Row(Modifier.fillMaxWidth().heightIn(min = 104.dp).clip(shape).background(if (on) Color(0xFFFFF3EC) else Color.White)
+                                    .border(if (on) 3.dp else 2.dp, if (on) Brand else Line, shape).press { if (!on) saveMode(ctx, scope, m, t) }.padding(horizontal = 28.dp, vertical = 18.dp),
+                                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                                    Box(Modifier.size(40.dp).clip(CircleShape).border(if (on) 12.dp else 3.dp, if (on) Brand else Color(0xFFB5BAC1), CircleShape))
+                                    Column {
+                                        Text(t, color = Ink, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                                        Text(d, color = Mute, fontSize = 22.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    1 -> {
+                        body("폰 설정 > 착신 전환 > '통화 중일 때'·'응답 없을 때'를 아래 번호로 바꿔 주세요.")
+                        Text(RoomService.serviceNumber.ifBlank { "(서비스 번호 불러오는 중)" }, Modifier.padding(bottom = 24.dp), color = Ink, fontSize = 40.sp, fontWeight = FontWeight.ExtraBold)
+                        if (RoomService.forwardOk) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Icon(Icons.Filled.Check, null, Modifier.size(32.dp), tint = RestC)
+                            Text("착신 설정 확인됨", color = RestC, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                        } else Pill("착신 설정 했어요", Icons.Filled.Check, light = true) { RoomService.confirmForward(ctx) }
+                        Box(Modifier.height(20.dp))
+                        body("실제 착신 전화가 한 번 들어오면 자동으로 확인돼요.")
+                    }
+                    else -> {
+                        body("폰 설정 > 방해 금지(운전 모드) > 차 블루투스 연결 시 자동 켜기, '즐겨찾기 허용'에 가족 번호, '반복 전화 허용' 켜기.")
+                        body("가족과 바로 다시 건 급한 분은 폰이 직접 울리고, 나머지는 AI가 받아요.")
+                        body("벨은 폰에서 먼저 울려요. 앱이 막을 수는 없어서, 통신사 착신 '응답 없을 때' 대기 시간을 가장 짧게 해 두세요.")
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (page == 0) Pill("건너뛰기", light = true) { page = 1 } else Pill("이전", light = true) { page-- }
+                Spacer(Modifier.weight(1f))
+                Pill(if (page == 2) "다 했어요" else "다음", if (page == 2) Icons.Filled.Check else Icons.Filled.ArrowForward, primary = true, light = true,
+                    m = Modifier.alpha(if (busy || !ok) 0.5f else 1f)) { if (!busy && ok) next() }
+            }
+        }
+        Column(Modifier.width(600.dp).fillMaxHeight().background(Ink).padding(horizontal = 48.dp, vertical = 56.dp), verticalArrangement = Arrangement.spacedBy(26.dp)) {
+            Text("상대가 듣게 될 첫 마디", color = Color(0xFFB9BEC6), fontSize = 22.sp)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Box(Modifier.size(60.dp).clip(CircleShape).background(BrandHi), Alignment.Center) { Text("비", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold) }
+                Text("내비서 · ${owner.ifEmpty { "내 전화" }} 대신", color = Color(0xFFC9CDD3), fontSize = 22.sp)
+            }
+            Text(buildAnnotatedString {
+                append(words)
+                if (owner.isNotEmpty()) words.indexOf(owner).takeIf { it >= 0 }?.let { addStyle(SpanStyle(color = Brand, fontWeight = FontWeight.ExtraBold), it, it + owner.length) }
+            }, Modifier.fillMaxWidth().clip(RoundedCornerShape(32.dp, 32.dp, 32.dp, 8.dp)).background(Color.White).padding(horizontal = 32.dp, vertical = 30.dp),
+                color = Ink, fontSize = 28.sp, lineHeight = 42.sp, fontWeight = FontWeight.SemiBold)
+            Pill("목소리로 들어보기", Icons.Filled.PlayArrow, primary = true) { speak(ctx, words) }
         }
     }
 }
 
-/** 응대 모드 2택(끔 없음): 서버 저장이 성공해야 바뀐다. */
+/** 시안 입력칸: 흰 바탕 + 3dp 검은 테두리, 큰 글자. */
+@Composable
+private fun Field(v: String, hint: String, fs: androidx.compose.ui.unit.TextUnit, h: Dp, onChange: (String) -> Unit) =
+    BasicTextField(v, onChange, Modifier.fillMaxWidth(), singleLine = true, cursorBrush = SolidColor(Brand),
+        textStyle = TextStyle(color = Ink, fontSize = fs, fontWeight = FontWeight.Bold)) { inner ->
+        Box(Modifier.fillMaxWidth().height(h).clip(RoundedCornerShape(24.dp)).background(Color.White).border(3.dp, Ink, RoundedCornerShape(24.dp)).padding(horizontal = 30.dp),
+            Alignment.CenterStart) {
+            if (v.isEmpty()) Text(hint, color = Mute, fontSize = fs, fontWeight = FontWeight.Bold)
+            inner()
+        }
+    }
+
+/** 설정 화면용 응대 모드 2택. */
 @Composable
 private fun ModeButtons() {
     val ctx = LocalContext.current
@@ -529,13 +646,7 @@ private fun ModeButtons() {
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         for ((m, t) in listOf("ai" to "AI 응대", "ment" to "한 마디 안내")) {
             val on = modeShown(RoomService.mode) == m
-            Button({
-                scope.launch {
-                    val ok = withContext(Dispatchers.IO) { Server.postMode(m).also { if (it) ctx.getSharedPreferences("car_ui", Context.MODE_PRIVATE).edit().putString("mode", m).apply() } }
-                    if (ok) RoomService.mode = m
-                    toast(ctx, if (ok) "$t(으)로 바꿨어요" else "저장 실패 — 다시 시도해 주세요")
-                }
-            }, Tall, colors = ButtonDefaults.buttonColors(containerColor = if (on) ParkAcc else ParkNote)) {
+            Button({ saveMode(ctx, scope, m, t) }, Tall, colors = ButtonDefaults.buttonColors(containerColor = if (on) ParkAcc else ParkNote)) {
                 Text(t, color = if (on) Color.White else ParkInk, fontSize = 18.sp)
             }
         }
