@@ -168,6 +168,17 @@ fun App() {
 /** 폰 알림 대답 대기 중: '듣는 중' 한 줄 + 큰 버튼(P·저속에서만, 주행 중엔 음성만). */
 @Composable
 private fun AskBar(m: Modifier) {
+    RoomService.choice?.let { c -> // Q1: 두 번 못 알아들은 질문은 화면 2택으로(음성 대기 종료)
+        Column(m.fillMaxWidth().background(SheetBg).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(c.prompt, color = SheetInk, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                for ((first, t) in listOf(true to c.first, false to c.second)) Button({ RoomService.pick(first) }, Modifier.weight(1f).heightIn(min = 96.dp), colors = ButtonDefaults.buttonColors(containerColor = if (first) ParkAcc else Color(0xFF3B414A))) {
+                    Text(t, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black)
+                }
+            }
+        }
+        return
+    }
     val step = RoomService.askStep
     if (step == NotifTalk.Step.NONE) return
     val (label, opts) = askBar(step, RoomService.listening, RoomService.askTouch)

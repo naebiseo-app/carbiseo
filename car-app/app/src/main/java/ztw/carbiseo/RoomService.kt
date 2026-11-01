@@ -78,7 +78,7 @@ class RoomService : Service() {
     private val notifFresh = mutableSetOf<Long>()
     private val notifSaid = mutableSetOf<Long>()
     // 음성으로 묻고 대답을 기다리는 질문(알림 묻기는 talk가 따로). 대답은 heard()가 받는다.
-    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, INTENT, INTENT_RETRY }
+    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, INTENT }
     private class PendingSend(val label: String, val number: String, val body: String, val task: String) // 보낼 문자(label·number·body)와 못 보냈을 때 남길 할 일 본문
     private var pending = Ask.NONE
     private var lateEvent: Pair<Event, Int>? = null
@@ -158,7 +158,9 @@ class RoomService : Service() {
 
     /** 묻고 대답 듣기. 지금 말해도 되는 때(경고·통화·다른 대화 중 아님)에만 쓴다. */
     private fun canAsk() = !quiet && pending == Ask.NONE && talk.step == NotifTalk.Step.NONE && !listening
-    private fun askVoice(text: String, a: Ask) { pending = a; speaker.speak(text, ::listenNow) }
+    private var lastAsk = ""
+    private val reask = Reask()
+    private fun askVoice(text: String, a: Ask) { reask.reset(); choice = null; lastAsk = text; pending = a; speaker.speak(text, ::listenNow) }
 
     /** 음성 인식 결과(또는 디버그 SAY) 한 곳 입구. 대기 중인 질문이 있으면 그 대답으로, 아니면 알림 대화로. */
     private fun heard(said: String?) {
@@ -167,26 +169,47 @@ class RoomService : Service() {
         // Q3: 운전 중 '급해요/화장실'은 어느 대답 대기에서든 먼저 본다(상시 듣기는 없다 — 듣는 중이거나 디버그 SAY일 때만 들어온다)
         if (urgentNeed(said) && machine.room.let { it != null && it != Room.PARK }) { talk.cancel(); askStep = talk.step; return addRestStop(true) }
         when (p) {
-            // 번호를 알면 초안을 읽어 주고 "이대로 보낼까요?"(SEND). 모르면 지금처럼 카드만.
-            Ask.LATE -> lateEvent?.let { (ev, m) -> if (yesNo(said) == true) lateTask(ev, m).let { t -> taskDraft(t).let { (n, b) -> sendOrCard(PendingSend("", n, b, t), LATE_DONE_SPEECH, true) } } }
-            Ask.RESERVE -> reserve?.let { (n, t) -> if (yesNo(said) == true) { addLocalTask(reserveTask(n, t)); say(RESERVE_DONE_SPEECH) } }
-            // 질문이 이미 초안을 읽어 줬으니 '응'이면 바로 발송(한 번 더 묻지 않는다)
-            Ask.CALLBACK -> callback?.let { (i, m) -> if (yesNo(said) == true) sendOrCard(PendingSend(i.fromLabel, i.fromNumber, m, callbackTask(i, m)), CALLBACK_DONE_SPEECH, false) }
-            // F5: [말하기] 뒤 한 마디. 못 알아들으면 "다시 말씀해 주세요" 한 번만, 그래도 못 알아들으면 끝.
-            Ask.INTENT, Ask.INTENT_RETRY -> when (carIntent(said)) {
+            // Q1 조용한 비서: 못 알아들으면 한 번만 다시 묻고, 그다음은 화면 2택(unsure). 번호를 알면 초안을 읽어 주고 "이대로 보낼까요?"(SEND). 모르면 지금처럼 카드만.
+            Ask.LATE, Ask.RESERVE, Ask.CALLBACK, Ask.SEND, Ask.REST -> when (voiceCmd(said)) {
+                Cmd.Yes -> answerYn(p, true)
+                Cmd.No, Cmd.Later -> answerYn(p, false) // '나중에'는 이 질문들엔 '아니'
+                else -> if (p == Ask.REST) unsure(p, "들르기" to { answerYn(p, true) }, "괜찮아요" to { answerYn(p, false) }, { answerYn(p, false) })
+                    else unsure(p, (if (p == Ask.RESERVE) "만들기" else "보내기") to { answerYn(p, true) }, "그만두기" to { answerYn(p, false) }, { answerYn(p, false) })
+            }
+            // F5: [말하기] 뒤 한 마디. 못 알아들으면 "다시 말씀해 주세요" 한 번만, 그다음은 화면 2택(주행 중엔 그냥 끝).
+            Ask.INTENT -> when (carIntent(said)) {
                 CarIntent.URGENT -> addRestStop(true)
                 CarIntent.RECENT_CALLS -> say(recentCallsSpeech(cards()))
                 CarIntent.NEXT_EVENT -> say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis())))
-                CarIntent.UNKNOWN -> if (p == Ask.INTENT) askVoice(REASK_SPEECH, Ask.INTENT_RETRY)
+                CarIntent.UNKNOWN -> unsure(p, "아까 전화" to { say(recentCallsSpeech(cards())) }, "다음 일정" to { say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis()))) }, {}, "어떤 걸 알려 드릴까요?")
             }
-            Ask.SEND -> sending?.let { s -> if (yesNo(said) == true) doSend(s) else { addLocalTask(s.task); say(SEND_KEEP_SPEECH) } }
-            Ask.REST -> when (yesNo(said)) {
-                true -> addRestStop(true)
-                false -> { restSnoozeUntil = clock.millis() + REST_SNOOZE_MS; restOnce.reset(); restOffer = false }
-                null -> {}
+            Ask.NONE -> {
+                // 알림 묻기(제안·보낼까요)도 같은 규칙: 못 알아들으면 한 번만 다시 묻고, 그다음은 P의 화면 버튼(읽어줘/나중에·보내/취소)·주행 중엔 카드로
+                val st = talk.step
+                if ((st == NotifTalk.Step.OFFER || st == NotifTalk.Step.CONFIRM) && voiceCmd(said) == Cmd.Unknown && reask.again()) speaker.speak(REASK_SPEECH, ::listenNow)
+                else runTurn(talk.hear(said, favs, machine.room == Room.PARK))
             }
-            Ask.NONE -> runTurn(talk.hear(said, favs, machine.room == Room.PARK))
         }
+    }
+
+    /** 예/아니오 질문의 대답 처리(음성·화면 버튼 공통). */
+    private fun answerYn(p: Ask, y: Boolean) {
+        when (p) {
+            // 번호를 알면 초안을 읽어 주고 "이대로 보낼까요?"(SEND). 모르면 지금처럼 카드만.
+            Ask.LATE -> lateEvent?.let { (ev, m) -> if (y) lateTask(ev, m).let { t -> taskDraft(t).let { (n, b) -> sendOrCard(PendingSend("", n, b, t), LATE_DONE_SPEECH, true) } } }
+            Ask.RESERVE -> reserve?.let { (n, t) -> if (y) { addLocalTask(reserveTask(n, t)); say(RESERVE_DONE_SPEECH) } }
+            // 질문이 이미 초안을 읽어 줬으니 '응'이면 바로 발송(한 번 더 묻지 않는다)
+            Ask.CALLBACK -> callback?.let { (i, m) -> if (y) sendOrCard(PendingSend(i.fromLabel, i.fromNumber, m, callbackTask(i, m)), CALLBACK_DONE_SPEECH, false) }
+            Ask.SEND -> sending?.let { s -> if (y) doSend(s) else { addLocalTask(s.task); say(SEND_KEEP_SPEECH) } }
+            Ask.REST -> if (y) addRestStop(true) else { restSnoozeUntil = clock.millis() + REST_SNOOZE_MS; restOnce.reset(); restOffer = false }
+            else -> {}
+        }
+    }
+
+    /** Q1: 못 알아들었다. 첫 번째는 다시 묻고 듣기, 두 번째는 화면 2택을 띄우고 음성 대기를 끝낸다. 화면을 못 쓰는 주행 중이면 onDrive(보통 '아니'로 닫기). */
+    private fun unsure(p: Ask, a: Pair<String, () -> Unit>, b: Pair<String, () -> Unit>, onDrive: () -> Unit, prompt: String = lastAsk) {
+        if (reask.again()) { pending = p; speaker.speak(REASK_SPEECH, ::listenNow); return }
+        if (touchOk()) choice = Choice(prompt, a.first, b.first, a.second, b.second) else onDrive()
     }
 
     private fun addLocalTask(summary: String) {
@@ -209,6 +232,7 @@ class RoomService : Service() {
     }
 
     private fun runTurn(t: Turn) {
+        if (t.listen) reask.reset() // 새 질문이면 재질문 기회도 새로
         t.send?.let { (id, text) -> net.execute { val ok = Server.reply(id, text); Log.i("ROOM", "reply $id -> ${if (ok) "ok" else "FAIL"}"); if (!ok) ui.post { speaker.speak("답장을 못 보냈어요. 잠시 뒤 다시 해 주세요.") } } }
         if (t.done.isNotEmpty()) markDone(this, t.done)
         t.say?.let { speaker.speak(it, if (t.listen) ::listenNow else null) }
@@ -335,7 +359,7 @@ class RoomService : Service() {
         machine = RoomStateMachine(clock) // settings = 기본 상수. 설정 화면이 machine.settings를 덮어쓴다.
         machine.onChange = { from, to ->
             Log.i("ROOM", "$from -> $to at ${LocalDateTime.now(clock).withNano(0)}")
-            room = to.name
+            room = to.name; choice = null
             val now = clock.millis()
             if (to == Room.PARK) {
                 parkedAt = now; restOffer = false; hold.clear(); parkRemind.reset()
@@ -619,5 +643,9 @@ class RoomService : Service() {
         var askTouch by mutableStateOf(true); private set
         var voicePath by mutableStateOf("none"); private set
         var answer: ((String) -> Unit)? = null // 화면 버튼 → 음성 대답과 같은 처리
+        /** Q1: 음성으로 두 번 못 알아들은 질문의 화면 2택(첫째·둘째 버튼 문구와 동작). 음성 듣기는 이미 끝났다. */
+        class Choice(val prompt: String, val first: String, val second: String, val onFirst: () -> Unit, val onSecond: () -> Unit)
+        var choice by mutableStateOf<Choice?>(null); private set
+        fun pick(first: Boolean) { val c = choice ?: return; choice = null; if (first) c.onFirst() else c.onSecond() }
     }
 }

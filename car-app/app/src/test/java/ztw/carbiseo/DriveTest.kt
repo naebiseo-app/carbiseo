@@ -288,4 +288,13 @@ class DriveTest {
         assertEquals("김민수님이 지금 운전 중이라 전화를 받을 수 없습니다. 정차하시면 연락드리겠습니다.", firstWords("김민수", "", "off"))
         assertEquals("회의 중입니다.", firstWords("김민수", "", "ment", " 회의 중입니다. "))
     }
+
+    @Test fun 재질문은_질문당_한_번만() {
+        val r = Reask()
+        assertTrue(r.again())   // 처음 못 알아들음 -> 다시 묻기
+        assertFalse(r.again())  // 두 번째 -> 화면 2택
+        assertFalse(r.again())
+        r.reset()               // 새 질문
+        assertTrue(r.again())
+    }
 }

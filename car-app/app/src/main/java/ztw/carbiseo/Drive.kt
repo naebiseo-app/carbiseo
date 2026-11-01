@@ -57,6 +57,12 @@ fun carIntent(said: String?): CarIntent {
     val n = said.orEmpty().replace(Regex("""\s"""), "")
     return when { urgentNeed(said) -> CarIntent.URGENT; RECENT_CALL_WORDS.containsMatchIn(n) -> CarIntent.RECENT_CALLS; "일정" in n -> CarIntent.NEXT_EVENT; else -> CarIntent.UNKNOWN }
 }
+/** Q1 조용한 비서: 한 질문에서 못 알아들었을 때 다시 묻는 건 1번뿐. again()이 true면 한 번 더 묻고, false면 화면 2택으로 넘긴다. 새 질문마다 reset. */
+class Reask {
+    private var n = 0
+    fun reset() { n = 0 }
+    fun again(): Boolean = n++ == 0
+}
 const val TALK_PROMPT = "말씀하세요"
 const val REASK_SPEECH = "다시 말씀해 주세요"
 const val NO_VOICE_SPEECH = "지금은 음성 인식을 쓸 수 없어요"
