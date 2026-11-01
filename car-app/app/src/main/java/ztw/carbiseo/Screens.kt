@@ -188,7 +188,7 @@ private fun BgImage(f: File, ver: Int, pol: BgPolicy): Boolean {
 
 @Composable
 private fun Park(onImage: Boolean, onSettings: () -> Unit) {
-    val items = parkOrder(unread(RoomService.inbox, RoomService.notifDone))
+    val items = parkOrder(RoomService.cards())
     val list = rememberLazyListState()
     val newest = RoomService.inbox.maxOfOrNull { it.id }
     LaunchedEffect(newest) { if (newest != null) list.animateScrollToItem(0) } // 새 카드가 위에 숨지 않게
@@ -204,7 +204,7 @@ private fun Park(onImage: Boolean, onSettings: () -> Unit) {
         val unseen = todo(items, RoomService.seen)
         Text(if (unseen == 0) "세워 둔 동안, 볼 건 없어요" else "확인할 게 ${unseen}건 있어요",
             color = ink, fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Black)
-        val calls = todayCalls(items, java.time.LocalDate.now())
+        val calls = todayCalls(RoomService.inbox, java.time.LocalDate.now()) // 완료한 카드도 '대신 받은 전화'엔 그대로 센다
         if (calls > 0) Text("오늘 AI가 대신 받은 전화 ${calls}통 = 운전 중 통화 ${calls}번 줄임",
             Modifier.padding(top = 6.dp), color = if (onImage) Color.White else ParkBody, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         if (RoomService.offline) Text("서버 연결 끊김 — 다시 연결하는 중. 그동안 전화는 통화 서비스가 기본 안내로 받아요",
@@ -273,6 +273,13 @@ private fun Note(i: InboxItem, selected: Boolean, onTap: () -> Unit) {
                         .onFailure { toast(ctx, "전화를 걸 수 있는 연결된 폰이 없어요") }
                 }, Tall, colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) { Text("전화 걸기", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
                 OutlinedButton(onTap, Tall) { Text("문자", color = ParkInk, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+            }
+        }
+        // F3: 처리한 통화·할 일은 [완료]로 목록·건수에서 뺀다(재시작해도 유지)
+        if (i.kind == "call" || i.kind == "task") {
+            val ctx = LocalContext.current
+            Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton({ RoomService.markCardDone(ctx, i.id) }, Tall) { Text("완료", color = ParkInk, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
             }
         }
     }
@@ -423,7 +430,7 @@ private fun RestButton(bg: Color, ink: Color, m: Modifier = Modifier) {
 /** 업무 운전(판정 전도 이 화면): 조작 요소는 휴게소 버튼(S2)뿐. */
 @Composable
 private fun Work(r: String) {
-    val n = RoomService.inbox.count { it.urgent && it.id !in RoomService.seen }
+    val n = RoomService.cards().count { it.urgent && it.id !in RoomService.seen }
     Box(Modifier.fillMaxSize().padding(24.dp)) {
         Text(roomName(r), color = WorkAcc, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -438,7 +445,7 @@ private fun Work(r: String) {
 
 @Composable
 private fun Rest() {
-    val n = todo(unread(RoomService.inbox, RoomService.notifDone), RoomService.seen)
+    val n = todo(RoomService.cards(), RoomService.seen)
     Column(Modifier.fillMaxSize().padding(24.dp)) {
         Text(roomName("DRIVE_REST"), color = RestAcc, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Text("오늘 일은 여기까지", color = RestInk, fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Black)

@@ -233,7 +233,7 @@ class RoomService : Service() {
             // 바뀌면 10초에 한 번까지, 안 바뀌어도 5분마다 하트비트(서버는 10분 넘게 갱신이 없으면 방을 모른다고 본다)
             val ago = System.currentTimeMillis() - ctxAt
             if ((carCtx().toString() != ctxSent && ago >= 10_000) || ago >= HEARTBEAT_MS) machine.room?.let { sendState(it.name, ++stateGen, false) }
-            if (parkRemind.fire(machine.room == Room.PARK && parkedAt?.let { clock.millis() - it >= PARK_REMIND_MS } == true) && !passenger) parkReminder(inbox, seen)?.let(::say)
+            if (parkRemind.fire(machine.room == Room.PARK && parkedAt?.let { clock.millis() - it >= PARK_REMIND_MS } == true) && !passenger) parkReminder(cards(), seen)?.let(::say)
             // F4: 업무 운전 중 도착 예상이 다음 일정 시작보다 늦으면 일정마다 한 번 묻는다
             if (machine.room == Room.DRIVE_WORK && !passenger && canAsk()) System.currentTimeMillis().let { now ->
                 nextEvent(schedule, now)?.takeIf { it.start !in lateAsked && headingTo(machine.signals.destination, it) }?.let { ev ->
@@ -264,11 +264,12 @@ class RoomService : Service() {
             // H9: 동승자 모드는 저장하지 않는다(이번 운전만). M5·H7: 본 카드·넘긴 건은 재시작해도 유지.
             val sn = p.getString("seen", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
             val nd = p.getString("notif_done", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
+            val cd = p.getString("card_done", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
             val df = decodeDeferred(p.getString("deferred", "")); val fw = p.getBoolean("forward_ok", false)
             val fv = p.getString("fav_senders", "").orEmpty(); ui.post { favs = parseFavs(fv) }
             val fd = p.getLong("family_day", -1); ui.post { familyDay = fd }
             val sd = p.getBoolean("setup_done", false); val md = p.getString("mode", "ai") ?: "ai"; val bd = p.getLong("brief_day", -1)
-            ui.post { restMin = r; seen = sn + seen; notifDone = nd + notifDone; deferred = df + deferred; forwardOk = forwardOk || fw; setupDone = sd; mode = md; briefDay = bd }
+            ui.post { restMin = r; seen = sn + seen; notifDone = nd + notifDone; cardDone = cd + cardDone; deferred = df + deferred; forwardOk = forwardOk || fw; setupDone = sd; mode = md; briefDay = bd }
         }
         latch = AlertLatch(Clock.systemDefaultZone())
         machine = RoomStateMachine(clock) // settings = 기본 상수. 설정 화면이 machine.settings를 덮어쓴다.
@@ -321,7 +322,7 @@ class RoomService : Service() {
     /** H7: 오늘 첫 업무 운전에서 '어제 넘긴 전화 N건' 한 문장. 하루 1회. */
     private fun briefCarryOver() {
         val t = today()
-        val c = carryOver(inbox, deferred, seen, t)
+        val c = carryOver(cards(), deferred, seen, t)
         carrySpeech(c, deferred, t)?.let { briefDay = t; net.execute { prefs.edit().putLong("brief_day", t).apply() }; say(it) }
     }
 
@@ -503,6 +504,14 @@ class RoomService : Service() {
             val s = notifDone.sorted().takeLast(300).joinToString(",")
             save(c) { putString("notif_done", s) }
         }
+        var cardDone by mutableStateOf(setOf<Long>()); private set // F3: [완료]한 통화·할 일 카드 id. prefs 저장(최근 300)
+        fun markCardDone(c: Context, id: Long) {
+            cardDone = cardDone + id
+            val s = cardDone.sorted().takeLast(300).joinToString(",")
+            save(c) { putString("card_done", s) }
+        }
+        /** 화면·건수·정차 알림이 보는 카드 목록: 읽어 준 알림과 [완료]한 카드를 뺀 것. */
+        fun cards(): List<InboxItem> = hideCards(unread(inbox, notifDone), cardDone)
         fun confirmForward(c: Context) { forwardOk = true; save(c) { putBoolean("forward_ok", true) } }
         fun finishSetup(c: Context) { setupDone = true; save(c) { putBoolean("setup_done", true) } }
         fun reopenSetup(c: Context) { setupDone = false; save(c) { putBoolean("setup_done", false) } }

@@ -52,6 +52,9 @@ val SHOWN_KINDS = setOf("call", "hint", "task", "sent", "notif")
 /** 확인할 건수: 아직 안 연 카드(보낸 문자 제외). */
 fun todo(items: List<InboxItem>, seen: Set<Long>) = items.count { it.kind != "sent" && it.id !in seen }
 
+/** F3: [완료]한 카드는 목록·건수에서 뺀다. */
+fun hideCards(items: List<InboxItem>, done: Set<Long>): List<InboxItem> = items.filter { it.id !in done }
+
 /** 보낸 문자 카드 상태 한 줄. 국외 IP 차단은 숨기지 않고 그대로 알린다. */
 fun sentStatus(i: InboxItem) = when {
     i.status == "sent" -> "보냄"

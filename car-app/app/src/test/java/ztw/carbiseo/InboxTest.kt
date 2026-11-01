@@ -173,4 +173,13 @@ class InboxTest {
     @Test fun 퇴근길도_direct_카드는_읽는다() {
         assertEquals("급한 전화 한 건, AI가 용건을 받아 두었습니다.", speechFor(listOf(item(1), item(2).copy(direct = true)), Room.DRIVE_REST))
     }
+
+    @Test fun 완료한_카드는_목록과_건수에서_빠진다() {
+        val l = listOf(item(1), item(2, urgent = true), item(3))
+        val shown = hideCards(l, setOf(2L))
+        assertEquals(listOf(1L, 3L), shown.map { it.id })
+        assertEquals(2, todo(shown, emptySet()))
+        assertNull(parkReminder(shown, emptySet()))          // 완료한 급한 전화는 정차 알림에서도 빠진다
+        assertEquals(l, hideCards(l, emptySet()))
+    }
 }
