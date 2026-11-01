@@ -437,6 +437,7 @@ class RoomService : Service() {
             override fun onReceive(c: Context, i: Intent) {
                 val at = runCatching { LocalDateTime.parse(i.getStringExtra("at")) }.getOrNull()
                 clock.offsetMs = at?.let { it.atZone(clock.zone).toInstant().toEpochMilli() - System.currentTimeMillis() } ?: 0
+                timeVer++ // 정차 화면이 '지금 시각'을 다시 읽는다(미룬 카드 복귀·퇴근 후 접기)
                 machine.tick()
                 Log.i("ROOM", "debug time -> ${LocalDateTime.now(clock).withNano(0)} ${LocalDate.now(clock).dayOfWeek} room=${machine.room}")
             }
@@ -546,6 +547,7 @@ class RoomService : Service() {
         /** H9: 이번 운전만. 저장하지 않고, 30분 넘게 세운 뒤 출발하면 자동 해제. */
         fun togglePassenger(on: Boolean) { passenger = on; passengerAt = clock.millis() }
         val clock = ShiftClock() // 프로세스 공통 시각(디버그 TIME 브로드캐스트만 offset을 바꾼다)
+        var timeVer by mutableIntStateOf(0); private set // TIME 브로드캐스트마다 +1: 화면이 시각을 다시 읽는 신호
         fun dropLocal(c: Context, id: Long) { inbox = inbox.filter { it.id != id }; saveLocalTasks(c) }
         fun saveLocalTasks(c: Context) { val s = encodeLocalTasks(inbox); save(c) { putString("local_tasks", s) } }
         var seen by mutableStateOf(setOf<Long>()); private set // M5: 주차 화면에서 연 카드 id. prefs 저장(최근 300)
@@ -582,7 +584,7 @@ class RoomService : Service() {
             save(c) { putString("deferred", ds).putString("snoozed", zs).putString("seen", ss) }
         }
         /** 화면·건수·정차 알림이 보는 카드 목록: 읽어 준 알림·[완료]한 카드·오늘 미룬 카드를 뺀 것. */
-        fun cards(): List<InboxItem> = hideCards(unread(inbox, notifDone), cardDone, snoozed, LocalDate.now(clock).toEpochDay())
+        fun cards(today: Long = LocalDate.now(clock).toEpochDay()): List<InboxItem> = hideCards(unread(inbox, notifDone), cardDone, snoozed, today)
         fun confirmForward(c: Context) { forwardOk = true; save(c) { putBoolean("forward_ok", true) } }
         fun finishSetup(c: Context) { setupDone = true; save(c) { putBoolean("setup_done", true) } }
         fun reopenSetup(c: Context) { setupDone = false; save(c) { putBoolean("setup_done", false) } }

@@ -289,14 +289,16 @@ private fun head(i: InboxItem): Pair<String, String?> = when (i.kind) {
 private fun Park(onImage: Boolean, onSettings: () -> Unit) {
     if (!RoomService.setupDone) { FirstRun(); return }
     val ctx = LocalContext.current
-    val items = parkOrder(RoomService.cards())
+    // 시각을 상태로: 1분마다, 그리고 디버그 TIME 때 다시 읽는다 → 자정·아침이 지나면 미룬 카드 복귀·퇴근 후 접기가 저절로 바뀐다
+    val now by produceState(RoomService.clock.millis(), RoomService.timeVer) { while (true) { value = RoomService.clock.millis(); kotlinx.coroutines.delay(60_000) } }
     // H7: 어제(업무 외 시간에) 넘긴 통화를 맨 앞에. 열면 본 것으로 저장(M5).
-    val today = LocalDate.now(RoomService.clock).toEpochDay()
+    val today = Instant.ofEpochMilli(now).atZone(RoomService.clock.zone).toLocalDate().toEpochDay()
+    val items = parkOrder(RoomService.cards(today))
     val carry = carryOver(items, RoomService.deferred, RoomService.seen, today)
     val rest = items.filter { it !in carry }
     // M6: 저녁·주말 P(집 차고 등)는 급한 것만 펼치고 업무 카드는 접는다. 1탭으로 펼침
     var showAll by rememberSaveable { mutableStateOf(false) }
-    val shown = if (offDuty(java.time.LocalDateTime.now(RoomService.clock), RoomSettings(workEnd = workEndTime(RoomService.workEndHour))) && !showAll) rest.filter { it.urgent } else rest
+    val shown = if (offDuty(Instant.ofEpochMilli(now).atZone(RoomService.clock.zone).toLocalDateTime(), RoomSettings(workEnd = workEndTime(RoomService.workEndHour))) && !showAll) rest.filter { it.urgent } else rest
     val queue = carry + shown
     var sel by rememberSaveable { mutableStateOf<Long?>(null) }
     var sheet by rememberSaveable { mutableStateOf(false) }
