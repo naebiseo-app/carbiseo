@@ -65,7 +65,37 @@ class DriveTest {
         assertEquals(null, nearestRestStop(LatLng(36.9, 127.0), LatLng(36.0, 127.0), stops))     // 둘 다 지나옴
         assertEquals(null, nearestRestStop(LatLng(37.5, 127.0), LatLng(36.0, 127.0), listOf(stops[1]))) // 앞쪽이지만 55km
         assertEquals(null, nearestRestStop(LatLng(37.21, 127.0), null, stops))                   // 목적지 없음 = 방향 모름
-        assertEquals(null, nearestRestStop(LatLng(36.35, 127.38), LatLng(35.18, 129.08)))        // 대전 → 부산: 데모 4곳 모두 뒤
+        assertEquals(null, nearestRestStop(LatLng(36.35, 127.38), LatLng(35.18, 129.08), stops))  // 대전 → 부산: 둘 다 뒤
+        assertEquals(null, nearestRestStop(LatLng(36.35, 127.38), LatLng(35.18, 129.08)))        // 목록을 못 읽으면(빈 목록) null = 내비 검색
+    }
+
+    @Test fun 휴게소_파일_파싱은_주석_빈줄_좌표없는_행을_버린다() {
+        val t = "# 주석\r\n\r\n휴게소\t기흥휴게소\t37.2363\t127.0938\t1\r\n졸음쉼터\t오창\t36.73\t127.45\t0\n졸음쉼터\t좌표없음\t\t\t1\n졸음쉼터\t깨짐\tabc\t127.1\t1\n휴게소\t\t37.0\t127.0\t1\n졸음쉼터\t열없음\t36.5\t127.5\n"
+        val l = parseRestStops(t)
+        assertEquals(listOf("기흥휴게소", "오창", "열없음"), l.map { it.name })
+        assertEquals(RestStop("기흥휴게소", LatLng(37.2363, 127.0938), true, "휴게소"), l[0])
+        assertEquals(RestStop("오창", LatLng(36.73, 127.45), false, "졸음쉼터"), l[1])
+        assertFalse(l[2].toilet) // 화장실 칸이 없으면 없음으로
+        assertEquals(emptyList<RestStop>(), parseRestStops(""))
+    }
+
+    @Test fun 내장_휴게소_파일은_모두_읽힌다() {
+        val f = java.io.File("src/main/assets/reststops.tsv")
+        val data = f.readLines().count { it.isNotBlank() && !it.startsWith("#") }
+        val l = parseRestStops(f.readText())
+        assertEquals(data, l.size)
+        assertTrue(l.count { it.kind == "졸음쉼터" } > 200 && l.count { it.kind == "휴게소" } > 50)
+        assertTrue(l.all { it.at.lat in 33.0..39.0 && it.at.lng in 124.0..132.0 })
+    }
+
+    @Test fun 급해요는_화장실_없는_더_가까운_졸음쉼터를_건너뛴다() {
+        val near = RestStop("가까운", LatLng(37.20, 127.0), false, "졸음쉼터"); val far = RestStop("먼휴게소", LatLng(37.10, 127.0))
+        val loc = LatLng(37.25, 127.0); val dest = LatLng(36.5, 127.0)
+        assertEquals("가까운", nearestRestStop(loc, dest, listOf(near, far))!!.name)                    // S2는 졸음쉼터도
+        assertEquals("먼휴게소", nearestRestStop(loc, dest, listOf(near, far), toiletOnly = true)!!.name) // Q3는 화장실 있는 곳만
+        assertEquals(null, nearestRestStop(loc, dest, listOf(near), toiletOnly = true))
+        assertEquals("가장 가까운 가까운 졸음쉼터를 경유지로 넣었어요", restStopSpeech(near, true))
+        assertEquals("가장 가까운 오창졸음쉼터로 길 안내를 시작해요", restStopSpeech(RestStop("오창졸음쉼터", near.at, true, "졸음쉼터"), false)) // 이름에 있으면 중복 X
     }
 
     @Test fun 짧은_P는_같은_운전() {
@@ -183,7 +213,8 @@ class DriveTest {
         assertTrue(urgentNeed("급해요")); assertTrue(urgentNeed("나 급해")); assertTrue(urgentNeed("화장실 가고 싶어"))
         assertFalse(urgentNeed("급한 전화")); assertFalse(urgentNeed("답장, 급해서 못 받는다고 해줘"))
         assertFalse(urgentNeed(null)); assertFalse(urgentNeed("응"))
-        val stop = nearestRestStop(LatLng(37.30, 127.10), LatLng(36.5, 127.3))!!  // 죽전은 지나온 곳(목적지에서 더 멀다), 기흥이 앞쪽 가장 가까운 곳
+        val demo = listOf(RestStop("죽전휴게소", LatLng(37.3290, 127.1040)), RestStop("기흥휴게소", LatLng(37.2363, 127.0938)))
+        val stop = nearestRestStop(LatLng(37.30, 127.10), LatLng(36.5, 127.3), demo)!!  // 죽전은 지나온 곳(목적지에서 더 멀다), 기흥이 앞쪽 가장 가까운 곳
         assertEquals("기흥휴게소", stop.name)
         assertEquals("가장 가까운 기흥휴게소를 경유지로 넣었어요", restStopSpeech(stop, true))
         assertEquals("가장 가까운 기흥휴게소로 길 안내를 시작해요", restStopSpeech(stop, false))

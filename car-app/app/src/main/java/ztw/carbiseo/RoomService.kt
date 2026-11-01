@@ -188,7 +188,7 @@ class RoomService : Service() {
         listening = false
         val p = pending; pending = Ask.NONE
         // Q3: 운전 중 '급해요/화장실'은 어느 대답 대기에서든 먼저 본다(상시 듣기는 없다 — 듣는 중이거나 디버그 SAY일 때만 들어온다)
-        if (urgentNeed(said) && machine.room.let { it != null && it != Room.PARK }) { talk.cancel(); askStep = talk.step; return addRestStop(true) }
+        if (urgentNeed(said) && machine.room.let { it != null && it != Room.PARK }) { talk.cancel(); askStep = talk.step; return addRestStop(true, true) }
         when (p) {
             // Q1 조용한 비서: 못 알아들으면 한 번만 다시 묻고, 그다음은 화면 2택(unsure). 번호를 알면 초안을 읽어 주고 "이대로 보낼까요?"(SEND). 모르면 지금처럼 카드만.
             Ask.LATE, Ask.RESERVE, Ask.CALLBACK, Ask.SEND, Ask.REST -> when (voiceCmd(said)) {
@@ -199,7 +199,7 @@ class RoomService : Service() {
             }
             // F5: [말하기] 뒤 한 마디. 못 알아들으면 "다시 말씀해 주세요" 한 번만, 그다음은 화면 2택(주행 중엔 그냥 끝).
             Ask.INTENT -> when (carIntent(said)) {
-                CarIntent.URGENT -> addRestStop(true)
+                CarIntent.URGENT -> addRestStop(true, true)
                 CarIntent.RECENT_CALLS -> say(recentCallsSpeech(cards()))
                 CarIntent.NEXT_EVENT -> say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis())))
                 CarIntent.UNKNOWN -> unsure(p, "아까 전화" to { say(recentCallsSpeech(cards())) }, "다음 일정" to { say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis()))) }, {}, "어떤 걸 알려 드릴까요?")
@@ -362,6 +362,7 @@ class RoomService : Service() {
             .createNotificationChannel(NotificationChannel(CH, "내비서", NotificationManager.IMPORTANCE_LOW))
         val n = notification(room)
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(1, n)
+        net.execute { restStops = runCatching { assets.open("reststops.tsv").bufferedReader().use { parseRestStops(it.readText()) } }.onFailure { Log.w("ROOM", "reststops FAIL $it") }.getOrDefault(emptyList()) } // 실패하면 빈 목록 = 내비 검색 폴백
         net.execute { // 첫 SharedPreferences 로드는 디스크 읽기 → 메인 밖에서
             val p = getSharedPreferences("car_ui", MODE_PRIVATE)
             val r = p.getInt("rest_min", REST_DEFAULT_MIN).takeIf { m -> m != 1 } ?: REST_DEFAULT_MIN
@@ -542,11 +543,11 @@ class RoomService : Service() {
     }
 
     /** S2 버튼: 경로상 앞쪽 휴게소를 첫 경유지로. 목적지가 없으면 그 휴게소로 경로를 연다. */
-    private fun addRestStop(speak: Boolean = false) {
+    private fun addRestStop(speak: Boolean = false, toiletOnly: Boolean = false) {
         restOffer = false
         val s = machine.signals
         val n = adapters.navi ?: return
-        val stop = nearestRestStop(s.location, s.destination)
+        val stop = nearestRestStop(s.location, s.destination, toiletOnly = toiletOnly)
         if (stop == null) { // H11: 앞쪽 휴게소를 모르면 경유지를 넣지 않고 내비 장소 검색을 연다(지나온 곳으로 유턴 방지)
             Log.i("ROOM", "rest stop none ahead -> navi search")
             runCatching { n.requestNavigationScreen(NavigationScreenRequest.SearchPlace("휴게소")) }.onFailure { Log.w("ROOM", "navi search FAIL $it") }

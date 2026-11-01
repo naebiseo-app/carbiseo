@@ -90,29 +90,34 @@ fun nextEventSpeech(e: Event?, zone: java.time.ZoneId = java.time.ZoneId.systemD
     if (e == null) "다음 일정이 없어요" else "다음 일정은 ${koTime(e.start, zone)} ${e.title}${if (e.place.isNotBlank()) ", ${e.place}" else ""}이에요"
 
 /** 휴게소를 넣은 뒤 한 문장. 목적지가 없으면 그 휴게소가 곧 목적지. */
-fun restStopSpeech(stop: RestStop, waypoint: Boolean) =
-    if (waypoint) "가장 가까운 ${stop.name}를 경유지로 넣었어요" else "가장 가까운 ${stop.name}로 길 안내를 시작해요"
+fun restStopSpeech(stop: RestStop, waypoint: Boolean): String {
+    val n = if (stop.kind == "졸음쉼터" && "졸음쉼터" !in stop.name) "${stop.name} 졸음쉼터" else stop.name
+    return if (waypoint) "가장 가까운 ${n}를 경유지로 넣었어요" else "가장 가까운 ${n}로 길 안내를 시작해요"
+}
 
-data class RestStop(val name: String, val at: LatLng)
+data class RestStop(val name: String, val at: LatLng, val toilet: Boolean = true, val kind: String = "휴게소")
 
-// NaviHelper 3.0.5에 장소 검색 API가 없어(javap: 경로·경유지·북마크·최근 목적지뿐) 데모 좌표를 앱에 둔다.
-// ponytail: 경부선 휴게소 몇 곳, 근사 좌표. 실서비스는 공공데이터 휴게소·졸음쉼터 목록으로 교체.
-val REST_STOPS = listOf(
-    RestStop("서울만남의광장휴게소", LatLng(37.4598, 127.0416)),
-    RestStop("죽전휴게소", LatLng(37.3290, 127.1040)),
-    RestStop("기흥휴게소", LatLng(37.2363, 127.0938)),
-    RestStop("안성휴게소", LatLng(37.0098, 127.2091)),
-)
+/** assets/reststops.tsv(탭 구분: 종류·이름·위도·경도·화장실 1|0) 파싱. #주석·빈 줄·좌표 없는/깨진 행은 버린다. */
+fun parseRestStops(text: String): List<RestStop> = text.lines().mapNotNull { l ->
+    if (l.isBlank() || l.startsWith("#")) return@mapNotNull null
+    val f = l.trimEnd('\r').split('\t')
+    val la = f.getOrNull(2)?.toDoubleOrNull(); val lo = f.getOrNull(3)?.toDoubleOrNull()
+    if (la == null || lo == null || f[1].isBlank()) null else RestStop(f[1], LatLng(la, lo), f.getOrNull(4) == "1", f[0])
+}
+
+// 공공데이터 졸음쉼터·휴게소 목록은 서비스가 IO에서 1회 읽어 넣는다. 실패하면 빈 목록 = 늘 '내비 휴게소 검색' 폴백.
+// (NaviHelper 3.0.5에는 장소 검색 API가 없어 목록을 앱에 둔다.)
+@Volatile var restStops: List<RestStop> = emptyList()
 
 const val REST_STOP_MAX_M = 40_000.0
 
 /**
  * H11: 앞쪽(지금보다 목적지에 가까운 곳)이고 40km 안인 휴게소 중 가장 가까운 것. 지나온 곳은 절대 고르지 않는다(유턴 경로 방지).
- * 목적지가 없으면 진행 방향을 몰라 null. null이면 호출자가 내비 장소 검색 화면을 연다.
+ * toiletOnly(Q3 급해요)면 화장실 있는 곳만. 목적지가 없으면 진행 방향을 몰라 null. null이면 호출자가 내비 장소 검색 화면을 연다.
  */
-fun nearestRestStop(loc: LatLng?, dest: LatLng?, stops: List<RestStop> = REST_STOPS): RestStop? {
+fun nearestRestStop(loc: LatLng?, dest: LatLng?, stops: List<RestStop> = restStops, toiletOnly: Boolean = false): RestStop? {
     if (loc == null || dest == null) return null
-    return stops.filter { distanceM(it.at, dest) < distanceM(loc, dest) && distanceM(loc, it.at) <= REST_STOP_MAX_M }.minByOrNull { distanceM(loc, it.at) }
+    return stops.filter { (it.toilet || !toiletOnly) &&  distanceM(it.at, dest) < distanceM(loc, dest) && distanceM(loc, it.at) <= REST_STOP_MAX_M }.minByOrNull { distanceM(loc, it.at) }
 }
 
 /** M4: 이보다 짧은 P(신호대기·드라이브스루)는 같은 운전으로 본다 — 방 선언·휴식/피로 타이머를 리셋하지 않는다. */
