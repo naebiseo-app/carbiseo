@@ -275,11 +275,12 @@ private fun Note(i: InboxItem, selected: Boolean, onTap: () -> Unit) {
                 OutlinedButton(onTap, Tall) { Text("문자", color = ParkInk, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
             }
         }
-        // F3: 처리한 통화·할 일은 [완료]로 목록·건수에서 뺀다(재시작해도 유지)
+        // F3: 처리한 통화·할 일은 [완료]로 목록·건수에서 뺀다(재시작해도 유지). H2: [내일 아침에]는 오늘만 숨기고 다음 날 첫 업무 운전 때 출근길 이월에 넣는다
         if (i.kind == "call" || i.kind == "task") {
             val ctx = LocalContext.current
             Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton({ RoomService.markCardDone(ctx, i.id) }, Tall) { Text("완료", color = ParkInk, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+                OutlinedButton({ RoomService.snooze(ctx, i.id) }, Tall) { Text("내일 아침에", color = ParkInk, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
             }
         }
     }

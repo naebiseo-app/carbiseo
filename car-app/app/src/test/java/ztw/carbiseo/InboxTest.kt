@@ -182,4 +182,16 @@ class InboxTest {
         assertNull(parkReminder(shown, emptySet()))          // 완료한 급한 전화는 정차 알림에서도 빠진다
         assertEquals(l, hideCards(l, emptySet()))
     }
+
+    @Test fun 내일_아침에는_그날만_숨기고_다음날_출근길_이월에_든다() {
+        val mon = 20_000L
+        val l = listOf(item(1, urgent = true), item(2))
+        val (d, z, s) = snoozeCard(emptyMap(), emptyMap(), setOf(1L), 1L, mon)   // 이미 열어 본 카드도
+        assertEquals(listOf(2L), hideCards(l, emptySet(), z, mon).map { it.id })   // 미룬 날엔 숨김
+        assertEquals(listOf(1L, 2L), hideCards(l, emptySet(), z, mon + 1).map { it.id }) // 다음 날엔 다시 보임
+        assertEquals(emptyList<Long>(), carryOver(l, d, s, mon).map { it.id })     // 당일엔 아직 이월 아님
+        assertEquals(listOf(1L), carryOver(l, d, s, mon + 1).map { it.id })        // 다음 업무 운전 때 이월
+        assertEquals(mapOf(1L to mon), decodeDeferred(encodeDeferred(z)))          // prefs 왕복
+        assertEquals(emptyList<Long>(), hideCards(l, setOf(1L, 2L), z, mon + 1).map { it.id }) // 완료가 우선
+    }
 }

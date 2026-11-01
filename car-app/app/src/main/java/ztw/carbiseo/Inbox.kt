@@ -52,8 +52,14 @@ val SHOWN_KINDS = setOf("call", "hint", "task", "sent", "notif")
 /** 확인할 건수: 아직 안 연 카드(보낸 문자 제외). */
 fun todo(items: List<InboxItem>, seen: Set<Long>) = items.count { it.kind != "sent" && it.id !in seen }
 
-/** F3: [완료]한 카드는 목록·건수에서 뺀다. */
-fun hideCards(items: List<InboxItem>, done: Set<Long>): List<InboxItem> = items.filter { it.id !in done }
+/** F3: [완료]한 카드와 H2: 오늘 [내일 아침에]로 미룬 카드(snoozed id -> 미룬 날)는 목록·건수에서 뺀다. */
+fun hideCards(items: List<InboxItem>, done: Set<Long>, snoozed: Map<Long, Long> = emptyMap(), today: Long = 0): List<InboxItem> =
+    items.filter { it.id !in done && snoozed[it.id] != today }
+
+/** H2: [내일 아침에] -> (deferred, snoozed, seen). 넘긴 건(deferred)에 오늘 날짜로 넣어 다음 날 첫 업무 운전의 출근길 이월(carryOver)에 들어가고,
+ *  본 카드였어도 이월에 들게 seen에서 뺀다. 미룬 날(snoozed)엔 목록에서 숨긴다. */
+fun snoozeCard(deferred: Map<Long, Long>, snoozed: Map<Long, Long>, seen: Set<Long>, id: Long, today: Long) =
+    Triple(deferred + (id to today), snoozed + (id to today), seen - id)
 
 /** 보낸 문자 카드 상태 한 줄. 국외 IP 차단은 숨기지 않고 그대로 알린다. */
 fun sentStatus(i: InboxItem) = when {

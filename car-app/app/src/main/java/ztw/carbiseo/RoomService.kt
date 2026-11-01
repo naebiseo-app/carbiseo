@@ -264,12 +264,13 @@ class RoomService : Service() {
             // H9: 동승자 모드는 저장하지 않는다(이번 운전만). M5·H7: 본 카드·넘긴 건은 재시작해도 유지.
             val sn = p.getString("seen", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
             val nd = p.getString("notif_done", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
+            val sz = decodeDeferred(p.getString("snoozed", ""))
             val cd = p.getString("card_done", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
             val df = decodeDeferred(p.getString("deferred", "")); val fw = p.getBoolean("forward_ok", false)
             val fv = p.getString("fav_senders", "").orEmpty(); ui.post { favs = parseFavs(fv) }
             val fd = p.getLong("family_day", -1); ui.post { familyDay = fd }
             val sd = p.getBoolean("setup_done", false); val md = p.getString("mode", "ai") ?: "ai"; val bd = p.getLong("brief_day", -1)
-            ui.post { restMin = r; seen = sn + seen; notifDone = nd + notifDone; cardDone = cd + cardDone; deferred = df + deferred; forwardOk = forwardOk || fw; setupDone = sd; mode = md; briefDay = bd }
+            ui.post { restMin = r; seen = sn + seen; notifDone = nd + notifDone; cardDone = cd + cardDone; snoozed = sz + snoozed; deferred = df + deferred; forwardOk = forwardOk || fw; setupDone = sd; mode = md; briefDay = bd }
         }
         latch = AlertLatch(Clock.systemDefaultZone())
         machine = RoomStateMachine(clock) // settings = 기본 상수. 설정 화면이 machine.settings를 덮어쓴다.
@@ -510,8 +511,15 @@ class RoomService : Service() {
             val s = cardDone.sorted().takeLast(300).joinToString(",")
             save(c) { putString("card_done", s) }
         }
-        /** 화면·건수·정차 알림이 보는 카드 목록: 읽어 준 알림과 [완료]한 카드를 뺀 것. */
-        fun cards(): List<InboxItem> = hideCards(unread(inbox, notifDone), cardDone)
+        var snoozed by mutableStateOf(mapOf<Long, Long>()); private set // H2: [내일 아침에] 카드 id -> 미룬 날(그날만 숨김). prefs 저장
+        fun snooze(c: Context, id: Long) {
+            val (d, z, s) = snoozeCard(deferred, snoozed, seen, id, LocalDate.now(clock).toEpochDay())
+            deferred = d; snoozed = z; seen = s
+            val ds = encodeDeferred(d); val zs = encodeDeferred(z); val ss = s.sorted().takeLast(300).joinToString(",")
+            save(c) { putString("deferred", ds).putString("snoozed", zs).putString("seen", ss) }
+        }
+        /** 화면·건수·정차 알림이 보는 카드 목록: 읽어 준 알림·[완료]한 카드·오늘 미룬 카드를 뺀 것. */
+        fun cards(): List<InboxItem> = hideCards(unread(inbox, notifDone), cardDone, snoozed, LocalDate.now(clock).toEpochDay())
         fun confirmForward(c: Context) { forwardOk = true; save(c) { putBoolean("forward_ok", true) } }
         fun finishSetup(c: Context) { setupDone = true; save(c) { putBoolean("setup_done", true) } }
         fun reopenSetup(c: Context) { setupDone = false; save(c) { putBoolean("setup_done", false) } }
