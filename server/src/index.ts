@@ -93,7 +93,9 @@ export async function reportCall(env: Env, a: Record<string, unknown>): Promise<
   const from = callerNumber(ring?.raw ?? "");
   if (sameNumber(from, env.OWNER_NUMBER) && !(await kvGet(env.DB, "owner_as_guest"))) return "ok"; // 주인 통화는 기존 할 일 경로
   const summary = (s("summary", 300) || [s("caller", 100), s("purpose", 200)].filter(Boolean).join(", ")).slice(0, 300);
-  await saveCallCard(env.DB, { call_id: id, ...fromCols(from), summary, urgent: a.urgent === true || isUrgent(summary) ? 1 : 0 },
+  // 카드 이름표는 AI가 확인받은 이름(없으면 끝번호) → 아는 번호 확인·"문자 먼저 보낼까요"·낭독이 이름을 쓴다
+  const cols = fromCols(from); const who = s("caller", 40).replace(/["'`{}]/g, "");
+  await saveCallCard(env.DB, { call_id: id, ...cols, from_label: who || cols.from_label, summary, urgent: a.urgent === true || isUrgent(summary) ? 1 : 0 },
     { via: "mcp", caller: s("caller", 100), purpose: s("purpose", 200), callback_by: s("callback_by", 50) }, from);
   console.log("report_call", id);
   return "ok";

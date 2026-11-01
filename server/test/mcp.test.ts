@@ -68,7 +68,7 @@ test("report_call → 카드 1장, 뒤에 온 summary.completed는 건너뜀", a
   const c = cards(env);
   assert.equal(c.length, 1);
   assert.equal(c[0].summary, "한빛물산 김민수, 견적 회신 급히 요청");
-  assert.equal(c[0].from_label, "끝번호 6789");
+  assert.equal(c[0].from_label, "한빛물산 김민수");
   assert.equal(c[0].from_number, GUEST);
   assert.equal(c[0].urgent, 1); // 입력 false여도 요약에 '급히'
   assert.equal(c[0].status, "summarized");
