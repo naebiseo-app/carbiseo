@@ -15,6 +15,7 @@ data class InboxItem(
     val fromNumber: String = "", // H15 회신용 전체 번호(화면엔 끝 4자리만). 30일 보관 후 행째 삭제
     val app: String = "", val replyable: Boolean = false, // notif: 폰 알림 앱 이름·답장 가능
     val direct: Boolean = false, // 서버 바로 연결 목록에 있는 발신자(meta.direct). 쉼·피로 중에도 읽는다
+    val replaces: Long = 0L, // meta.replaces: 이 요약 카드가 대신하는 '전화 왔어요'(ringing) 카드 id. 0 = 없음
 )
 
 /**
@@ -79,6 +80,17 @@ fun taskDraft(text: String): Pair<String, String> {
 fun mailDraft(text: String): Triple<String, String, String>? {
     val p = Regex("""메일\s*[:：]\s*(.+)""").find(text)?.groupValues?.get(1)?.split(" / ", limit = 3)?.map { it.trim() } ?: return null
     return if (p.size == 3 && p[0].isNotEmpty() && p[2].isNotEmpty()) Triple(p[0], p[1], p[2]) else null
+}
+
+/** 서버가 ringing 카드를 요약 카드로 교체한 항목들이 가리키는 옛 카드 id들. 차는 이 카드를 inbox·callFresh·seen 등에서 뺀다. */
+fun replacedIds(items: List<InboxItem>): Set<Long> = items.mapNotNull { it.replaces.takeIf { r -> r > 0 } }.toSet()
+
+/** 교체 요약 카드는 일반 새 전화 문장(speechFor·directSpeech)으로 다시 읽지 않고, 업무·쉼 운전 중에만 "○○님 전화 요약: …" 한 문장씩(최대 3). 끔 모드·정차·판정 전은 카드만. */
+fun replaceSpeech(items: List<InboxItem>, room: Room?, mode: String = "ai"): String? {
+    if (mode == "off" || (room != Room.DRIVE_WORK && room != Room.DRIVE_REST)) return null
+    val d = items.filter { it.kind == "call" && it.replaces > 0 && it.summary.isNotBlank() }.distinctBy { it.id }.take(3)
+    if (d.isEmpty()) return null
+    return sentences(*d.map { "${if (it.fromLabel.isBlank()) "알 수 없는 번호" else "${it.fromLabel}님"} 전화 요약: ${firstSentence(it.summary)}" }.toTypedArray())
 }
 
 /** 서버에서 지워진 카드(관리자 inbox 비우기·30일 삭제)는 차에서도 뺀다. minId: 서버 최소 id(비었으면 Long.MAX_VALUE), null = 모름 → 그대로. */

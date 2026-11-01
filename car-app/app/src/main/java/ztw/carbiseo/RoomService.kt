@@ -107,10 +107,18 @@ class RoomService : Service() {
     }
 
     private fun onInbox(fetched: List<InboxItem>) {
-        val fresh = fetched.filter { it.id > since }
+        val got = fetched.filter { it.id > since }
         val initial = firstPoll; firstPoll = false
-        since = nextSince(since, fresh)
-        if (fresh.isEmpty()) return
+        since = nextSince(since, got)
+        if (got.isEmpty()) return
+        // 서버가 '전화 왔어요'(ringing) 카드를 요약 카드로 교체: 옛 카드는 목록·새 통화·본 카드·넘긴 건에서 뺀다(새 카드는 따로 새로 들어온다)
+        val rep = replacedIds(got)
+        if (rep.isNotEmpty()) {
+            inbox = inbox.filter { it.id !in rep }; callFresh -= rep; callbackAsked -= rep; seen = seen - rep
+            if (deferred.keys.any { it in rep }) { deferred = deferred - rep; val s = encodeDeferred(deferred); net.execute { prefs.edit().putString("deferred", s).apply() } }
+            Log.i("ROOM", "replaced ringing cards $rep")
+        }
+        val fresh = got.filter { it.id !in rep }
         if (fresh.any { it.kind == "ring" }) markForwarded() // 실제 착신 통화가 서버에 왔다 = 착신 설정 완료
         val off = machine.room == Room.DRIVE_REST || offDuty(LocalDateTime.now(clock), machine.settings)
         deferNew(fresh, initial, off, today(), machine.settings).takeIf { it.isNotEmpty() }?.let { d ->
@@ -121,8 +129,10 @@ class RoomService : Service() {
         Log.i("ROOM", "inbox ${if (initial) "initial" else "new"} ${fresh.size}")
         // 피로 모드면 음성 없이 보관만(카드는 쌓인다). 바로 연결(급함·direct) 전화만 예외로 한 줄(조작·경고·통화 중 보류는 say가 그대로 적용)
         if (!initial && !passenger) {
-            if (fatigued(machine.room, tripMin())) directSpeech(fresh, mode)?.let(::say)
-            else hold.offerItems(fresh, machine.room, quiet)?.let { speaker.speak(it) }
+            val plain = fresh.filter { it.replaces == 0L } // 교체 요약 카드는 같은 바로 연결 전화를 다시 알리지 않는다
+            if (fatigued(machine.room, tripMin())) directSpeech(plain, mode)?.let(::say)
+            else hold.offerItems(plain, machine.room, quiet)?.let { speaker.speak(it) }
+            replaceSpeech(fresh, machine.room, mode)?.let(::say) // 요약만 한 번
         }
         if (!initial) callFresh += fresh.filter { it.kind == "call" }.map { it.id }
         if (!initial) fresh.filter { it.kind == "notif" }.let { n -> notifFresh += n.map { it.id }; notifQueue += notifNow(n.sortedBy { it.id }, machine.room, favs, off) } // 도착 순(서버는 최신순)

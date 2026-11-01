@@ -204,4 +204,20 @@ class InboxTest {
         assertEquals(emptyList<InboxItem>(), decodeLocalTasks("")); assertEquals(emptyList<InboxItem>(), decodeLocalTasks(null))
         assertEquals(30, decodeLocalTasks(encodeLocalTasks((1..40L).map { a.copy(id = LOCAL_ID_BASE + it) })).size)
     }
+
+    @Test fun ringing_카드를_요약_카드로_교체하면_옛_id를_뽑고_같은_전화를_다시_알리지_않는다() {
+        val ring = item(5, label = "김부장", summary = "전화 왔어요").copy(direct = true)
+        val sum = item(7, label = "김부장", summary = "견적 보내 달라고 하세요. 급하진 않아요.").copy(direct = true, replaces = 5)
+        val other = item(8, label = "박대리", summary = "회의 끝나면 연락 부탁")
+        assertEquals(setOf(5L), replacedIds(listOf(other, sum)))
+        assertEquals(emptySet<Long>(), replacedIds(listOf(ring, other)))
+        // 교체 카드는 일반 새 전화 문장에서 빠지고(호출자가 replaces==0만 넘긴다), 요약 한 문장만 낸다
+        assertEquals("김부장님 전화 요약: 견적 보내 달라고 하세요.", replaceSpeech(listOf(sum, other), Room.DRIVE_WORK))
+        assertEquals("김부장님 전화 요약: 견적 보내 달라고 하세요.", replaceSpeech(listOf(sum), Room.DRIVE_REST))
+        assertNull(replaceSpeech(listOf(sum), Room.PARK)); assertNull(replaceSpeech(listOf(sum), null))
+        assertNull(replaceSpeech(listOf(sum), Room.DRIVE_WORK, "off"))
+        assertNull(replaceSpeech(listOf(other, ring), Room.DRIVE_WORK))                 // 교체가 아닌 카드는 해당 없음
+        assertNull(replaceSpeech(listOf(sum.copy(summary = " ")), Room.DRIVE_WORK))      // 요약이 비면 말할 게 없다
+        assertEquals("박대리님 전화, 용건 회의 끝나면 연락 부탁.".let { "바로 연결: $it" }, directSpeech(listOf(other.copy(direct = true), sum).filter { it.replaces == 0L }))
+    }
 }
