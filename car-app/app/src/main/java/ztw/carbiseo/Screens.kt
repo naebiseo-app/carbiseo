@@ -408,7 +408,7 @@ private fun Sheet(i: InboxItem, onDone: () -> Unit) {
                     val code = withContext(Dispatchers.IO) { if (mail != null) Server.mail(number.trim(), subject.trim(), text.trim()) else Server.send(if (auto) i.fromLabel else "", digits, text.trim()) }
                     busy = false
                     toast(ctx, when (code) { "ok" -> "보냈어요"; null -> "서버 연결 실패 — 다시 시도해 주세요"; "overseas_ip_blocked" -> "못 보냄(서버 IP 제한)"; else -> "못 보냄($code)" })
-                    if (code == "ok") { RoomService.dropLocal(i.id); onDone() }
+                    if (code == "ok") { RoomService.dropLocal(ctx, i.id); onDone() }
                 }
             }, Tall, enabled = !busy && (if (mail != null) number.isNotBlank() else digits.length in 9..11) && text.isNotBlank(), colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
                 Text("보내기", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)

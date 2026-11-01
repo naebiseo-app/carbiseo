@@ -232,4 +232,17 @@ class DriveTest {
         assertEquals(null, parseDirect((1..11).joinToString(",") { "0100000%04d".format(it) })) // 11개
         assertEquals(10, parseDirect((1..10).joinToString(",") { "0100000%04d".format(it) })!!.size)
     }
+
+    @Test fun 음성_발송은_번호를_알때만_초안을_읽고_확인한다() {
+        assertEquals("01012345678", sendable("010-1234-5678")); assertEquals("0212345678", sendable("02-1234-5678"))
+        assertEquals(null, sendable("")); assertEquals(null, sendable(null)); assertEquals(null, sendable("김부장")); assertEquals(null, sendable("1234"))
+        assertEquals("'운전 중이라 약 7분 늦을 것 같습니다. 죄송합니다.' 이대로 보낼까요?", sendConfirmSpeech("운전 중이라 약 7분 늦을 것 같습니다. 죄송합니다."))
+        // F4: 서버가 contact_number를 주면 그 번호가 초안 번호가 된다(옛 contact보다 우선). 없으면 지금처럼.
+        val e = Event("거래처 미팅", 0, "곳", LatLng(37.0, 127.0), "김과장", "010-9999-8888")
+        assertEquals("01099998888" to "운전 중이라 약 7분 늦을 것 같습니다. 죄송합니다.", taskDraft(lateTask(e, 7)))
+        assertEquals("" to "운전 중이라 약 7분 늦을 것 같습니다. 죄송합니다.", taskDraft(lateTask(e.copy(contactNumber = ""), 7)))
+        assertEquals("01012345678", sendable(taskDraft(lateTask(e.copy(contactNumber = "", contact = "010-1234-5678"), 7)).first))
+        assertEquals(null, sendable(taskDraft(lateTask(e.copy(contactNumber = ""), 7)).first)) // 번호 모름 = 카드만
+        assertFalse(SEND_KEEP_SPEECH.contains("누르라")); assertTrue(SEND_FAIL_SPEECH.contains("할 일"))
+    }
 }

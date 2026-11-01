@@ -194,4 +194,14 @@ class InboxTest {
         assertEquals(mapOf(1L to mon), decodeDeferred(encodeDeferred(z)))          // prefs 왕복
         assertEquals(emptyList<Long>(), hideCards(l, setOf(1L, 2L), z, mon + 1).map { it.id }) // 완료가 우선
     }
+
+    @Test fun 차에서_만든_할일_카드는_prefs_형식으로_왕복한다() {
+        val a = InboxItem(LOCAL_ID_BASE + 5, "내비서", "미팅 일정 지연 알림 010-1234-5678 / 내용: 7분 늦을 것 같습니다, 죄송합니다.", false, 111, "", kind = "task")
+        val b = a.copy(id = LOCAL_ID_BASE + 9, summary = "예약: 줄바꿈\n포함 : 콜론, 쉼표", createdAt = 222)
+        val server = item(3) // 서버 카드·할 일 아닌 카드는 저장하지 않는다
+        val enc = encodeLocalTasks(listOf(b, server, a))
+        assertEquals(listOf(a, b), decodeLocalTasks(enc))
+        assertEquals(emptyList<InboxItem>(), decodeLocalTasks("")); assertEquals(emptyList<InboxItem>(), decodeLocalTasks(null))
+        assertEquals(30, decodeLocalTasks(encodeLocalTasks((1..40L).map { a.copy(id = LOCAL_ID_BASE + it) })).size)
+    }
 }

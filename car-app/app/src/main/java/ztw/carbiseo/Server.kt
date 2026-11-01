@@ -108,7 +108,7 @@ object Server {
             if (c.responseCode !in 200..299) return@runCatching null
             val arr = JSONObject(c.inputStream.bufferedReader().readText()).getJSONArray("items")
             (0 until arr.length()).map { arr.getJSONObject(it) }.map {
-                Event(it.str("title"), it.getLong("start"), it.str("place"), LatLng(it.getDouble("lat"), it.getDouble("lng")), it.str("contact"))
+                Event(it.str("title"), it.getLong("start"), it.str("place"), LatLng(it.getDouble("lat"), it.getDouble("lng")), it.str("contact"), it.str("contact_number"))
             }
         } finally { c.disconnect() }
     }.getOrNull()

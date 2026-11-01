@@ -87,6 +87,14 @@ fun pruneGone(items: List<InboxItem>, minId: Long?): List<InboxItem> = if (minId
 /** 차 안에서 만든 할 일 카드(서버에 없음)의 id 시작값. 서버 id와 겹치지 않고 서버 정리(pruneGone)에 지워지지 않는다. */
 const val LOCAL_ID_BASE = Long.MAX_VALUE / 2
 
+/** F4·O4·회신 초안 할 일 카드(차 안에서 만든 것)를 prefs에 넣고 빼는 형식: "id:createdAt:본문(URL 인코딩),…". 최근 30개. */
+fun encodeLocalTasks(items: List<InboxItem>): String = items.filter { it.kind == "task" && it.id >= LOCAL_ID_BASE }.sortedBy { it.id }.takeLast(30)
+    .joinToString(",") { "${it.id}:${it.createdAt}:${java.net.URLEncoder.encode(it.summary, "UTF-8")}" }
+fun decodeLocalTasks(s: String?): List<InboxItem> = s.orEmpty().split(",").mapNotNull { e ->
+    e.split(":").takeIf { it.size == 3 }?.let { (a, b, c) -> a.toLongOrNull()?.let { id -> b.toLongOrNull()?.let { at ->
+        InboxItem(id, "내비서", java.net.URLDecoder.decode(c, "UTF-8"), false, at, "", kind = "task") } } }
+}
+
 /** 마지막으로 본 id. 항목이 없으면 그대로. */
 fun nextSince(since: Long, items: List<InboxItem>): Long = maxOf(since, items.maxOfOrNull { it.id } ?: since)
 

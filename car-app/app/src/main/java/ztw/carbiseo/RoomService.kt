@@ -74,7 +74,8 @@ class RoomService : Service() {
     private val notifFresh = mutableSetOf<Long>()
     private val notifSaid = mutableSetOf<Long>()
     // 음성으로 묻고 대답을 기다리는 질문(알림 묻기는 talk가 따로). 대답은 heard()가 받는다.
-    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK }
+    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND }
+    private class PendingSend(val label: String, val number: String, val body: String, val task: String) // 보낼 문자(label·number·body)와 못 보냈을 때 남길 할 일 본문
     private var pending = Ask.NONE
     private var lateEvent: Pair<Event, Int>? = null
     private val lateAsked = mutableSetOf<Long>() // 이미 물은 일정(start)
@@ -82,6 +83,7 @@ class RoomService : Service() {
     private val callFresh = mutableSetOf<Long>() // 이번 실행에 새로 온 통화 카드 id
     private val callbackAsked = mutableSetOf<Long>() // 문자 먼저 보낼지 이미 물은 카드(카드당 한 번)
     private var callback: Pair<InboxItem, String>? = null
+    private var sending: PendingSend? = null
     private var reserve: Pair<String, String>? = null // 예약 초안을 물은 (목적지 이름, 도착 HH:MM)
     private var forcedDest: String? = null // 디버그 ROUTE의 --es name (에뮬은 내비가 목적지 이름을 안 줄 수 있어서)
     private var familyDay = -1L // 가족에게 도착 예상을 보낸 날(하루 한 번)
@@ -143,9 +145,12 @@ class RoomService : Service() {
         // Q3: 운전 중 '급해요/화장실'은 어느 대답 대기에서든 먼저 본다(상시 듣기는 없다 — 듣는 중이거나 디버그 SAY일 때만 들어온다)
         if (urgentNeed(said) && machine.room.let { it != null && it != Room.PARK }) { talk.cancel(); askStep = talk.step; return addRestStop(true) }
         when (p) {
-            Ask.LATE -> lateEvent?.let { (ev, m) -> if (yesNo(said) == true) { addLocalTask(lateTask(ev, m)); say(LATE_DONE_SPEECH) } }
+            // 번호를 알면 초안을 읽어 주고 "이대로 보낼까요?"(SEND). 모르면 지금처럼 카드만.
+            Ask.LATE -> lateEvent?.let { (ev, m) -> if (yesNo(said) == true) lateTask(ev, m).let { t -> taskDraft(t).let { (n, b) -> sendOrCard(PendingSend("", n, b, t), LATE_DONE_SPEECH, true) } } }
             Ask.RESERVE -> reserve?.let { (n, t) -> if (yesNo(said) == true) { addLocalTask(reserveTask(n, t)); say(RESERVE_DONE_SPEECH) } }
-            Ask.CALLBACK -> callback?.let { (i, m) -> if (yesNo(said) == true) { addLocalTask(callbackTask(i, m)); say(CALLBACK_DONE_SPEECH) } }
+            // 질문이 이미 초안을 읽어 줬으니 '응'이면 바로 발송(한 번 더 묻지 않는다)
+            Ask.CALLBACK -> callback?.let { (i, m) -> if (yesNo(said) == true) sendOrCard(PendingSend(i.fromLabel, i.fromNumber, m, callbackTask(i, m)), CALLBACK_DONE_SPEECH, false) }
+            Ask.SEND -> sending?.let { s -> if (yesNo(said) == true) doSend(s) else { addLocalTask(s.task); say(SEND_KEEP_SPEECH) } }
             Ask.REST -> when (yesNo(said)) {
                 true -> addRestStop(true)
                 false -> { restSnoozeUntil = clock.millis() + REST_SNOOZE_MS; restOnce.reset(); restOffer = false }
@@ -157,6 +162,21 @@ class RoomService : Service() {
 
     private fun addLocalTask(summary: String) {
         inbox = listOf(InboxItem(LOCAL_ID_BASE + clock.millis(), "내비서", summary, false, System.currentTimeMillis(), "", kind = "task")) + inbox
+        saveLocalTasks(this) // 재시작해도 남게
+    }
+
+    /** 받는 번호를 알고 동승자 모드가 아니면 음성으로 발송(confirm이면 초안을 읽고 확인), 아니면 할 일 카드만 만들고 "정차하시면" 안내. */
+    private fun sendOrCard(s: PendingSend, doneSpeech: String, confirm: Boolean) {
+        val n = sendable(s.number)
+        if (n == null || passenger) { addLocalTask(s.task); say(doneSpeech); return }
+        val ps = PendingSend(s.label, n, s.body, s.task)
+        if (confirm && canAsk()) { sending = ps; askVoice(sendConfirmSpeech(s.body), Ask.SEND) } else if (confirm) { addLocalTask(s.task); say(doneSpeech) } else doSend(ps)
+    }
+
+    /** 기존 문자 발송 경로(Server.send). 성공하면 "보냈어요", 실패하면 카드로 남긴다. */
+    private fun doSend(s: PendingSend) = net.execute {
+        val code = Server.send(s.label, s.number, s.body); Log.i("ROOM", "voice send -> $code")
+        ui.post { if (code == "ok") say(SENT_SPEECH) else { addLocalTask(s.task); say(SEND_FAIL_SPEECH) } }
     }
 
     private fun runTurn(t: Turn) {
@@ -168,7 +188,7 @@ class RoomService : Service() {
 
     /** 음성 인식이 없고(path none) 주행 중이면 대답을 못 받으니 '나중에'(카드로 보관). */
     private fun listenNow() {
-        if (voice.path == "none") { if (!touchOk() || pending == Ask.CALLBACK) heard("나중에"); return }
+        if (voice.path == "none") { if (!touchOk() || pending == Ask.CALLBACK || pending == Ask.SEND) heard("나중에"); return }
         listening = true; voice.listen()
     }
 
@@ -265,14 +285,14 @@ class RoomService : Service() {
             // H9: 동승자 모드는 저장하지 않는다(이번 운전만). M5·H7: 본 카드·넘긴 건은 재시작해도 유지.
             val sn = p.getString("seen", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
             val nd = p.getString("notif_done", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
-            val we = p.getInt("work_end", 18)
+            val we = p.getInt("work_end", 18); val lt = decodeLocalTasks(p.getString("local_tasks", ""))
             val sz = decodeDeferred(p.getString("snoozed", ""))
             val cd = p.getString("card_done", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
             val df = decodeDeferred(p.getString("deferred", "")); val fw = p.getBoolean("forward_ok", false)
             val fv = p.getString("fav_senders", "").orEmpty(); ui.post { favs = parseFavs(fv) }
             val fd = p.getLong("family_day", -1); ui.post { familyDay = fd }
             val sd = p.getBoolean("setup_done", false); val md = p.getString("mode", "ai") ?: "ai"; val bd = p.getLong("brief_day", -1)
-            ui.post { restMin = r; workEndHour = we; seen = sn + seen; notifDone = nd + notifDone; cardDone = cd + cardDone; snoozed = sz + snoozed; deferred = df + deferred; forwardOk = forwardOk || fw; setupDone = sd; mode = md; briefDay = bd }
+            ui.post { restMin = r; workEndHour = we; inbox = (lt.filter { t -> inbox.none { it.id == t.id } } + inbox).sortedByDescending { it.id }; seen = sn + seen; notifDone = nd + notifDone; cardDone = cd + cardDone; snoozed = sz + snoozed; deferred = df + deferred; forwardOk = forwardOk || fw; setupDone = sd; mode = md; briefDay = bd }
         }
         latch = AlertLatch(Clock.systemDefaultZone())
         machine = RoomStateMachine(clock) // settings = 기본 상수. 설정 화면이 machine.settings를 덮어쓴다.
@@ -488,7 +508,8 @@ class RoomService : Service() {
         /** H9: 이번 운전만. 저장하지 않고, 30분 넘게 세운 뒤 출발하면 자동 해제. */
         fun togglePassenger(on: Boolean) { passenger = on; passengerAt = clock.millis() }
         val clock = ShiftClock() // 프로세스 공통 시각(디버그 TIME 브로드캐스트만 offset을 바꾼다)
-        fun dropLocal(id: Long) { inbox = inbox.filter { it.id != id } }
+        fun dropLocal(c: Context, id: Long) { inbox = inbox.filter { it.id != id }; saveLocalTasks(c) }
+        fun saveLocalTasks(c: Context) { val s = encodeLocalTasks(inbox); save(c) { putString("local_tasks", s) } }
         var seen by mutableStateOf(setOf<Long>()); private set // M5: 주차 화면에서 연 카드 id. prefs 저장(최근 300)
         var deferred by mutableStateOf(mapOf<Long, Long>()); private set // H7: 넘긴 통화 id -> 넘긴 날
         var forwardOk by mutableStateOf(false); private set // H13: 착신 설정 완료(사용자 체크 또는 실제 착신 1회)

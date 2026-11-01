@@ -125,7 +125,7 @@ fun readiness(offline: Boolean, forwardOk: Boolean, mode: String): String = when
 }
 
 /** F6 데모 일정 1건(서버 /car/schedule). start = epoch ms. */
-data class Event(val title: String, val start: Long, val place: String, val at: LatLng, val contact: String = "")
+data class Event(val title: String, val start: Long, val place: String, val at: LatLng, val contact: String = "", val contactNumber: String = "")
 
 /** F7: 아직 시작 안 한 일정 중 가장 이른 것. */
 fun nextEvent(events: List<Event>, nowMs: Long): Event? = events.filter { it.start > nowMs }.minByOrNull { it.start }
@@ -145,7 +145,16 @@ const val LATE_DEST_RADIUS_M = 1000.0
 fun headingTo(dest: LatLng?, e: Event): Boolean = dest != null && distanceM(dest, e.at) <= LATE_DEST_RADIUS_M
 
 /** F4: 지연 문자 초안 = 할 일 카드 본문(taskDraft 형식). 연락처가 일정에 있으면 번호로 들어간다. */
-fun lateTask(e: Event, min: Int) = "${e.title} 일정 지연 알림${if (e.contact.isNotBlank()) " ${e.contact}" else ""} / 내용: 운전 중이라 약 ${min}분 늦을 것 같습니다. 죄송합니다."
+fun lateTask(e: Event, min: Int) = "${e.title} 일정 지연 알림${e.contactNumber.ifBlank { e.contact }.let { if (it.isNotBlank()) " $it" else "" }} / 내용: 운전 중이라 약 ${min}분 늦을 것 같습니다. 죄송합니다."
+
+/** 문자 음성 발송: 번호가 9~11자리 숫자일 때만 숫자만 돌려준다(보내기 시트와 같은 기준). 아니면 null = 카드만. */
+fun sendable(number: String?): String? = number.orEmpty().filter(Char::isDigit).takeIf { it.length in 9..11 }
+
+/** 초안을 읽어 주고 확인받는 문장. */
+fun sendConfirmSpeech(body: String) = "'$body' 이대로 보낼까요?"
+const val SENT_SPEECH = "보냈어요"
+const val SEND_FAIL_SPEECH = "문자를 못 보냈어요. 할 일에 남겨 뒀어요"
+const val SEND_KEEP_SPEECH = "할 일에 남겨 뒀어요. 정차하시면 보내기 버튼을 눌러 주세요"
 
 /** O4 예약 대행: 목적지 이름이 식당·주차장류인가. 이름을 모르면 false. */
 private val RESERVE_NAME = Regex("식당|맛집|카페|레스토랑|주차장|파킹|한정식|횟집|고기")
