@@ -76,11 +76,16 @@ type Card = ReturnType<typeof fromCols> & { call_id: string; summary: string; ur
 // 같은 통화의 카드는 1장만: 웹훅 재전송, report_call 뒤 오는 summary.completed는 건너뛴다
 // ponytail: 칩은 카드 만든 시점의 차량 맥락. 정확히 하려면 call-context 때 값을 ring meta에 남겨 call_id로 잇기
 // from = 발신번호 원문. 바로 연결 목록(settings.direct_numbers)에 있으면 urgent=1·meta.direct (차는 피로·퇴근 중에도 읽음)
-async function saveCallCard(db: D1Database, c: Card, extra: object = {}, from = "") {
+async function saveCallCard(db: D1Database, c: Card, extra: object = {}, from = "", status = "summarized") {
   const cc = await kvGet(db, "car_context");
   if (isDirect((await kvGet(db, "settings"))?.direct_numbers, from)) { c = { ...c, urgent: 1 }; extra = { ...extra, direct: true }; }
-  await db.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,from_number,summary,urgent,created_at,meta) SELECT 'call','summarized',?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='call' AND call_id=?)")
-    .bind(parseRoom(cc?.room) ?? null, c.call_id, c.from_label, c.from_number, c.summary, c.urgent, now(), JSON.stringify({ car: carChip(cc, now()), ...extra }), c.call_id).run();
+  const meta = JSON.stringify({ car: carChip(cc, now()), ...extra });
+  // 바로 연결 번호는 전화 오는 순간 status='ringing' 카드가 먼저 있다 → 요약이 오면 그 행을 채워 summarized로(차는 id>since라 이 변경을 다시 받지 않는다)
+  if (status === "summarized")
+    await db.prepare("UPDATE inbox SET status='summarized', from_label=?, from_number=COALESCE(?,from_number), summary=COALESCE(NULLIF(?,''),summary), urgent=?, meta=? WHERE kind='call' AND call_id=? AND status='ringing'")
+      .bind(c.from_label, c.from_number, c.summary, c.urgent, meta, c.call_id).run();
+  await db.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,from_number,summary,urgent,created_at,meta) SELECT 'call',?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='call' AND call_id=?)")
+    .bind(status, parseRoom(cc?.room) ?? null, c.call_id, c.from_label, c.from_number, c.summary, c.urgent, now(), meta, c.call_id).run();
 }
 
 // MCP report_call: AI가 끝맺음 직전에 요약을 보낸다 → 끊는 순간 카드. 결과 "ok" 또는 오류 문구.
@@ -326,6 +331,11 @@ export default {
         ctx?.waitUntil(new Promise((ok) => setTimeout(ok, HANGUP_MS)).then(() => fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls/${callId}`,
           { method: "POST", headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ Status: "completed" }) }))
           .then((r) => console.log("ment hangup", r.status)).catch((e) => console.log("ment hangup error", String(e))));
+      // 바로 연결 번호: 통화 중에도 차가 알도록 지금 카드(ringing). 요약이 오면 saveCallCard가 같은 행을 채운다
+      if (direct && CALL_ID.test(callId)) {
+        const from = callerNumber(raw);
+        await saveCallCard(env.DB, { call_id: callId, ...fromCols(from), summary: "바로 연결 번호에서 전화가 왔어요", urgent: 1 }, {}, from, "ringing").catch((e) => console.log("direct ring card error", String(e)));
+      }
       const dl = direct && mode === "ai" ? ` 이 분은 ${owner ?? "주인"}님이 바로 연결 목록에 넣은 분입니다. 용건만 짧게 듣고 '바로 전해 드리겠습니다'로 끝냅니다.` : ""; // ment·off는 대화가 없어 생략
       return json({ CallContext: { Instruction: s.instruction + dl + report, Variables: { room: s.room ?? "UNKNOWN", car: carChip(cc, now()), ...(direct ? { direct: "1" } : {}) } } });
     }

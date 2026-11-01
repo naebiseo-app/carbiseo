@@ -96,3 +96,22 @@ test("ment_text: 저장·따옴표 괄호 제거·ment 대본 반영·빈 값이
   assert.equal((await settings(env, { ment_text: "" })).status, 200);
   assert.ok((await ring(env, OTHER)).Instruction.includes("운전 중이라 전화를 받을 수 없습니다."));
 });
+
+test("바로 연결: 전화 오는 순간 ringing 카드, 요약이 오면 같은 행을 채워 summarized", async () => {
+  const env = mkEnv();
+  await settings(env, { direct_numbers: [VIP] });
+  await ring(env, OTHER, CID2);
+  assert.equal(cards(env).length, 0); // 목록 밖 번호는 요약 전 카드 없음
+  await ring(env, VIP);
+  await ring(env, VIP); // 재전송돼도 1장
+  let c = cards(env);
+  assert.equal(c.length, 1);
+  assert.deepEqual([c[0].status, c[0].urgent, c[0].call_id, c[0].summary, JSON.parse(c[0].meta).direct], ["ringing", 1, CID, "바로 연결 번호에서 전화가 왔어요", true]);
+  const id = c[0].id;
+  await report(env, { call_id: CID, caller: "김민수", summary: "견적 문의" });
+  c = cards(env);
+  assert.equal(c.length, 1);
+  assert.deepEqual([c[0].id, c[0].status, c[0].urgent, c[0].summary, c[0].from_label, JSON.parse(c[0].meta).via], [id, "summarized", 1, "견적 문의", "김민수", "mcp"]);
+  await report(env, { call_id: CID, summary: "다른 요약" }); // 이미 summarized면 건너뜀
+  assert.equal(cards(env)[0].summary, "견적 문의");
+});
