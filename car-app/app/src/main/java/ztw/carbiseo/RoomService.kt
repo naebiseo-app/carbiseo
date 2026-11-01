@@ -92,6 +92,8 @@ class RoomService : Service() {
     private var forcedDest: String? = null // 디버그 ROUTE의 --es name (에뮬은 내비가 목적지 이름을 안 줄 수 있어서)
     private var familyDay = -1L // 가족에게 도착 예상을 보낸 날(하루 한 번)
     private var restSnoozeUntil = 0L // 휴식 제안에 '아니'라고 한 뒤 30분(시뮬 시각)
+    private var replayRun: ReplayRun? = null // O3 재현 통화 진행 중(= 통화 중 상태). 메인 스레드에서만
+    private var replayAt = 0L // 대본을 받은 시각(SystemClock.elapsedRealtime)
 
     // 단일 스케줄러: 이전 폴링이 끝난 뒤에만 다음을 예약한다(느린 서버에서 요청이 쌓여 카드가 늦게 뜨는 것 방지, L2).
     // 상태 전송·문자 발송과 줄 서지 않게 폴링만 따로 한 스레드(pollNet)에서 돈다.
@@ -131,6 +133,8 @@ class RoomService : Service() {
             Log.i("ROOM", "replaced ringing cards $rep")
         }
         val fresh = got.filter { it.id !in rep }
+        // O3 재현 통화: 서버가 내린 대본(kind=replay, 화면엔 안 보임). 재시작 직후 첫 폴링의 옛 대본은 재생하지 않는다.
+        if (!initial) fresh.filter { it.kind == "replay" }.maxByOrNull { it.id }?.let { r -> parseReplay(r.raw)?.let { startReplay(it) } }
         if (fresh.any { it.kind == "ring" }) markForwarded() // 실제 착신 통화가 서버에 왔다 = 착신 설정 완료
         val off = machine.room == Room.DRIVE_REST || offDuty(LocalDateTime.now(clock), machine.settings)
         deferNew(fresh, initial, off, today(), machine.settings).takeIf { it.isNotEmpty() }?.let { d ->
@@ -150,6 +154,23 @@ class RoomService : Service() {
         if (!initial) fresh.filter { it.kind == "notif" }.let { n -> notifFresh += n.map { it.id }; notifQueue += notifNow(n.sortedBy { it.id }, machine.room, favs, off) } // 도착 순(서버는 최신순)
     }
 
+    /** O3: 대본을 받으면 방(정차·운전) 상관없이 '통화 중'으로 시작. 진행 중이면 새 대본으로 바꾼다. */
+    private fun startReplay(s: ReplayScript) {
+        Log.i("ROOM", "replay start ${s.title} lines=${s.lines.size} room=${machine.room}")
+        replayRun = ReplayRun(s); replayAt = SystemClock.elapsedRealtime(); replay = ReplayView(s.title)
+    }
+
+    /** O3 틱: 시각이 된 줄을 순서대로. 읽을 문장은 say(경고·깜빡이 중이면 보류)로, 끝나면 통화 중 상태를 푼다(통화 정리 카드는 서버가 시각에 맞춰 내려 준다). */
+    private fun tickReplay() {
+        val r = replayRun ?: return
+        val e = SystemClock.elapsedRealtime() - replayAt
+        for (l in r.due(e)) {
+            val a = replayAct(replay ?: ReplayView(r.script.title), l, machine.room, passenger)
+            replay = a.view; a.speech?.let(::say)
+        }
+        if (r.done(e)) { replayRun = null; replay = null; Log.i("ROOM", "replay end") }
+    }
+
     /** 알림 묶음 제안 "카톡 3건, ○○님 외 2명. 읽어드릴까요?" → 대답 듣기. */
     private fun offerNotifs(list: List<InboxItem>) {
         notifSaid += list.map { it.id }
@@ -157,7 +178,7 @@ class RoomService : Service() {
     }
 
     /** 묻고 대답 듣기. 지금 말해도 되는 때(경고·통화·다른 대화 중 아님)에만 쓴다. */
-    private fun canAsk() = !quiet && pending == Ask.NONE && talk.step == NotifTalk.Step.NONE && !listening
+    private fun canAsk() = !quiet && replayRun == null && pending == Ask.NONE && talk.step == NotifTalk.Step.NONE && !listening
     private var lastAsk = ""
     private val reask = Reask()
     private fun askVoice(text: String, a: Ask) { reask.reset(); choice = null; lastAsk = text; pending = a; speaker.speak(text, ::listenNow) }
@@ -290,6 +311,7 @@ class RoomService : Service() {
             val q = a != Alert.NONE || busyManeuver(adapters.turnOn, machine.signals.gear, adapters.steerDeg) || inCall
             if (q != quiet) { quiet = q; Log.i("ROOM", "quiet $q"); hold.release(q, machine.room)?.let { speaker.speak(it) } }
             if (passenger) { hold.clear(); notifQueue.clear() } // 동승자 모드면 보류분도 버린다
+            tickReplay()
             // 폰 알림: 미루기 조건(경고·깜빡이·후진·큰 조향·통화·피로)이 다 풀리고 대화 중이 아니면 쌓인 것을 묶어서 한 번
             // 대답 없이 남은 묻기(P의 바)도 새 알림이 오면 닫고, 못 읽어 준 알림과 합쳐 다시 묻는다(같은 알림은 한 번만)
             if (!q && (talk.step == NotifTalk.Step.NONE || talk.waiting && !listening) && pending == Ask.NONE && notifQueue.isNotEmpty() && machine.room != null && !passenger && !fatigued(machine.room, tripMin())) {
@@ -370,6 +392,7 @@ class RoomService : Service() {
             }
             else {
                 val parked = parkedAt?.let { now - it }; parkedAt = null
+                replay = replay?.copy(hint = null) // 출발하면 도움 카드는 내리고(운전 중엔 귓속말만), 다음 도움부터 TTS
                 if (from == Room.PARK && talk.step != NotifTalk.Step.NONE) { talk.cancel(); askStep = talk.step; listening = false } // P에서 남겨 둔 바는 출발하면 닫는다(카드는 남음)
                 // M4: 2분 미만 P는 같은 운전 — 휴식·피로·집 문턱 1회 안내와 운전 시작 시각을 유지
                 if (newDrive(parked)) { homeOnce.reset(); reserveOnce.reset(); restOnce.reset(); fatigueOnce.reset(); trip.reset(); driveStart = now; restSnoozeUntil = 0 }
@@ -631,6 +654,7 @@ class RoomService : Service() {
         var inbox by mutableStateOf(listOf<InboxItem>()); private set // id 내림차순
         var alert by mutableStateOf(Alert.NONE); private set
         var schedule by mutableStateOf(listOf<Event>()); private set // F6 데모 일정
+        var replay by mutableStateOf<ReplayView?>(null); private set // O3 재현 통화 중(null = 통화 아님). 화면 하단 띠가 읽는다
         var offline by mutableStateOf(false); private set // #23 서버 폴링 실패
         var passengerOffer by mutableStateOf(false) // C⑤ 조수석 착석 감지 → "동승자 모드로 바꿀까요?"
         var telltale by mutableStateOf<String?>(null); private set // C⑦ 빨간 경고등

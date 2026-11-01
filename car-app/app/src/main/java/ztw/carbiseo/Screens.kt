@@ -160,8 +160,24 @@ fun App() {
     Box(Modifier.fillMaxSize()) {
         Crossfade(room, animationSpec = tween(200), label = "room") { r -> RoomScreen(r, room, bg(r), ver) { settings = true } }
         AlertFrame(RoomService.alert)
-        AskBar(Modifier.align(Alignment.BottomCenter))
+        Column(Modifier.align(Alignment.BottomCenter)) { ReplayBar(); AskBar(Modifier) }
     }
+    }
+}
+
+/** O3 재현 통화 중: 화면 아래 띠. '통화 중' 표시 + 최근 자막 한 줄, 정차 중엔 도움 카드(추천 답변·사실 정정·빈 시간). 운전 중 도움은 귓속말 TTS라 카드가 없다. */
+@Composable
+private fun ReplayBar() {
+    val v = RoomService.replay ?: return
+    Column(Modifier.fillMaxWidth().background(SheetBg).padding(horizontal = 24.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        v.hint?.let { h ->
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(ParkAcc).padding(horizontal = 24.dp, vertical = 14.dp)) {
+                Text(h.label, color = Color.White.copy(alpha = 0.86f), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text(h.text, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
+            }
+        }
+        Text("통화 중 · ${v.title}", color = DMute, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+        v.caption?.let { c -> Text("${when (c.who) { "ai" -> "AI 비서"; "peer" -> "상대"; else -> "나" }}  ${c.text}", color = SheetInk, fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 2) }
     }
 }
 
