@@ -72,3 +72,11 @@ test("문자 발송 검증: confirmed·번호 9~11자리·내용", () => {
   assert.ok("error" in parseSend({ to_number: "01012345678", body: "  ", confirmed: true }));
   assert.ok("error" in parseSend({ to_number: "01012345678", body: "가".repeat(1001), confirmed: true }));
 });
+
+test("주인 대화: 운전 2시간 이상이면 짧게·정차 후로 미루자고 먼저 제안", () => {
+  const o = { room: "DRIVE_WORK" as const, eta: null, schedule: null, recent: [], nowMs: 0 };
+  const MSG = /운전 2시간이 넘었습니다\. 업무 대화는 한두 문장으로 짧게 하고, 긴 일은 정차 후로 미루자고 먼저 제안합니다/;
+  assert.doesNotMatch(ownerScript({ ...o, trip_min: 119 }), MSG);
+  assert.doesNotMatch(ownerScript(o), MSG);
+  assert.match(ownerScript({ ...o, trip_min: 120 }), MSG);
+});

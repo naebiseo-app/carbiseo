@@ -320,7 +320,7 @@ export default {
         console.log("call-context db error", String(e));
       }
       if (isOwner) {
-        const instruction = ownerScript({ owner, name, room, eta, schedule, recent, nowMs: now(), passenger: cc?.passenger === true });
+        const instruction = ownerScript({ owner, name, room, eta, schedule, recent, nowMs: now(), passenger: cc?.passenger === true, trip_min: cc?.trip_min });
         return json({ CallContext: { Instruction: instruction, Variables: { room: room ?? "UNKNOWN", owner_mode: "1" } } });
       }
       const s = pickScript(room, owner, name, eta, mode, nextEventAt(schedule, now()), cc, clk, ment, known);
