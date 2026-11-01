@@ -20,6 +20,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -38,7 +39,9 @@ class RoomService : Service() {
     private val receivers = mutableListOf<BroadcastReceiver>()
     private lateinit var speaker: Speaker
     private val audio by lazy { getSystemService(AudioManager::class.java) }
-    private val net = Executors.newSingleThreadExecutor() // 서버 호출은 여기서만(순서 보장, 메인 차단 방지)
+    private val net = Executors.newSingleThreadExecutor() // 상태·발송 등 쓰기 호출은 여기서만(순서 보장, 메인 차단 방지)
+    @Volatile private var alive = true
+    private val pollNet = Executors.newSingleThreadExecutor() // 폴링(읽기)만. 쓰기와 줄 서지 않는다
     private var stateGen = 0       // 방 변경마다 +1. 재시도는 최신 방일 때만.
     private var sentEta: Int? = null // 마지막으로 올린 남은 분. 분이 바뀔 때만 다시 올린다.
     private var okState: Pair<String, Int?>? = null // 서버가 마지막으로 받은 (방, 남은 분)
@@ -89,20 +92,27 @@ class RoomService : Service() {
     private var familyDay = -1L // 가족에게 도착 예상을 보낸 날(하루 한 번)
     private var restSnoozeUntil = 0L // 휴식 제안에 '아니'라고 한 뒤 30분(시뮬 시각)
 
+    // 단일 스케줄러: 이전 폴링이 끝난 뒤에만 다음을 예약한다(느린 서버에서 요청이 쌓여 카드가 늦게 뜨는 것 방지, L2).
+    // 상태 전송·문자 발송과 줄 서지 않게 폴링만 따로 한 스레드(pollNet)에서 돈다.
     private val poller = object : Runnable {
         override fun run() {
-            net.execute {
-                val r = Server.fetchInbox(since)
-                ui.post {
-                    offline = r == null; r?.let { (items, minId) -> inbox = pruneGone(inbox, minId); onInbox(items) } // 5초마다 다시 시도한다
-                    // 오프라인 중 상태 전송이 다 실패했으면 서버가 옛 방에 멈춰 있다 → 연결되면 지금 상태를 다시 올린다
-                    val cur = machine.room?.let { it.name to sentEta }
-                    if (r != null && cur != null && cur != okState) { Log.i("ROOM", "state resync $cur (server had $okState)"); sendState(cur.first, ++stateGen, false) }
+            if (!alive) return
+            val t0 = SystemClock.elapsedRealtime()
+            pollNet.execute {
+                try {
+                    val r = Server.fetchInbox(since)
+                    ui.post {
+                        offline = r == null; r?.let { (items, minId) -> inbox = pruneGone(inbox, minId); onInbox(items) } // 끝나는 대로 다시 시도한다
+                        // 오프라인 중 상태 전송이 다 실패했으면 서버가 옛 방에 멈춰 있다 → 연결되면 지금 상태를 다시 올린다
+                        val cur = machine.room?.let { it.name to sentEta }
+                        if (r != null && cur != null && cur != okState) { Log.i("ROOM", "state resync $cur (server had $okState)"); sendState(cur.first, ++stateGen, false) }
+                    }
+                    Server.fetchSchedule()?.let { r -> ui.post { schedule = r } }
+                    if (!forwardOk || serviceNumber.isEmpty()) Server.fetchConfig()?.let { (n, fw) -> ui.post { serviceNumber = n; if (fw) markForwarded() } }
+                } finally {
+                    ui.post { if (alive) ui.postDelayed(this, maxOf(0L, POLL_MS - (SystemClock.elapsedRealtime() - t0))) } // Worker 요청 하루 약 3.5만, 무료 10만 안
                 }
-                Server.fetchSchedule()?.let { r -> ui.post { schedule = r } }
-                if (!forwardOk || serviceNumber.isEmpty()) Server.fetchConfig()?.let { (n, fw) -> ui.post { serviceNumber = n; if (fw) markForwarded() } }
             }
-            ui.postDelayed(this, 5_000) // 끊고 카드까지 대기를 줄인다(Worker 요청 하루 약 3.5만, 무료 10만 안)
         }
     }
 
@@ -524,12 +534,13 @@ class RoomService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        ui.removeCallbacks(ticker); ui.removeCallbacks(poller); net.shutdown(); speaker.stop(); voice.stop(); adapters.stop(); receivers.forEach { unregisterReceiver(it) }; super.onDestroy()
+        alive = false; ui.removeCallbacks(ticker); ui.removeCallbacks(poller); net.shutdown(); pollNet.shutdown(); speaker.stop(); voice.stop(); adapters.stop(); receivers.forEach { unregisterReceiver(it) }; super.onDestroy()
     }
 
     companion object {
         private const val CH = "room"
         private const val HEARTBEAT_MS = 5 * 60_000L
+        private const val POLL_MS = 5_000L
         const val ACTION_REST = "ztw.carbiseo.REST"
         const val ACTION_TALK = "ztw.carbiseo.TALK" // F5: [말하기] 버튼
         const val ACTION_GO = "ztw.carbiseo.GO" // F7: extras lat, lng, name
