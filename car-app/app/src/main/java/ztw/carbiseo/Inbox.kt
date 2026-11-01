@@ -157,3 +157,8 @@ fun todayCalls(items: List<InboxItem>, today: java.time.LocalDate, zone: ZoneId 
 
 /** 주차 화면 순서: 급한 카드 먼저, 그 안에서 최신순. */
 fun parkOrder(items: List<InboxItem>): List<InboxItem> = items.sortedWith(compareByDescending<InboxItem> { it.urgent }.thenByDescending { it.id })
+
+/** 화면용 카드 문장: 할 일 본문의 `제목 번호 / 내용: …`에서 번호를 빼고 `제목 — …`로. 발송용 원문(summary)은 그대로 둔다. */
+fun cardText(i: InboxItem): String =
+    if (i.kind != "task") i.summary
+    else i.summary.replace(Regex("""\s*0\d{1,2}-?\d{3,4}-?\d{4}"""), "").replace(" / 내용: ", " — ").replace(" / ", " · ")

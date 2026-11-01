@@ -438,7 +438,7 @@ private fun Focus(i: InboxItem, carryTag: String?, a: Float, onSms: () -> Unit) 
             }
             Text(time(i.createdAt), color = DMute, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
         }
-        Text(i.summary.ifBlank { "AI가 통화 내용을 정리하고 있어요" }, color = DTx, fontSize = 30.sp, lineHeight = 43.sp, fontWeight = FontWeight.SemiBold, maxLines = 4, overflow = TextOverflow.Ellipsis)
+        Text(cardText(i).ifBlank { "AI가 통화 내용을 정리하고 있어요" }, color = DTx, fontSize = 30.sp, lineHeight = 43.sp, fontWeight = FontWeight.SemiBold, maxLines = 4, overflow = TextOverflow.Ellipsis)
         if (i.kind == "sent") Text(sentStatus(i), color = if (i.status == "sent") DMute else Color(0xFFFF8A80), fontSize = 22.sp, fontWeight = FontWeight.Bold)
         if (i.car.isNotBlank()) FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("쓴 차량 데이터", Modifier.align(Alignment.CenterVertically), color = DMute, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
@@ -489,7 +489,7 @@ private fun ColumnScope.Queue(q: List<InboxItem>, hidden: Int, a: Float, carryTa
                         Text(name, Modifier.weight(1f, fill = false), color = DTx, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         (carryTag(i) ?: sub ?: if (i.kind == "hint") "AI 제안" else null)?.let { Text(it, color = DMute, fontSize = 20.sp, maxLines = 1) }
                     }
-                    Text(i.summary.ifBlank { "AI가 통화 내용을 정리하고 있어요" }, color = DMute, fontSize = 23.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(cardText(i).ifBlank { "AI가 통화 내용을 정리하고 있어요" }, color = DMute, fontSize = 23.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Text(time(i.createdAt), color = DMute, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
                 if (i.kind == "call" && i.fromNumber.isNotBlank()) Round(Icons.Filled.Call, "전화", DS2) { dial(ctx, i.fromNumber) }
@@ -777,7 +777,7 @@ private fun Drive(r: String) {
             Row(Modifier.height(68.dp).clip(RoundedCornerShape(34.dp)).background(if (rest) Color(0xFF0F3A33) else Color(0xFF3A1D10)).padding(horizontal = 30.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 val tc = if (rest) Color(0xFF7FE3CB) else Color(0xFFFFB48C)
-                when (r) { "DRIVE_REST" -> R.drawable.ic_room_rest; "DRIVE_WORK" -> R.drawable.ic_room_work; else -> null }?.let { Icon(painterResource(it), null, Modifier.size(22.dp), tint = tc) }
+                when (r) { "DRIVE_REST" -> R.drawable.ic_room_rest; "DRIVE_WORK" -> R.drawable.ic_room_work; else -> null }?.let { Icon(painterResource(it), null, Modifier.size(32.dp), tint = tc) }
                 Text(when (r) { "DRIVE_REST" -> "쉼 방"; "DRIVE_WORK" -> "업무 방"; else -> "방 판정 전" }, color = tc, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
             }
             Text("$n", Modifier.padding(top = 56.dp), color = acc, fontSize = 200.sp, lineHeight = 170.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-10).sp)

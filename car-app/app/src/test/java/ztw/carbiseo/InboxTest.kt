@@ -223,4 +223,10 @@ class InboxTest {
         assertNull(replaceSpeech(listOf(sum.copy(summary = " ")), Room.DRIVE_WORK))      // 요약이 비면 말할 게 없다
         assertEquals("박대리님 전화, 용건 회의 끝나면 연락 부탁.".let { "바로 연결: $it" }, directSpeech(listOf(other.copy(direct = true), sum).filter { it.replaces == 0L }))
     }
+
+    @Test fun 할일_카드_화면문장은_번호를_빼고_보여준다() {
+        val t = InboxItem(1, "", "한빛물산 일정 지연 알림 010-0000-0001 / 내용: 30분 늦습니다.", false, 0L, "{}", kind = "task")
+        assertEquals("한빛물산 일정 지연 알림 — 30분 늦습니다.", cardText(t))
+        assertEquals("2026-11-01 회의", cardText(t.copy(summary = "2026-11-01 회의")))
+    }
 }

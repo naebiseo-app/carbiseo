@@ -428,7 +428,7 @@ class RoomService : Service() {
                 val lng = i.getFloatExtra("lng", 0f).toDouble()
                 forcedDest = i.getStringExtra("name")
                 Log.i("ROOM", "debug requestRoute $lat,$lng name=$forcedDest")
-                adapters.navi?.requestRoute(RouteInfo(lat, lng, null, null, forcedDest ?: "debug", "", "", "", RouteOption.RECOMMENDED, "", false))
+                adapters.navi?.requestRoute(RouteInfo(lat, lng, null, null, forcedDest ?: "목적지", "", "", "", RouteOption.RECOMMENDED, "", false))
             }
         }
         val wp = object : BroadcastReceiver() {
