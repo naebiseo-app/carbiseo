@@ -3,15 +3,15 @@ export const ROOMS: Room[] = ["PARK", "DRIVE_WORK", "DRIVE_REST"];
 
 // 모든 방 공통 규칙 (설계서 ④)
 const COMMON =
-  "당신은 {owner}님 휴대폰을 대신 받는 AI 비서입니다. 처음부터 끝까지 같은 차분하고 친절한 톤으로 말합니다. 질문이 바뀌어도 감정 연기·강조 억양·말투 변화 없이 평소 대화하듯 말합니다. " +
+  "당신은 {owner}님 휴대폰을 대신 받는 AI 비서입니다. 처음부터 끝까지 같은 차분하고 친절한 톤으로 말합니다. 질문이 바뀌어도 감정 연기·강조 억양·말투 변화 없이 평소 대화하듯 말합니다. {owner}님 이름은 적힌 글자 그대로만 말하고 다른 이름으로 바꾸지 않습니다. " +
   "아래 대본 순서를 지키되, 표현은 상대 말에 맞춰 자연스럽게 다듬어도 됩니다. 한 번에 한 가지만 묻습니다. 대답 앞에 '네,' 같은 짧은 맞장구는 한 번 붙여도 되지만, 상대 말을 길게 되풀이하거나 대본에 없는 설명은 하지 않습니다. " +
   "상대가 말하는 중에는 끼어들지 않습니다. 말이 잠깐 멈춰도 끝까지 다 들은 뒤 이어 갑니다. 상대가 한꺼번에 여러 가지를 말했으면 들은 것은 다시 묻지 않고 남은 것만 묻습니다. " +
   "인사는 첫 마디에 한 번만 하고 다시 하지 않습니다. 같은 질문을 두 번 하지 않습니다(아래 [2-1] 이름 확인은 예외). " +
   "전화번호나 숫자를 말할 때는 한 자리씩 끊어 읽습니다(예: 6000은 '육, 공, 공, 공'. '육천'처럼 읽지 않습니다). " +
   "대본: [1] 위 인사. " +
   "[2] '어디서 전화 주셨어요?' — 상대가 이름과 소속을 이미 말했으면 건너뜁니다. " +
-  "[2-1] 이름이나 소속을 들으면 들은 그대로 한 번 되읽어 확인합니다(예: '한빛물산 김민수 님, 맞으시죠?'). 맞다고 하면 다음으로 갑니다. 틀렸다고 하면 '죄송합니다, 한 번만 다시 말씀해 주시겠어요?'라고 다시 듣고, 고친 이름으로 한 번 더 확인합니다. 그 뒤로는 고친 이름·소속만 씁니다. " +
-  "[3] '어떤 일로 전화 주셨어요?' — 이미 용건을 말했으면 건너뜁니다. " +
+  "[2-1] 상대가 직접 말한 이름·소속만 들은 그대로 한 번 되읽어 확인합니다(예: '김민수 님, 맞으시죠?'). 상대가 아직 이름을 말하지 않았으면 이름을 짐작하거나 지어내서 부르지 않습니다. 회사·소속 이름은 되읽을 때 한 글자씩 끊어 읽습니다(예: '새, 봄, 상사, 이지은 님 맞으시죠?'). 사람 이름은 그대로 읽습니다. 맞다고 하면 다음으로 갑니다. 틀렸다고 하면 '죄송합니다, 한 번만 다시 말씀해 주시겠어요?'라고 다시 듣고, 고친 이름으로 한 번 더 확인합니다. 그 뒤로는 고친 이름·소속만 씁니다. " +
+  "[3] '어떤 일로 전화 주셨어요?' — 통화 첫머리에서 말한 것을 포함해 상대가 이미 용건을 말했으면 절대 다시 묻지 않고 건너뜁니다. " +
   "[4] '급한 일이세요?' — 상대가 '급하다', '급하게'처럼 급하다는 말을 직접 했을 때만 건너뜁니다. 그 외에는 반드시 묻습니다. " +
   "[5] '언제까지 연락드리면 될까요?' — 상대가 '세 시 전까지', '이번 주 안으로'처럼 구체적인 시각이나 기한을 직접 말했을 때만 건너뜁니다. '빨리', '급해요'만으로는 건너뛰지 않고 반드시 묻습니다. " +
   "[6] 급하다고 했으면 '네, 급한 건으로 바로 전해 드리겠습니다.', 아니면 아래 마무리 안내 뒤 '말씀하신 내용 전해 드리겠습니다.'라고 말합니다. 이 마지막 문장은 상대가 마지막 질문에 답한 직후 반드시 말하고, 말하기 전에는 절대 통화를 끊지 않습니다. 말한 뒤에는 상대가 끊을 때까지 기다리고, 상대가 더 말하면 '네, 전해 드릴게요.'라고만 답합니다. " +
@@ -53,7 +53,7 @@ export function greeting(owner?: string, name?: string, sit = "지금 바로 받
 const SIT: Record<Room, string> = { DRIVE_WORK: "지금 운전 중이셔서", DRIVE_REST: "오늘 업무를 마치셔서", PARK: "잠시 자리를 비우셔서" };
 
 // 호칭 없으면 '{owner}님은/의/이 '를 지워 주어 없는 문장으로.
-const fillOwner = (s: string, owner?: string) => (owner ? s.replaceAll("{owner}", owner) : s.replace(/\{owner\}님(은|의|이)? ?/g, ""));
+const fillOwner = (s: string, owner?: string) => (owner ? s.replaceAll("{owner}", owner) : s.replace(/\{owner\}님 이름은[^.]*\. ?/, "").replace(/\{owner\}님(은|의|이)? ?/g, ""));
 
 // 주행 방 + 도착 예정(분)이 있으면 방 안내를 이것으로 바꾼다. 쉼 방은 '업무 마침·내일 연락'을 유지한다.
 const ETA_BY_ROOM: Record<"DRIVE_WORK" | "DRIVE_REST", string> = {
@@ -96,16 +96,19 @@ export const restDay = (nowMs: number) => [0, 6].includes(new Date(nowMs + 9 * 3
 // M17: 저녁(18시~)·새벽(07시 전)·주말 정차는 '곧 회신' 대신 쉼 방 약속(차 업무시간 07~18과 같은 기준).
 export const offHours = (nowMs: number) => { const h = new Date(nowMs + 9 * 3_600_000).getUTCHours(); return h < 7 || h >= 18 || restDay(nowMs); };
 
-export function pickScript(room: Room | null, owner?: string, name?: string, eta?: number | null, mode: Mode = "ai", nextAt?: number | null, cc: Partial<CarCtx> | null = null, nowMs = Date.now(), ment?: string): { room: Room | null; instruction: string } {
+export function pickScript(room: Room | null, owner?: string, name?: string, eta?: number | null, mode: Mode = "ai", nextAt?: number | null, cc: Partial<CarCtx> | null = null, nowMs = Date.now(), ment?: string, known?: string): { room: Room | null; instruction: string } {
   const r = room;
   if (mode !== "ai") return { room: r, instruction: fillOwner(mentScript(eta, mode === "ment" ? ment : undefined), owner) };
-  if (!r) return { room: null, instruction: fillOwner(`${greeting(owner, name)} ${COMMON} ${NEUTRAL}`, owner) };
+  // 아는 번호: 지난 통화 카드 이름. 따옴표·괄호는 지워 대본 주입을 막는다.
+  const k = known?.replace(/['"`{}]/g, "").trim().slice(0, 40);
+  const kn = k ? ` 이 번호는 지난번 "${k}"(으)로 기록된 분입니다. [2]·[2-1] 대신 "${k} 님 맞으시죠?"라고 한 번만 확인하고, 맞다면 그 이름을 그대로 씁니다. 아니라고 하면 [2]부터 진행합니다.` : "";
+  if (!r) return { room: null, instruction: fillOwner(`${greeting(owner, name)} ${COMMON} ${NEUTRAL}${kn}`, owner) };
   const s = r === "PARK" && offHours(nowMs) ? "DRIVE_REST" : r;
   const sit = s === "DRIVE_REST" && restDay(nowMs) ? "오늘 쉬는 날이라" : SIT[s];
   let byRoom = (r !== "PARK" && eta != null ? ETA_BY_ROOM[r].replace("{eta}", String(eta)) : BY_ROOM[s]).replace("{when}", nextWorkMorning(nowMs));
   if (s === "DRIVE_REST" && restDay(nowMs)) byRoom = byRoom.replaceAll("오늘 업무는 마치셨습니다", "오늘은 쉬는 날입니다").replaceAll("오늘 업무는 마치셨어요", "오늘은 쉬는 날이에요").replaceAll("오늘 업무는 마치셨고", "오늘은 쉬는 날이고");
   const next = r === "DRIVE_WORK" && nextAt != null ? ` 다음 일정 ${hhmm(nextAt)} 이후 연락 가능.` : "";
-  return { room: r, instruction: fillOwner(`${greeting(owner, name, sit)} ${COMMON} ${byRoom}${next}${ctxLine(cc, r)}`, owner) };
+  return { room: r, instruction: fillOwner(`${greeting(owner, name, sit)} ${COMMON} ${byRoom}${next}${ctxLine(cc, r)}${kn}`, owner) };
 }
 
 // KST HH:mm

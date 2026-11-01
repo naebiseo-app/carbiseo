@@ -113,7 +113,7 @@ test("첫 인사: AI 비서 소개 + 방별 상황 + 하나씩 묻는다는 안�
 test("손님 대본: 되읽기 확인·기한/급함은 직접 말했을 때만 생략·번호 한 자리씩·톤 유지(지적 1·2·4·5·9)", () => {
   for (const r of ["PARK", "DRIVE_WORK", "DRIVE_REST", null] as const) {
     const s = pickScript(r, "김도윤").instruction;
-    assert.match(s, /되읽어 확인합니다\(예: '한빛물산 김민수 님, 맞으시죠\?'\)/);
+    assert.match(s, /되읽어 확인합니다\(예: '김민수 님, 맞으시죠\?'\)/);
     assert.match(s, /틀렸다고 하면 .*고친 이름으로 한 번 더 확인/);
     assert.match(s, /\[5\] '언제까지 연락드리면 될까요\?' — 상대가 .*구체적인 시각이나 기한을 직접 말했을 때만 건너뜁니다.*반드시 묻습니다/);
     assert.match(s, /\[4\] '급한 일이세요\?' — 상대가 '급하다', '급하게'처럼 .*직접 했을 때만 건너뜁니다\. 그 외에는 반드시 묻습니다/);
@@ -123,4 +123,19 @@ test("손님 대본: 되읽기 확인·기한/급함은 직접 말했을 때만 
     assert.doesNotMatch(s, /문장 그대로만|맞장구·되풀이는 하지 않습니다/);
     assert.match(s, /말씀하신 내용 전해 드리겠습니다/);
   }
+});
+
+test("지어내기 금지·소속 한 글자 되읽기·아는 번호 이름 확인·주인 이름 고정", () => {
+  const ai = (owner?: string, known?: string) => pickScript("PARK", owner, undefined, null, "ai", null, null, WED_19 - 5 * 3_600_000, undefined, known).instruction;
+  assert.match(ai("김도윤"), /직접 말한 이름·소속만/);
+  assert.match(ai("김도윤"), /이름을 짐작하거나 지어내서 부르지 않습니다/);
+  assert.match(ai("김도윤"), /한 글자씩 끊어 읽습니다\(예: '새, 봄, 상사, 이지은 님 맞으시죠\?'\)/);
+  assert.match(ai("김도윤"), /통화 첫머리에서 말한 것을 포함해.*절대 다시 묻지 않고/);
+  assert.match(ai("김도윤"), /김도윤님 이름은 적힌 글자 그대로만 말하고 다른 이름으로 바꾸지 않습니다/);
+  assert.doesNotMatch(ai(undefined), /\{owner\}|이름은 적힌 글자/);
+  assert.match(ai("김도윤", "이지은"), /이 번호는 지난번 "이지은"\(으\)로 기록된 분입니다.*"이지은 님 맞으시죠\?"라고 한 번만 확인.*\[2\]부터 진행/);
+  assert.doesNotMatch(ai("김도윤"), /지난번/);
+  assert.doesNotMatch(pickScript(null, "김도윤", undefined, null, "ai", null, null, WED_19, undefined, "이지은").instruction.replace("지난번", ""), /\{owner\}/);
+  assert.match(pickScript(null, "김도윤", undefined, null, "ai", null, null, WED_19, undefined, "이지은").instruction, /지난번 "이지은"/);
+  assert.doesNotMatch(pickScript("PARK", "김도윤", undefined, null, "ment", null, null, WED_19, "자리 비움", "이지은").instruction, /지난번/);
 });
