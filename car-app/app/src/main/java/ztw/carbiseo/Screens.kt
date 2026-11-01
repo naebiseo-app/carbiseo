@@ -334,14 +334,14 @@ private fun Park(onImage: Boolean, onSettings: () -> Unit) {
 @Composable
 private fun Rail(items: List<InboxItem>, today: Long, a: Float) {
     val day = LocalDate.ofEpochDay(today)
-    val isToday = { i: InboxItem -> Instant.ofEpochMilli(i.createdAt).atZone(ZoneId.systemDefault()).toLocalDate() == day }
+    val isToday = { i: InboxItem -> Instant.ofEpochMilli(i.createdAt + RoomService.clock.offsetMs).atZone(ZoneId.systemDefault()).toLocalDate() == day }
     Column(Modifier.width(520.dp).fillMaxHeight().background(DS1.copy(alpha = a)).padding(horizontal = 36.dp, vertical = 40.dp), verticalArrangement = Arrangement.spacedBy(26.dp)) {
         Row(Modifier.height(44.dp).clip(RoundedCornerShape(22.dp)).background(DS2).padding(start = 14.dp, end = 18.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Box(Modifier.size(24.dp).border(2.dp, BrandHi, RoundedCornerShape(6.dp)), Alignment.Center) { Text("P", color = BrandHi, fontSize = 15.sp, fontWeight = FontWeight.Black) }
             Text(roomName("PARK"), color = DTx, fontSize = 21.sp, fontWeight = FontWeight.Bold)
         }
-        val calls = todayCalls(RoomService.inbox, day) // 완료한 카드도 '대신 받은 전화'엔 그대로 센다
+        val calls = todayCalls(RoomService.inbox, day, offsetMs = RoomService.clock.offsetMs) // 완료한 카드도 '대신 받은 전화'엔 그대로 센다
         Column {
             Row(verticalAlignment = Alignment.Bottom) {
                 Text("$calls", color = DTx, fontSize = 150.sp, lineHeight = 143.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-6).sp)

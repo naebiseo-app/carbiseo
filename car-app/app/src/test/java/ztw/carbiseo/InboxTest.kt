@@ -82,6 +82,9 @@ class InboxTest {
         )
         assertEquals(2, todayCalls(items, today, z))
         assertEquals(0, todayCalls(emptyList(), today, z))
+        // 앱 시계를 하루 앞으로 밀면(시연 TIME) 카드 시각도 같이 밀려, 실제로 10-29에 온 카드 2건이 시연 날짜 10-30의 '오늘'로 센다
+        assertEquals(2, todayCalls(items, today.plusDays(1), z, offsetMs = 24 * 3_600_000L))
+        assertEquals(1, todayCalls(items, today, z, offsetMs = 24 * 3_600_000L)) // 10-28 23시 카드 = 시연 10-29
     }
 
     @Test fun 주차화면_급한것_먼저_그안에서_최신순() {

@@ -150,9 +150,10 @@ fun itemLine(i: InboxItem, zone: ZoneId = ZoneId.systemDefault()): String {
     return "${if (i.urgent) "[급함] " else ""}$time $body"
 }
 
-/** S4: 오늘(zone 기준 날짜) 받은 통화 수. 웹훅 이벤트는 같은 통화라 세지 않는다. */
-fun todayCalls(items: List<InboxItem>, today: java.time.LocalDate, zone: ZoneId = ZoneId.systemDefault()): Int =
-    items.count { it.kind == "call" && Instant.ofEpochMilli(it.createdAt).atZone(zone).toLocalDate() == today }
+/** S4: 오늘(zone 기준 날짜) 받은 통화 수. 웹훅 이벤트는 같은 통화라 세지 않는다.
+ *  offsetMs: 앱 시계(디버그 TIME)가 실제 시각에서 민 만큼. 카드 시각은 서버 실제 시각이라 같이 밀어야 시연 시각의 '오늘'과 맞는다(0이면 그대로). */
+fun todayCalls(items: List<InboxItem>, today: java.time.LocalDate, zone: ZoneId = ZoneId.systemDefault(), offsetMs: Long = 0): Int =
+    items.count { it.kind == "call" && Instant.ofEpochMilli(it.createdAt + offsetMs).atZone(zone).toLocalDate() == today }
 
 /** 주차 화면 순서: 급한 카드 먼저, 그 안에서 최신순. */
 fun parkOrder(items: List<InboxItem>): List<InboxItem> = items.sortedWith(compareByDescending<InboxItem> { it.urgent }.thenByDescending { it.id })
