@@ -193,8 +193,11 @@ export function transcriptTarget(raw: string) {
 
 // 차 폴링: since 뒤 행 중, 아직 시각이 안 된(created_at 미래) 첫 행 앞까지만 준다.
 // 미래 행보다 id가 큰 행을 먼저 주면 차가 since를 넘겨 버려 미래 행(재현 hint)을 영영 못 받는다.
+// since>0: 오래된 것부터 INBOX_PAGE건(오래 끊겼다 와도 51번째부터 유실되지 않게, 다음 폴링이 이어 받음). 한 건 더 읽어 more 판정.
+// since=0(차 첫 폴링·재시작): 최신 INBOX_PAGE건 — 오래된 것부터 주면 옛 카드가 새 전화처럼 읽힌다.
+export const INBOX_PAGE = 50;
 export const INBOX_SQL =
-  "SELECT * FROM inbox WHERE id>?1 AND id < COALESCE((SELECT MIN(id) FROM inbox WHERE id>?1 AND created_at>?2), 9e18) ORDER BY id DESC LIMIT 50";
+  "SELECT * FROM inbox WHERE id>?1 AND id < COALESCE((SELECT MIN(id) FROM inbox WHERE id>?1 AND created_at>?2), 9e18) ORDER BY CASE WHEN ?1=0 THEN -id ELSE id END LIMIT 51";
 
 // 폰 알림 1건 → inbox kind='notif'. 방은 받을 때의 차 방(카드 칩·판단 참고용)
 async function saveNotif(db: D1Database, n: Notif) {
@@ -272,10 +275,12 @@ export default {
     if (m === "GET" && pathname === "/car/inbox") {
       if (!authed) return json({ error: "unauthorized" }, 401);
       const since = Number(new URL(req.url).searchParams.get("since") ?? 0) || 0;
-      const { results } = await env.DB.prepare(INBOX_SQL).bind(since, now()).all();
+      const rows = (await env.DB.prepare(INBOX_SQL).bind(since, now()).all()).results;
+      const more = since > 0 && rows.length > INBOX_PAGE;
+      const results = rows.slice(0, INBOX_PAGE);
       // min_id: 서버에 남은 가장 작은 id(비었으면 null). 차는 이보다 작은 카드를 지운다(관리자 비우기·30일 삭제 반영)
       const min = await env.DB.prepare("SELECT MIN(id) AS m FROM inbox").first<{ m: number | null }>();
-      return json({ items: results, min_id: min?.m ?? null });
+      return json({ items: results, min_id: min?.m ?? null, more });
     }
 
     // callContextUrl: 비밀 조각 경로. 어떤 실패에도 유효한 응답을 돌려 통화가 끊기지 않게 한다.

@@ -12,7 +12,7 @@ test("폴링: 시각 안 된 hint보다 뒤 행은 hint가 보일 때까지 기�
   const poll = (since: number, now: number) => (db.prepare(INBOX_SQL).all(since, now) as { id: number }[]).map((r) => r.id);
   assert.deepEqual(poll(0, 105), [2, 1]);          // id 3(108)이 미래 → 3 이상은 보류(5는 시각이 됐어도)
   assert.deepEqual(poll(2, 110), [3]);              // 4(116) 미래
-  assert.deepEqual(poll(3, 120), [5, 4]);           // 다 보임
+  assert.deepEqual(poll(3, 120), [4, 5]);           // 다 보임(since>0은 오래된 순)
   assert.deepEqual(poll(5, 200), []);
 });
 

@@ -115,3 +115,16 @@ test("바로 연결: 전화 오는 순간 ringing 카드, 요약이 오면 같�
   await report(env, { call_id: CID, summary: "다른 요약" }); // 이미 summarized면 건너뜀
   assert.equal(cards(env)[0].summary, "견적 문의");
 });
+
+test("/car/inbox: since>0은 오래된 순 50건 + more, 이어 받으면 유실 없음, since=0은 최신 50건", async () => {
+  const env = mkEnv();
+  const t = Date.now() - 1000;
+  for (let i = 0; i < 60; i++) env.DB.db.prepare("INSERT INTO inbox(kind,created_at) VALUES('call',?)").run(t);
+  const poll = async (since: number) => (await (await worker.fetch(new Request(`https://x/car/inbox?since=${since}`, { headers: { authorization: "Bearer t" } }), env)).json()) as any;
+  const a = await poll(5);
+  assert.deepEqual([a.items.length, a.items[0].id, a.items[49].id, a.more, a.min_id], [50, 6, 55, true, 1]);
+  const b = await poll(55);
+  assert.deepEqual([b.items.length, b.items[0].id, b.items[4].id, b.more], [5, 56, 60, false]);
+  const z = await poll(0);
+  assert.deepEqual([z.items.length, z.items[0].id, z.items[49].id, z.more], [50, 60, 11, false]);
+});

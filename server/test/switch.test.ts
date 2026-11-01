@@ -63,7 +63,7 @@ test("/admin/reset-inbox: inbox 전체 삭제", async () => {
 test("/car/inbox: 비었으면 min_id null(차가 카드를 비운다)", async () => {
   const env = mkEnv();
   const r = await worker.fetch(new Request("https://x/car/inbox?since=9", { headers: { authorization: "Bearer t" } }), env);
-  assert.deepEqual(await r.json(), { items: [], min_id: null });
+  assert.deepEqual(await r.json(), { items: [], min_id: null, more: false });
 });
 
 test("/admin/demo-clock: 시연 시각만큼 offset 저장, none이면 0", async () => {
