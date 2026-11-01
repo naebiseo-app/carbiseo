@@ -1,3 +1,4 @@
+import { guardText, FALLBACK } from "./guard.ts";
 import { isUrgent } from "./script.ts";
 
 // F6 데모 모드: 관리 페이지(/admin)용 순수 함수. 이름·장소는 전부 가상.
@@ -37,10 +38,6 @@ export function demoSchedule(nowMs: number): DemoEvent[] {
   ];
 }
 
-// 재현 통화(원문③④⑤)용 가상 견적 데이터
-export const DEMO_QUOTE = { client: "새봄상사", item: "사무용 의자 50개", amount: "1,150만 원" };
-export const REPLAY_SAID = "다음 주 화요일 2시 미팅 가능하세요? 지난번 견적 1,200만 원 맞죠?";
-
 // 장소 간 이동(분): 직선거리 ÷ 평균 30km/h. ponytail: 도로·정체 무시, 실제 경로가 필요하면 내비 ETA로 교체
 export function travelMin(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const r = Math.PI / 180;
@@ -49,28 +46,83 @@ export function travelMin(a: { lat: number; lng: number }, b: { lat: number; lng
   return Math.ceil((km / 30) * 60);
 }
 
-// 일정 사이 첫 빈 시간. 다음 장소까지 이동시간을 빼고 30분 이상 남는 구간.
-// ponytail: 일정에 끝 시각이 없어 각 30분으로 가정. 끝 시각이 생기면 그것으로
-export function freeSlot(s: DemoEvent[], nowMs: number, durMs = 30 * 60_000) {
-  const ev = s.filter((e) => e.start + durMs > nowMs).sort((a, b) => a.start - b.start);
-  for (let i = 0; i + 1 < ev.length; i++) {
-    const move = travelMin(ev[i], ev[i + 1]);
-    const from = Math.max(ev[i].start + durMs, nowMs), to = ev[i + 1].start - move * 60_000;
-    if (to - from >= 30 * 60_000) return { from, to, move };
-  }
-  return null;
-}
-
 const hm = (ms: number) => new Date(ms + 9 * 3_600_000).toISOString().slice(11, 16);
 
-// 거래처 통화 재현 카드 3장(+0·+8·+16초)
-export function replayCards(s: DemoEvent[], nowMs: number) {
-  const f = freeSlot(s, nowMs);
-  return [
-    { label: "추천 답변", text: "화요일 2시는 판교 미팅과 겹쳐요. 4시 가능하다고 답하세요" },
-    { label: "사실 정정", text: `견적은 ${DEMO_QUOTE.amount}입니다 (${DEMO_QUOTE.client} ${DEMO_QUOTE.item})` },
-    { label: "빈 시간", text: f ? `${hm(f.from)}~${hm(f.to)} 비어요(이동 ${f.move}분 포함)` : "오늘 남은 빈 시간이 없어요" },
-  ].map((c, i) => ({ ...c, step: i + 3, created_at: nowMs + i * 8000 }));
+// ── 재현 통화(원문③답변 추천·④사실 정정·⑤빈 날짜). 통화 망이 없어 서버가 대본을 차에 내려 주고 차가 상대 대사를 읽는다. ──
+const KST = 9 * 3_600_000, HOUR = 3_600_000, MIN = 60_000, DAY = 86_400_000;
+const WORK_FROM = 9, WORK_TO = 18; // 미팅은 업무시간(KST 09~18시, 주말 제외) 안에서만
+export const MEET_MIN = 60; // 제안할 미팅 길이·일정 1건의 길이(일정에 끝 시각이 없어 같은 값으로 가정)
+export const MEET_AT = { lat: 37.3948, lng: 127.1112 }; // 다음 미팅 장소 = 거래처(판교역)
+export const REPLAY_NOTICE = "AI 비서가 함께 듣습니다";
+// 가상 거래처 견적: 50개 × 개당 23만 원 = 1,150만 원
+export const REPLAY_DEAL = { client: "한빛물산", contact: "김민수 과장", item: "사무용 의자 50개", unit: "개당 23만 원", total: "1,150만 원" };
+
+export function korTime(ms: number): string {
+  const d = new Date(ms + KST), h = d.getUTCHours(), m = d.getUTCMinutes();
+  return `${h < 12 ? "오전" : "오후"} ${h % 12 || 12}시${m ? ` ${m}분` : ""}`;
+}
+
+export function slotLabel(ms: number, nowMs: number): string {
+  const n = Math.floor((ms + KST) / DAY) - Math.floor((nowMs + KST) / DAY);
+  const day = ["오늘", "내일", "모레"][n] ?? `${"일월화수목금토"[new Date(ms + KST).getUTCDay()]}요일`;
+  return `${day} ${korTime(ms)}`;
+}
+
+/** 미팅 시작 후보 n개(기본 2). 조건: 업무시간 안·평일, 차가 도착한 뒤(지금+eta_min), 일정과 안 겹침(일정 앞뒤로 미팅 장소까지 이동시간 포함).
+ *  둘째는 첫째보다 3시간 이상 뒤. 30분 단위로 4일 앞까지 찾는다. ponytail: 이동은 직선거리 ÷ 30km/h, 현재 위치는 무시 */
+export function freeSlots(s: DemoEvent[], nowMs: number, etaMin: number | null, n = 2): number[] {
+  const earliest = nowMs + (etaMin ?? 0) * MIN, len = MEET_MIN * MIN;
+  const ev = s.filter((e) => e.start + len > nowMs).map((e) => { const go = travelMin(e, MEET_AT) * MIN; return { from: e.start - go, to: e.start + len + go }; });
+  const out: number[] = [];
+  for (let d = 0; d < 4; d++) {
+    const day0 = Math.floor((nowMs + KST) / DAY) * DAY - KST + d * DAY;
+    const wd = new Date(day0 + KST).getUTCDay();
+    if (wd === 0 || wd === 6) continue;
+    for (let t = day0 + WORK_FROM * HOUR; t + len <= day0 + WORK_TO * HOUR; t += 30 * MIN) {
+      if (t < earliest || ev.some((e) => t < e.to && e.from < t + len) || (out.length && t < out[0] + 3 * HOUR)) continue;
+      out.push(t);
+      if (out.length === n) return out;
+    }
+  }
+  return out;
+}
+
+export type ReplayLine = { t: number; who: "ai" | "peer" | "driver" | "hint"; label: string; text: string };
+export type Replay = { title: string; endMs: number; lines: ReplayLine[]; wrap: string };
+
+// 대본(t = 시작 후 ms). 상대·AI 대사는 차가 읽고, 운전자 대사는 자막만, hint는 운전 중 귓속말 TTS·정차 중 카드.
+// 도움 카드·정리 문장은 전부 가드(guardText)를 거친다. 일정·ETA가 달라지면 문장 속 시각도 달라진다.
+export function replayScript(s: DemoEvent[], nowMs: number, etaMin: number | null): Replay {
+  const D = REPLAY_DEAL;
+  const ev = s.find((e) => e.contact.startsWith(D.contact.split(" ")[0]));
+  const at = ev ? `${slotLabel(ev.start, nowMs)} ${ev.place}` : "";
+  const [a, b] = freeSlots(s, nowMs, etaMin);
+  const slots = b ? `${slotLabel(a, nowMs)}, 아니면 ${slotLabel(b, nowMs)}` : a ? slotLabel(a, nowMs) : "";
+  const g = (x: string) => guardText("summary", x);
+  const hint = (t: number, label: string, text: string): ReplayLine => ({ t, who: "hint", label, text: g(text) });
+  const line = (t: number, who: ReplayLine["who"], text: string): ReplayLine => ({ t, who, label: "", text });
+  const lines: ReplayLine[] = [
+    line(0, "ai", REPLAY_NOTICE),
+    line(3000, "peer", `여보세요, ${D.client} ${D.contact}입니다. ${D.item} 납품 일정이 어떻게 되는지 궁금해서 전화드렸어요.`),
+    hint(9000, "추천 답변", ev ? `${at} 납품 미팅이 잡혀 있어요. 그때 일정 확정하자고 답하세요` : "납품 일정은 확인해서 오늘 안에 알려 드린다고 답하세요"),
+    line(14000, "driver", ev ? `네 과장님, ${at}에서 뵐 때 납품 날짜 확정해서 말씀드릴게요.` : "네 과장님, 확인해서 바로 말씀드릴게요."),
+    line(20000, "peer", "좋아요. 그런데 단가가 얼마였죠? 한 번 확인하고 싶어서요."),
+    line(25000, "driver", "단가는 개당 25만 원으로 알고 있습니다."), // 일부러 틀린 말
+    hint(30000, "사실 정정", `실제로는 ${D.unit}이에요 (${D.client} 견적 카드, 합계 ${D.total})`),
+    line(35000, "driver", `아, 죄송합니다. ${D.unit}, 합계 ${D.total}입니다.`),
+    line(41000, "peer", "네, 맞아요. 그럼 다음 미팅은 언제가 좋을까요? 편한 시간 두 개만 알려 주세요."),
+    hint(47500, "빈 시간", slots ? `비는 시간은 ${slots}예요 (일정·이동 시간 반영)` : "이번 주엔 비는 시간이 없어요. 다음 주로 미루자고 답하세요"),
+    line(53000, "driver", slots ? `${slots} 어떠세요?` : "이번 주는 어려워서 다음 주로 말씀드려도 될까요?"),
+    line(59000, "peer", slots ? "그럼 첫 번째 시간으로 하죠. 그때 뵙겠습니다. 감사합니다." : "네, 다음 주에 다시 연락 주세요. 감사합니다."),
+  ].filter((l) => l.text !== FALLBACK.summary);
+  const promise = [ev ? `${at} 납품 일정 확정` : "납품 일정 확인", `단가 ${D.unit}(합계 ${D.total}) 재확인`, a ? `다음 미팅 ${slotLabel(a, nowMs)}` : "다음 미팅은 다음 주로"].join(" · ");
+  return { title: `${D.client} ${D.contact}`, endMs: 66000, lines, wrap: g(`${D.client} ${D.contact} 통화 · 납품 일정, 단가, 다음 미팅 확인. 약속: ${promise}`) };
+}
+
+// 차에 내려 주는 형식(JSON 없이 줄 단위): 첫 줄 "제목\t끝ms", 다음 줄부터 "t\twho\tlabel\t문장"
+export function encodeReplay(r: Replay): string {
+  const c = (x: string) => x.replace(/[\t\r\n]+/g, " ");
+  return [`${c(r.title)}\t${r.endMs}`, ...r.lines.map((l) => `${l.t}\t${l.who}\t${c(l.label)}\t${c(l.text)}`)].join("\n");
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
@@ -118,5 +170,5 @@ form{background:#FFFDF8;padding:16px;border-radius:14px;margin:16px 0}.m{font-we
 <form method="post" action="/admin/reset-schedule"><h2>데모 일정 초기화</h2><p>오늘 일정 3건(지금부터 1·3·5시간 뒤)으로 덮어씁니다.</p><button>초기화</button></form>
 <form method="post" action="/admin/owner-as-guest"><h2>녹화용: 주인 번호를 손님으로</h2><p>켜면 주인 번호로 건 전화도 일반 발신자처럼 AI가 응대합니다. 녹화 뒤 꼭 끄세요.</p><button name="on" value="1">켜기</button><button name="on" value="0">끄기</button></form>
 <form method="post" action="/admin/reset-inbox"><h2>부재중 카드 비우기</h2><p>녹화 전에 inbox를 모두 지웁니다.</p><button>비우기</button></form>
-<form method="post" action="/admin/replay"><h2>재현 통화 시작</h2><p>거래처 통화("${esc(REPLAY_SAID)}")에 맞춰 차에 카드 3장을 8초 간격으로 띄웁니다.</p><button>재현 통화 시작</button></form>`;
+<form method="post" action="/admin/replay"><h2>재현 통화 시작</h2><p>거래처 통화를 재현합니다. 차가 상대 대사를 읽고(운전자 대사는 자막만), 정차 중엔 화면 아래 도움 카드, 운전 중엔 귓속말 한 줄. 약 1분, 끝나면 통화 정리 카드가 남습니다.</p><button>재현 통화 시작</button></form>`;
 }

@@ -1,5 +1,5 @@
 import { CALL_ID, carChip, callerNumber, cleanMent, cleanName, field, freshCtx, hhmm, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, reportLine, isDirect, sameNumber, type Mode, type Recent } from "./script.ts";
-import { adminPage, basicOk, demoSchedule, parseFakeCall, REPLAY_SAID, replayCards, type MailRow, type ReplyRow } from "./admin.ts";
+import { adminPage, basicOk, demoSchedule, encodeReplay, parseFakeCall, replayScript, type MailRow, type ReplyRow } from "./admin.ts";
 import { guardText, isBlocked } from "./guard.ts";
 import { parseNotify, parseReply, TAKE_REPLIES_SQL, type Notif } from "./notif.ts";
 
@@ -531,14 +531,19 @@ export default {
         const r = await env.DB.prepare("DELETE FROM inbox").run();
         return html(`inbox ${r.meta.changes ?? 0}건을 비웠습니다(차 화면도 15초 안에 비워집니다)`);
       }
+      // 재현 통화: 대본 1행(kind='replay', 차가 받는 즉시 재생·화면엔 안 보임) + 끝난 뒤 뜨는 '통화 정리' hint 카드 1행(created_at 미래 → 그때까지 차에 안 내려감)
       if (m === "POST" && pathname === "/admin/replay") {
         const t = now();
         const s = (await kvGet(env.DB, "schedule")) ?? demoSchedule(t);
-        const room = (await kvGet(env.DB, "car_context"))?.room ?? null;
-        const cards = replayCards(s, t);
-        await env.DB.batch(cards.map((c) => env.DB.prepare("INSERT INTO inbox(kind,status,room,from_label,summary,created_at,meta) VALUES('hint','replay',?,?,?,?,?)")
-          .bind(room, c.label, c.text, c.created_at, JSON.stringify({ step: c.step, said: REPLAY_SAID }))));
-        return html(`재현 카드 ${cards.length}장을 넣었습니다(8초 간격)`);
+        const cc = await kvGet(env.DB, "car_context");
+        const r = replayScript(s, t, parseEta(cc?.eta_min));
+        await env.DB.batch([
+          env.DB.prepare("INSERT INTO inbox(kind,status,room,from_label,created_at,raw,meta) VALUES('replay','replay',?,?,?,?,?)")
+            .bind(cc?.room ?? null, r.title, t, encodeReplay(r), "{}"),
+          env.DB.prepare("INSERT INTO inbox(kind,status,room,from_label,summary,created_at,meta) VALUES('hint','replay',?,'통화 정리',?,?,?)")
+            .bind(cc?.room ?? null, r.wrap, t + r.endMs + 6000, JSON.stringify({ replay: true })),
+        ]);
+        return html(`재현 통화를 시작했습니다(차가 5초 안에 받습니다, 약 ${Math.round(r.endMs / 1000)}초)`);
       }
     }
 
