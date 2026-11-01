@@ -19,12 +19,15 @@ fun callbackMessage(i: InboxItem): String? {
     if (i.kind != "call" || i.fromLabel.isBlank() || i.fromNumber.isBlank() || Regex("""\d{3}""").containsMatchIn(i.fromLabel)) return null
     val t = i.summary.ifBlank { i.raw }
     val hhmm = DEADLINE.find(t)?.let { m ->
-        val h = m.groupValues[2].toInt().let { if (m.groupValues[1] == "오후" && it < 12) it + 12 else it }; val min = m.groupValues[3].ifEmpty { "0" }.toInt()
-        if (h in 0..23 && min in 0..59) "%02d:%02d".format(h, min) else null
+        // 오전/오후가 없으면 1~7시는 업무 시간 기준 오후(13~19시). 0·8~12시·13시 이상은 그대로.
+        val h = m.groupValues[2].toInt().let { if (m.groupValues[1] == "오후" && it < 12 || m.groupValues[1].isEmpty() && it in 1..7) it + 12 else it }; val min = m.groupValues[3].ifEmpty { "0" }.toInt()
+        if (h in 0..23 && min in 0..59) koClock(h, min) else null
     }
     if (hhmm == null && !REPLY_ASK.containsMatchIn(t)) return null
     return "확인하고 ${hhmm?.let { "$it 전에 " } ?: "곧 "}연락드리겠습니다"
 }
+/** 문자·낭독용 "오후 3시 30분"(분이 0이면 "오후 3시"). */
+fun koClock(h: Int, min: Int) = "${if (h < 12) "오전" else "오후"} ${if (h % 12 == 0) 12 else h % 12}시${if (min > 0) " ${min}분" else ""}"
 fun callbackAsk(i: InboxItem, msg: String) = "${i.fromLabel}님께 '$msg'라고 문자 먼저 보내 드릴까요?"
 /** 할 일 카드 본문(taskDraft 형식: 번호 + 내용). */
 fun callbackTask(i: InboxItem, msg: String) = "${i.fromLabel}님께 회신 문자 ${i.fromNumber} / 내용: $msg"

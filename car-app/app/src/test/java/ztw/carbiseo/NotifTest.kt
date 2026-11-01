@@ -151,7 +151,13 @@ class NotifTest {
     private fun call(label: String = "김부장", num: String = "01000000000", sum: String) = InboxItem(1, label, sum, false, 0L, "", fromNumber = num)
 
     @Test fun 먼저_제안_기한이면_시각_문장() {
-        assertEquals("확인하고 15:30 전에 연락드리겠습니다", callbackMessage(call(sum = "오후 3시 30분까지 견적 부탁")))
+        assertEquals("확인하고 오후 3시 30분 전에 연락드리겠습니다", callbackMessage(call(sum = "오후 3시 30분까지 견적 부탁")))
+        // 오전/오후가 없으면 1~7시는 업무 시간 기준 오후, 그 밖은 그대로
+        assertEquals("확인하고 오후 3시 30분 전에 연락드리겠습니다", callbackMessage(call(sum = "3시 30분까지 연락 주세요")))
+        assertEquals("확인하고 오후 2시 전에 연락드리겠습니다", callbackMessage(call(sum = "2시 전까지 회신")))
+        assertEquals("확인하고 오전 10시 전에 연락드리겠습니다", callbackMessage(call(sum = "10시까지 회신")))
+        assertEquals("확인하고 오전 3시 전에 연락드리겠습니다", callbackMessage(call(sum = "오전 3시까지 회신")))
+        assertEquals("확인하고 오후 3시 30분 전에 연락드리겠습니다", callbackMessage(call(sum = "15:30까지 연락")))
         assertEquals("확인하고 곧 연락드리겠습니다", callbackMessage(call(sum = "회신 부탁드립니다")))
         assertEquals("김부장님께 '확인하고 곧 연락드리겠습니다'라고 문자 먼저 보내 드릴까요?", callbackAsk(call(sum = "x"), "확인하고 곧 연락드리겠습니다"))
         assertEquals("01000000000" to "확인하고 곧 연락드리겠습니다", taskDraft(callbackTask(call(sum = "x"), "확인하고 곧 연락드리겠습니다")))
