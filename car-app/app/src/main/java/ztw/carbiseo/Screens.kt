@@ -157,11 +157,12 @@ fun App() {
     val bg = { r: String -> prefs?.getString(r, null)?.let(::File) } // 없는 파일은 loadBg(IO)가 null로 처리
     Column(Modifier.fillMaxSize()) {
     AlertBanner(RoomService.alert)
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.weight(1f)) {
         Crossfade(room, animationSpec = tween(200), label = "room") { r -> RoomScreen(r, room, bg(r), ver) { settings = true } }
         AlertFrame(RoomService.alert)
-        Column(Modifier.align(Alignment.BottomCenter)) { ReplayBar(); AskBar(Modifier) }
+        AskBar(Modifier.align(Alignment.BottomCenter))
     }
+    ReplayBar() // 통화 중 띠는 화면을 밀어 올린다(덮으면 다음 일정·말하기가 가려짐)
     }
 }
 
@@ -302,6 +303,13 @@ private fun dial(ctx: Context, n: String) {
 }
 private fun talk(ctx: Context) { ctx.startService(Intent(ctx, RoomService::class.java).setAction(RoomService.ACTION_TALK)) }
 private fun time(ms: Long) = hhmm.format(Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()))
+/** 다음 일정 시각: 오늘이 아니면 "내일"·"요일"을 붙인다(밤에 잡힌 일정이 "00:00"만 보이던 문제). */
+private fun dayTime(ms: Long): String {
+    val z = RoomService.clock.zone
+    val d = Instant.ofEpochMilli(ms).atZone(z).toLocalDate().toEpochDay() - Instant.ofEpochMilli(RoomService.clock.millis()).atZone(z).toLocalDate().toEpochDay()
+    val day = when (d) { 0L -> ""; 1L -> "내일 "; else -> "${Instant.ofEpochMilli(ms).atZone(z).dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.KOREAN)}요일 " }
+    return day + hhmm.format(Instant.ofEpochMilli(ms).atZone(z))
+}
 
 /** 카드 머리: (이름, 보조 줄). 회신 번호는 끝 4자리만(H15). */
 private fun head(i: InboxItem): Pair<String, String?> = when (i.kind) {
@@ -325,7 +333,7 @@ private fun Park(onImage: Boolean, onSettings: () -> Unit) {
     val rest = items.filter { it !in carry }
     // M6: 저녁·주말 P(집 차고 등)는 급한 것만 펼치고 업무 카드는 접는다. 1탭으로 펼침
     var showAll by rememberSaveable { mutableStateOf(false) }
-    val shown = if (offDuty(Instant.ofEpochMilli(now).atZone(RoomService.clock.zone).toLocalDateTime(), RoomSettings(workEnd = workEndTime(RoomService.workEndHour))) && !showAll) rest.filter { it.urgent } else rest
+    val shown = if (offDuty(Instant.ofEpochMilli(now).atZone(RoomService.clock.zone).toLocalDateTime(), RoomSettings(workEnd = workEndTime(RoomService.workEndHour))) && !showAll) rest.filter { it.urgent || it.kind == "hint" } else rest // 통화 정리(hint)는 방금 내가 한 통화라 접지 않는다
     val queue = carry + shown
     var sel by rememberSaveable { mutableStateOf<Long?>(null) }
     var sheet by rememberSaveable { mutableStateOf(false) }
@@ -408,7 +416,7 @@ private fun NextEvent(e: Event) {
     val ctx = LocalContext.current
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(DS2).padding(horizontal = 26.dp, vertical = 24.dp)) {
         Text("다음 일정", color = DMute, fontSize = 21.sp)
-        Text("${time(e.start)} ${e.title}", Modifier.padding(top = 4.dp, bottom = 2.dp), color = DTx, fontSize = 38.sp, lineHeight = 46.sp, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text("${dayTime(e.start)} ${e.title}", Modifier.padding(top = 4.dp, bottom = 2.dp), color = DTx, fontSize = 38.sp, lineHeight = 46.sp, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
         if (e.place.isNotBlank()) Text(e.place, color = DMute, fontSize = 21.sp)
         Pill("지금 출발", Icons.Filled.LocationOn, primary = true, m = Modifier.fillMaxWidth().padding(top = 18.dp)) {
             ctx.startService(Intent(ctx, RoomService::class.java).setAction(RoomService.ACTION_GO)
