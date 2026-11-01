@@ -41,6 +41,7 @@ class RoomService : Service() {
     private val audio by lazy { getSystemService(AudioManager::class.java) }
     private val net = Executors.newSingleThreadExecutor() // 상태·발송 등 쓰기 호출은 여기서만(순서 보장, 메인 차단 방지)
     @Volatile private var alive = true
+    private var pollN = 0 // 메인 스레드에서만
     private val pollNet = Executors.newSingleThreadExecutor() // 폴링(읽기)만. 쓰기와 줄 서지 않는다
     private var stateGen = 0       // 방 변경마다 +1. 재시도는 최신 방일 때만.
     private var sentEta: Int? = null // 마지막으로 올린 남은 분. 분이 바뀔 때만 다시 올린다.
@@ -98,6 +99,7 @@ class RoomService : Service() {
         override fun run() {
             if (!alive) return
             val t0 = SystemClock.elapsedRealtime()
+            val slow = pollN++ % SLOW_EVERY == 0 // 일정·착신 설정은 거의 안 바뀌니 30초에 한 번(카드는 매번)
             pollNet.execute {
                 try {
                     val r = Server.fetchInbox(since)
@@ -107,8 +109,8 @@ class RoomService : Service() {
                         val cur = machine.room?.let { it.name to sentEta }
                         if (r != null && cur != null && cur != okState) { Log.i("ROOM", "state resync $cur (server had $okState)"); sendState(cur.first, ++stateGen, false) }
                     }
-                    Server.fetchSchedule()?.let { r -> ui.post { schedule = r } }
-                    if (!forwardOk || serviceNumber.isEmpty()) Server.fetchConfig()?.let { (n, fw) -> ui.post { serviceNumber = n; if (fw) markForwarded() } }
+                    if (slow) Server.fetchSchedule()?.let { r -> ui.post { schedule = r } }
+                    if (slow && (!forwardOk || serviceNumber.isEmpty())) Server.fetchConfig()?.let { (n, fw) -> ui.post { serviceNumber = n; if (fw) markForwarded() } }
                 } finally {
                     ui.post { if (alive) ui.postDelayed(this, maxOf(0L, POLL_MS - (SystemClock.elapsedRealtime() - t0))) } // Worker 요청 하루 약 3.5만, 무료 10만 안
                 }
@@ -541,6 +543,7 @@ class RoomService : Service() {
         private const val CH = "room"
         private const val HEARTBEAT_MS = 5 * 60_000L
         private const val POLL_MS = 5_000L
+        private const val SLOW_EVERY = 6 // 일정·설정 조회 주기(폴링 6번에 한 번)
         const val ACTION_REST = "ztw.carbiseo.REST"
         const val ACTION_TALK = "ztw.carbiseo.TALK" // F5: [말하기] 버튼
         const val ACTION_GO = "ztw.carbiseo.GO" // F7: extras lat, lng, name
