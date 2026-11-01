@@ -97,7 +97,7 @@ test("ment_text: 저장·따옴표 괄호 제거·ment 대본 반영·빈 값이
   assert.ok((await ring(env, OTHER)).Instruction.includes("운전 중이라 전화를 받을 수 없습니다."));
 });
 
-test("바로 연결: 전화 오는 순간 ringing 카드, 요약이 오면 같은 행을 채워 summarized", async () => {
+test("바로 연결: 전화 오는 순간 ringing 카드, 요약이 오면 새 id 행(meta.replaces)으로 바꾸고 ringing 행 삭제", async () => {
   const env = mkEnv();
   await settings(env, { direct_numbers: [VIP] });
   await ring(env, OTHER, CID2);
@@ -111,7 +111,10 @@ test("바로 연결: 전화 오는 순간 ringing 카드, 요약이 오면 같�
   await report(env, { call_id: CID, caller: "김민수", summary: "견적 문의" });
   c = cards(env);
   assert.equal(c.length, 1);
-  assert.deepEqual([c[0].id, c[0].status, c[0].urgent, c[0].summary, c[0].from_label, JSON.parse(c[0].meta).via], [id, "summarized", 1, "견적 문의", "김민수", "mcp"]);
+  assert.deepEqual([c[0].status, c[0].urgent, c[0].summary, c[0].from_label, JSON.parse(c[0].meta).via, JSON.parse(c[0].meta).direct], ["summarized", 1, "견적 문의", "김민수", "mcp", true]);
+  assert.ok(c[0].id > id && JSON.parse(c[0].meta).replaces === id); // 차는 id>since만 받으므로 새 id + 지울 카드 id
+  const inbox = (await (await worker.fetch(new Request("https://x/car/inbox?since=0", { headers: { authorization: "Bearer t" } }), env)).json()) as any;
+  assert.equal(JSON.parse(inbox.items.find((i: any) => i.call_id === CID).meta).replaces, id); // 응답 items[].meta(JSON 문자열).replaces
   await report(env, { call_id: CID, summary: "다른 요약" }); // 이미 summarized면 건너뜀
   assert.equal(cards(env)[0].summary, "견적 문의");
 });

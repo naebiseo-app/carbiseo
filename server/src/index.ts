@@ -79,13 +79,14 @@ type Card = ReturnType<typeof fromCols> & { call_id: string; summary: string; ur
 async function saveCallCard(db: D1Database, c: Card, extra: object = {}, from = "", status = "summarized") {
   const cc = await kvGet(db, "car_context");
   if (isDirect((await kvGet(db, "settings"))?.direct_numbers, from)) { c = { ...c, urgent: 1 }; extra = { ...extra, direct: true }; }
-  const meta = JSON.stringify({ car: carChip(cc, now()), ...extra });
-  // 바로 연결 번호는 전화 오는 순간 status='ringing' 카드가 먼저 있다 → 요약이 오면 그 행을 채워 summarized로(차는 id>since라 이 변경을 다시 받지 않는다)
-  if (status === "summarized")
-    await db.prepare("UPDATE inbox SET status='summarized', from_label=?, from_number=COALESCE(?,from_number), summary=COALESCE(NULLIF(?,''),summary), urgent=?, meta=? WHERE kind='call' AND call_id=? AND status='ringing'")
-      .bind(c.from_label, c.from_number, c.summary, c.urgent, meta, c.call_id).run();
-  await db.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,from_number,summary,urgent,created_at,meta) SELECT 'call',?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='call' AND call_id=?)")
-    .bind(status, parseRoom(cc?.room) ?? null, c.call_id, c.from_label, c.from_number, c.summary, c.urgent, now(), meta, c.call_id).run();
+  // 바로 연결 번호는 전화 오는 순간 status='ringing' 카드가 먼저 있다. 차는 id>since만 받아 같은 행의 변경을 못 보므로,
+  // 요약이 오면 새 id로 summarized 행을 넣고(meta.replaces=ringing 행 id) ringing 행은 지운다. 차가 replaces id 카드를 뺀다.
+  const ringId = status === "summarized"
+    ? (await db.prepare("SELECT id FROM inbox WHERE kind='call' AND call_id=? AND status='ringing' LIMIT 1").bind(c.call_id).first<{ id: number }>())?.id : undefined;
+  const meta = JSON.stringify({ car: carChip(cc, now()), ...extra, ...(ringId ? { replaces: ringId } : {}) });
+  await db.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,from_number,summary,urgent,created_at,meta) SELECT 'call',?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='call' AND call_id=? AND (?='ringing' OR status<>'ringing'))")
+    .bind(status, parseRoom(cc?.room) ?? null, c.call_id, c.from_label, c.from_number, c.summary, c.urgent, now(), meta, c.call_id, status).run();
+  if (ringId) await db.prepare("DELETE FROM inbox WHERE id=?").bind(ringId).run();
 }
 
 // MCP report_call: AI가 끝맺음 직전에 요약을 보낸다 → 끊는 순간 카드. 결과 "ok" 또는 오류 문구.
