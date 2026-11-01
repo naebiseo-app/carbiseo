@@ -257,5 +257,11 @@ const val TELLTALE_SPEECH = "계기판에 빨간 경고등이 켜졌어요. 안�
 private val HOME_NAME = Regex("""^\s*((우리\s*)?집|(my\s*)?home)\s*$""", RegexOption.IGNORE_CASE)
 fun homeFromRecent(recents: List<Pair<String?, LatLng>>): LatLng? = recents.firstOrNull { HOME_NAME.matches(it.first.orEmpty()) }?.second
 
+/** L6 런타임 권한(매니페스트의 위험 권한). CAR_SPEED는 AAOS 런타임 권한: 거부되면 속도만 null. RECORD_AUDIO 거부면 알림 대답은 화면 버튼. POST_NOTIFICATIONS는 33+. */
+const val PERM_NOTIF = "android.permission.POST_NOTIFICATIONS"
+val RUNTIME_PERMS = listOf("android.car.permission.CAR_SPEED", "android.permission.RECORD_AUDIO", PERM_NOTIF)
+fun missingPermissions(sdk: Int, granted: (String) -> Boolean): List<String> = RUNTIME_PERMS.filter { (it != PERM_NOTIF || sdk >= 33) && !granted(it) }
+fun permName(p: String) = when (p) { "android.permission.RECORD_AUDIO" -> "마이크"; PERM_NOTIF -> "알림"; else -> "차 속도" }
+
 /** 서버 car_context용 기어 한 글자. */
 fun gearCode(g: Gear): String? = when (g) { Gear.PARK -> "P"; Gear.DRIVE -> "D"; Gear.REVERSE -> "R"; Gear.NEUTRAL -> "N"; Gear.UNKNOWN -> null }

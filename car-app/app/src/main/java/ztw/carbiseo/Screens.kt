@@ -555,6 +555,7 @@ private fun FirstRun() {
     val owner = listOf(name.trim(), when (title) { 0 -> ""; 3 -> custom.trim(); else -> TITLES[title] }).filter { it.isNotEmpty() }.joinToString(" ")
     val ok = owner.isEmpty() || validName(owner)
     val words = firstWords(owner, prefs.getString("assistant_name", "") ?: "", RoomService.mode, prefs.getString("ment_text", "") ?: "")
+    val askPerms = rememberPermAsk { RoomService.finishSetup(ctx) } // 마지막 단계: 거부해도 설정은 끝난다(설정 화면에 '권한 꺼짐' 줄)
     val next = {
         if (page < 2) {
             val saved = prefs.getString("owner_label", "") ?: ""
@@ -567,7 +568,7 @@ private fun FirstRun() {
                     page = 1
                 }
             } else page++
-        } else RoomService.finishSetup(ctx)
+        } else missingPerms(ctx).let { if (it.isEmpty()) RoomService.finishSetup(ctx) else askPerms(it) }
     }
     Row(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).fillMaxHeight().background(Paper).padding(start = 60.dp, end = 60.dp, top = 56.dp, bottom = 40.dp)) {
@@ -740,6 +741,14 @@ private fun RestButton(bg: Color) {
     }
 }
 
+/** L6: 런타임 권한 요청 창(여러 개 한 번에). 결과가 오면 onDone. */
+@Composable
+private fun rememberPermAsk(onDone: () -> Unit): (List<String>) -> Unit {
+    val l = rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { onDone() }
+    return { l.launch(it.toTypedArray()) }
+}
+private fun missingPerms(ctx: Context) = missingPermissions(android.os.Build.VERSION.SDK_INT) { ctx.checkSelfPermission(it) == android.content.pm.PackageManager.PERMISSION_GRANTED }
+
 private fun speak(ctx: Context, t: String) { ctx.startService(Intent(ctx, RoomService::class.java).setAction(RoomService.ACTION_SPEAK).putExtra("t", t)) }
 
 /** 링 안 비서 상태: (두 줄 제목, 한 줄 설명, 준비됨). 실제 상태(서버·착신·응대 모드·방)에서만 고른다. */
@@ -846,6 +855,17 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("설정", Modifier.weight(1f), color = ParkInk, fontSize = 30.sp, fontWeight = FontWeight.Black)
             TextButton(onClose, Tall) { Text("닫기", color = ParkInk, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+        }
+        var missing by remember { mutableStateOf(missingPerms(ctx)) }
+        var asked by remember { mutableStateOf(false) }
+        val askPerms = rememberPermAsk { missing = missingPerms(ctx) }
+        if (missing.isNotEmpty()) Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color(0xFFFBE9E7)).padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("권한 꺼짐 — ${missing.joinToString("·") { permName(it) }}", Modifier.weight(1f), color = Urgent, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            TextButton({
+                // 한 번 물었는데도 꺼져 있으면(시스템이 더 안 묻는 경우) 앱 정보 화면으로
+                if (asked) runCatching { ctx.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.onFailure { toast(ctx, "설정 앱에서 내비서 권한을 켜 주세요") }
+                else { asked = true; askPerms(missing) }
+            }, Tall) { Text("켜기", color = ParkAcc, fontSize = 22.sp, fontWeight = FontWeight.Black) }
         }
         for (r in listOf("PARK", "DRIVE_WORK", "DRIVE_REST")) {
             Text("${roomName(r)} 배경", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)

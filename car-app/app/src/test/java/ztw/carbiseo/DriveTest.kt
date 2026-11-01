@@ -297,4 +297,12 @@ class DriveTest {
         r.reset()               // 새 질문
         assertTrue(r.again())
     }
+
+    @Test fun 꺼진_권한만_모은다() {
+        assertEquals(emptyList<String>(), missingPermissions(34) { true })
+        assertEquals(RUNTIME_PERMS, missingPermissions(34) { false })
+        assertEquals(listOf("android.car.permission.CAR_SPEED", "android.permission.RECORD_AUDIO"), missingPermissions(32) { false }) // 알림 권한은 33부터
+        assertEquals(listOf(PERM_NOTIF), missingPermissions(34) { it != PERM_NOTIF })
+        assertEquals("마이크·알림", missingPermissions(34) { it == "android.car.permission.CAR_SPEED" }.joinToString("·") { permName(it) })
+    }
 }
