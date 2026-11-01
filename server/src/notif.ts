@@ -1,3 +1,4 @@
+import { isBlocked } from "./guard.ts";
 // 폰 알림 읽어주기(35 설계): 폰(연결 앱·관리 페이지) → inbox kind='notif', 차 답장 → kind='reply' 대기열 → 폰.
 // 알림 본문은 개인 메시지라 console.log 금지.
 
@@ -20,6 +21,7 @@ export function parseReply(b: Record<string, unknown>) {
   if (b.confirmed !== true) return { error: "confirmed must be true" };
   if (!Number.isInteger(id) || id <= 0) return { error: "bad notif_id" };
   if (text.length < 1 || text.length > 500) return { error: "bad text" };
+  if (isBlocked(text)) return { error: "blocked text" }; // 사용자가 확인한 답장: 자르지 않고 금칙어·번호만
   return { id, text };
 }
 

@@ -1,5 +1,6 @@
 import { CALL_ID, carChip, callerNumber, cleanMent, cleanName, field, freshCtx, hhmm, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, reportLine, isDirect, sameNumber, type Mode, type Recent } from "./script.ts";
 import { adminPage, basicOk, demoSchedule, parseFakeCall, REPLAY_SAID, replayCards, type MailRow, type ReplyRow } from "./admin.ts";
+import { guardText, isBlocked } from "./guard.ts";
 import { parseNotify, parseReply, TAKE_REPLIES_SQL, type Notif } from "./notif.ts";
 
 interface Env {
@@ -77,6 +78,7 @@ type Card = ReturnType<typeof fromCols> & { call_id: string; summary: string; ur
 // ponytail: 칩은 카드 만든 시점의 차량 맥락. 정확히 하려면 call-context 때 값을 ring meta에 남겨 call_id로 잇기
 // from = 발신번호 원문. 바로 연결 목록(settings.direct_numbers)에 있으면 urgent=1·meta.direct (차는 피로·퇴근 중에도 읽음)
 async function saveCallCard(db: D1Database, c: Card, extra: object = {}, from = "", status = "summarized") {
+  c = { ...c, summary: guardText("summary", c.summary) }; // LLM 가드: 요약 카드 저장은 전부 여기를 지난다
   const cc = await kvGet(db, "car_context");
   if (isDirect((await kvGet(db, "settings"))?.direct_numbers, from)) { c = { ...c, urgent: 1 }; extra = { ...extra, direct: true }; }
   // 바로 연결 번호는 전화 오는 순간 status='ringing' 카드가 먼저 있다. 차는 id>since만 받아 같은 행의 변경을 못 보므로,
@@ -157,6 +159,7 @@ export function parseSend(b: Record<string, unknown>) {
   if (b.confirmed !== true) return { error: "confirmed must be true" };
   if (!/^\d{10,11}$/.test(to)) return { error: "bad to_number" };
   if (body.length < 1 || body.length > 1000) return { error: "bad body" };
+  if (isBlocked(body)) return { error: "blocked body" }; // 사용자가 확인한 문장이라 자르지 않고 금칙어·번호만 막는다
   return { to, body, label: cleanName(b.to_label) ?? `끝번호 ${to.slice(-4)}` };
 }
 
@@ -384,7 +387,7 @@ export default {
         // 주인 모드 통화 → 할 일 카드(문자 초안 등). 재전송 대비 1장만
         const cc = await kvGet(env.DB, "car_context");
         await env.DB.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,summary,created_at) SELECT 'task','open',?,?,'주인',?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='task' AND call_id=?)")
-          .bind(parseRoom(cc?.room) ?? null, card.call_id, taskText(raw), now(), card.call_id).run();
+          .bind(parseRoom(cc?.room) ?? null, card.call_id, guardText("summary", taskText(raw)), now(), card.call_id).run();
       } else if (card) await saveCallCard(env.DB, card, {}, new URLSearchParams(raw).get("From") ?? "");
       return json({ ok: true });
     }
@@ -411,6 +414,7 @@ export default {
       if (to.length < 1 || to.length > 100) return json({ error: "bad to" }, 400);
       if (body.length < 1 || body.length > 2000) return json({ error: "bad body" }, 400);
       if (subject.length > 100) return json({ error: "bad subject" }, 400);
+      if (isBlocked(body) || isBlocked(subject)) return json({ error: "blocked body" }, 400);
       const r = await env.DB.prepare("INSERT INTO inbox(kind,status,from_label,summary,created_at,meta) VALUES('sent','sent',?,?,?,?)")
         .bind(to, body, now(), JSON.stringify({ channel: "mail", subject })).run();
       return json({ ok: true, id: r.meta.last_row_id });
