@@ -266,6 +266,7 @@ class RoomService : Service() {
             askTouch = touchOk(); voicePath = voice.path
             // 정수 분이라 != 가 곧 "1분 이상 변화". 방 판정 전이면 첫 방 변경이 같이 올린다.
             val e = adapters.etaMin
+            etaMin = e; destName = forcedDest ?: adapters.destName // 운전 화면 '도착 예정'
             if (e != sentEta) machine.room?.let { sentEta = e; sendState(it.name, ++stateGen, true) }
             // 짧은 P 동안은 driveStart가 남아 있으니 주행 중일 때만 센다(M4). 휴식·피로가 같은 순간이면 한 문장만(H10).
             val restNow = restOnce.fire(restDue(driveStart.takeIf { machine.room != Room.PARK }, clock.millis(), restMin, restSnoozeUntil))
@@ -460,11 +461,18 @@ class RoomService : Service() {
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(rc, IntentFilter(action), Context.RECEIVER_EXPORTED) else registerReceiver(rc, IntentFilter(action))
             receivers += rc
         }
+        // 디버그 빌드만: 화면만 다른 방으로 그려 보기(판정·서버 상태는 그대로). adb shell am broadcast -a ztw.carbiseo.SCREEN --es room DRIVE_WORK (빈 값 = 해제)
+        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+            val scr = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) { screenOverride = i.getStringExtra("room")?.takeIf { it.isNotBlank() } } }
+            if (Build.VERSION.SDK_INT >= 33) registerReceiver(scr, IntentFilter("ztw.carbiseo.SCREEN"), Context.RECEIVER_EXPORTED) else registerReceiver(scr, IntentFilter("ztw.carbiseo.SCREEN"))
+            receivers += scr
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_REST) addRestStop()
         if (intent?.action == ACTION_TALK) startTalk()
+        if (intent?.action == ACTION_SPEAK) intent.getStringExtra("t")?.takeIf { it.isNotBlank() }?.let(::say) // 화면 버튼(급한 건 듣기·첫 마디 들어보기): 경고 중이면 보류
         if (intent?.action == ACTION_GO) intent.run {
             val lat = getDoubleExtra("lat", 0.0); val lng = getDoubleExtra("lng", 0.0); val name = getStringExtra("name") ?: ""
             Log.i("ROOM", "go $name $lat,$lng")
@@ -524,6 +532,10 @@ class RoomService : Service() {
         const val ACTION_REST = "ztw.carbiseo.REST"
         const val ACTION_TALK = "ztw.carbiseo.TALK" // F5: [말하기] 버튼
         const val ACTION_GO = "ztw.carbiseo.GO" // F7: extras lat, lng, name
+        const val ACTION_SPEAK = "ztw.carbiseo.SPEAK" // extra t: 읽을 문장
+        var etaMin by mutableStateOf<Int?>(null); private set // 목적지까지 남은 분(내비). null = 목적지 없음
+        var destName by mutableStateOf<String?>(null); private set
+        var screenOverride by mutableStateOf<String?>(null); private set // 디버그 SCREEN 브로드캐스트(화면 확인용)
         private const val NAVI_PKG = "ai.umos.maps.android.navigation.app" // Pleos 내비 앱(26 실측)
         var restOffer by mutableStateOf(false); private set // S2: 화면에 휴게소 버튼
         var restMin by mutableIntStateOf(REST_DEFAULT_MIN) // 연속 주행 기준(분). 설정 화면이 바꾼다.

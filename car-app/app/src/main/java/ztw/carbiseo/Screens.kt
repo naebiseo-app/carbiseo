@@ -11,6 +11,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.snap
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.LocalIndication
@@ -66,7 +73,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -118,15 +124,11 @@ private val DBg = Color(0xFF111316); private val DS1 = Color(0xFF1A1D22); privat
 private val DTx = Color(0xFFF2F3F5); private val DMute = Color(0xFFA6ACB4); private val DOut = Color(0xFF3B414A); private val DriveBg = Color(0xFF0D0F12)
 private val Paper = Color(0xFFEEEFF1); private val Mute = Color(0xFF5B616A); private val Line = Color(0xFFDFE1E5)
 private val SheetBg = DS2; private val SheetInk = DTx
-private val WorkBg1 = Color(0xFF04121F); private val WorkBg2 = Color(0xFF0B3A5C); private val WorkInk = Color(0xFFE6F4FF); private val WorkAcc = Color(0xFF5CE1E6)
-private val RestBg1 = Color(0xFF24183A); private val RestBg2 = Color(0xFF7A3E5C); private val RestBg3 = Color(0xFFE8875A)
-private val RestInk = Color(0xFFFFF3E8); private val RestAcc = Color(0xFFFFD38A)
 private val Tall = Modifier.heightIn(min = 64.dp)
 private val hhmm = DateTimeFormatter.ofPattern("HH:mm")
 
 
 private fun roomName(r: String) = when (r) { "PARK" -> "5분 사무실"; "DRIVE_WORK" -> "업무 운전"; "DRIVE_REST" -> "업무 시간 밖"; else -> "판정 전" }
-private fun accent(r: String) = when (r) { "PARK" -> ParkAcc; "DRIVE_REST" -> RestAcc; else -> WorkAcc }
 private fun toast(c: Context, s: String) = Toast.makeText(c, s, Toast.LENGTH_SHORT).show()
 private fun label(i: InboxItem) = when (i.kind) {
     "task" -> "할 일"
@@ -142,25 +144,16 @@ fun App() {
     val prefs = produceState<SharedPreferences?>(null) { value = withContext(Dispatchers.IO) { ctx.getSharedPreferences("car_ui", Context.MODE_PRIVATE).also { it.all } } }.value
     var ver by remember { mutableIntStateOf(0) } // 배경 바뀌면 +1 -> 다시 디코드
     var settings by rememberSaveable { mutableStateOf(false) }
-    val room = RoomService.room
+    val room = RoomService.screenOverride ?: RoomService.room
     LaunchedEffect(room) { if (room != "PARK") settings = false } // 운전 시작하면 설정 닫음
     if (settings && room == "PARK" && prefs != null) { Settings(prefs, { ver++ }) { settings = false }; return }
 
-    // 방 전환: 우리 창 안에서만 대각선 와이프 300ms 1회
-    var prev by remember { mutableStateOf(room) }
-    val p = remember { Animatable(1f) }
-    LaunchedEffect(room) { if (room != prev) { p.snapTo(0f); p.animateTo(1f, tween(300)); prev = room } }
+    // 방 전환: 우리 창 안에서만 200ms 크로스페이드 1회(튐·깜빡임 없음)
     val bg = { r: String -> prefs?.getString(r, null)?.let(::File) } // 없는 파일은 loadBg(IO)가 null로 처리
     Column(Modifier.fillMaxSize()) {
     AlertBanner(RoomService.alert)
     Box(Modifier.fillMaxSize()) {
-        if (p.value < 1f) RoomScreen(prev, room, bg(prev), ver) {}
-        val a = (1 - p.value) * 1.4f
-        Box(Modifier.fillMaxSize().clip(GenericShape { s, _ ->
-            moveTo(a * s.width, 0f); lineTo(s.width, 0f); lineTo(s.width, s.height); lineTo((a - 0.4f) * s.width, s.height); close()
-        })) { RoomScreen(room, room, bg(room), ver) { settings = true } }
-        if (p.value < 1f) Text(roomName(room), Modifier.align(Alignment.BottomEnd).padding(24.dp),
-            color = accent(room), fontSize = 44.sp, fontWeight = FontWeight.Black)
+        Crossfade(room, animationSpec = tween(200), label = "room") { r -> RoomScreen(r, room, bg(r), ver) { settings = true } }
         AlertFrame(RoomService.alert)
         AskBar(Modifier.align(Alignment.BottomCenter))
     }
@@ -208,12 +201,11 @@ private fun AlertFrame(a: Alert) {
 private fun RoomScreen(r: String, live: String, bgFile: File?, ver: Int, onSettings: () -> Unit) {
     val base = when (r) {
         "PARK" -> SolidColor(DBg)
-        "DRIVE_REST" -> Brush.linearGradient(listOf(RestBg1, RestBg2, RestBg3))
-        else -> Brush.radialGradient(listOf(WorkBg2, WorkBg1))
+        else -> SolidColor(DriveBg)
     }
     Box(Modifier.fillMaxSize().background(base)) {
         val onImage = bgFile != null && BgImage(bgFile, ver, bgPolicy(live))
-        when (r) { "PARK" -> Park(onImage, onSettings); "DRIVE_REST" -> Rest(); else -> Work(r) }
+        if (r == "PARK") Park(onImage, onSettings) else Drive(r)
     }
 }
 
@@ -599,43 +591,96 @@ private fun Sheet(i: InboxItem, onDone: () -> Unit) {
 
 /** S2: 연속 주행 기준을 넘으면 주행 화면에 큰 버튼 1개. 움직임 없음, 한 번 터치. */
 @Composable
-private fun RestButton(bg: Color, ink: Color, m: Modifier = Modifier) {
+private fun RestButton(bg: Color) {
     if (!RoomService.restOffer) return
     val ctx = LocalContext.current
-    Button({ ctx.startService(Intent(ctx, RoomService::class.java).setAction(RoomService.ACTION_REST)) },
-        m.fillMaxWidth().heightIn(min = 96.dp), colors = ButtonDefaults.buttonColors(containerColor = bg)) {
-        Text("가까운 휴게소 들르기", color = ink, fontSize = 30.sp, fontWeight = FontWeight.Black)
+    Row(Modifier.fillMaxWidth().padding(bottom = 16.dp).height(104.dp).clip(RoundedCornerShape(52.dp)).background(bg)
+        .press { ctx.startService(Intent(ctx, RoomService::class.java).setAction(RoomService.ACTION_REST)) },
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+        Text("가까운 휴게소 들르기", color = Ink, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
     }
 }
 
-/** 업무 운전(판정 전도 이 화면): 조작 요소는 휴게소 버튼(S2)뿐. */
+private fun speak(ctx: Context, t: String) { ctx.startService(Intent(ctx, RoomService::class.java).setAction(RoomService.ACTION_SPEAK).putExtra("t", t)) }
+
+/** 링 안 비서 상태: (두 줄 제목, 한 줄 설명, 준비됨). 실제 상태(서버·착신·응대 모드·방)에서만 고른다. */
+private fun ringState(rest: Boolean, offline: Boolean, forwardOk: Boolean, mode: String, recent: InboxItem?): Triple<String, String, Boolean> = when {
+    offline -> Triple("서버 연결\n끊김", "알림이 늦어져요", false)
+    !forwardOk -> Triple("응대 준비\n안 됨", "착신 설정이 필요해요", false)
+    rest -> Triple("조용히\n운전 중", "업무 전화는 메모만", true)
+    modeShown(mode) == "ment" -> Triple("안내 멘트로\n응대 중", "운전 중이라고만 알려요", true)
+    else -> Triple("전화\n대신 받는 중", recent?.let { "방금 ${head(it).first}" } ?: "용건을 받아 정리해요", true)
+}
+
+// ── 2B 운전 화면 '다크 링': 업무 방 = 주황 열린 링, 쉼 방 = 청록 닫힌 링. 조작은 듣기 1개(+휴게소 S2) ──
 @Composable
-private fun Work(r: String) {
-    val n = RoomService.cards().count { it.urgent && it.id !in RoomService.seen }
-    Box(Modifier.fillMaxSize().padding(24.dp)) {
-        Text(roomName(r), color = WorkAcc, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(readiness(RoomService.offline, RoomService.forwardOk, RoomService.mode), color = WorkInk, fontSize = 30.sp, fontWeight = FontWeight.Black)
-            Text("$n", color = WorkInk, fontSize = 120.sp, lineHeight = 130.sp, fontWeight = FontWeight.Black)
-            Text("급한 건", color = WorkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+private fun Drive(r: String) {
+    val ctx = LocalContext.current
+    val rest = r == "DRIVE_REST"
+    val acc = if (rest) RestHi else BrandHi
+    val cards = RoomService.cards()
+    val urgent = cards.filter { it.urgent && it.id !in RoomService.seen }
+    val n = if (rest) todo(cards, RoomService.seen) else urgent.size
+    val recent = cards.firstOrNull { it.kind == "call" && System.currentTimeMillis() - it.createdAt < 10 * 60_000 }
+    val (title, sub, ready) = ringState(rest, RoomService.offline, RoomService.forwardOk, RoomService.mode, recent)
+    Row(Modifier.fillMaxSize().padding(horizontal = 64.dp, vertical = 60.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(776.dp)) { Ring(rest, ready, acc, title, sub) }
+        Column(Modifier.weight(1f).fillMaxHeight().padding(vertical = 20.dp)) {
+            Row(Modifier.height(68.dp).clip(RoundedCornerShape(34.dp)).background(if (rest) Color(0xFF0F3A33) else Color(0xFF3A1D10)).padding(horizontal = 30.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text(when (r) { "DRIVE_REST" -> "쉼 방"; "DRIVE_WORK" -> "업무 방"; else -> "방 판정 전" }, color = if (rest) Color(0xFF7FE3CB) else Color(0xFFFFB48C), fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+            }
+            Text("$n", Modifier.padding(top = 56.dp), color = acc, fontSize = 200.sp, lineHeight = 170.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-10).sp)
+            // H7: 쉼 방의 업무 건은 다음 첫 업무 운전에 '어제 넘긴 건'으로 말하고 P 화면 맨 앞에 묶는다
+            Text(if (rest) "다음 출근길에 알려 드릴 업무" else "급한 건", Modifier.padding(top = 16.dp), color = DTx, fontSize = 38.sp, fontWeight = FontWeight.Bold)
+            RoomService.etaMin?.let { m ->
+                HorizontalDivider(Modifier.padding(top = 44.dp), thickness = 2.dp, color = Color(0xFF2A2F36))
+                Row(Modifier.padding(top = 30.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                    Text(java.time.LocalTime.now(RoomService.clock).plusMinutes(m.toLong()).format(hhmm), color = DTx, fontSize = 84.sp, lineHeight = 90.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("${RoomService.destName ?: "목적지"} 도착", Modifier.padding(bottom = 14.dp), color = DMute, fontSize = 30.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            RestButton(acc)
+            Row(Modifier.fillMaxWidth().height(104.dp).clip(RoundedCornerShape(52.dp)).background(Color(0xFF1C2026)).press {
+                speak(ctx, if (rest) recentCallsSpeech(cards) else if (urgent.none { it.kind == "call" }) "급한 전화는 없어요" else recentCallsSpeech(urgent).replaceFirst("최근 전화", "급한 전화"))
+            }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)) {
+                Icon(Icons.Filled.PlayArrow, null, Modifier.size(40.dp), tint = DTx)
+                Text(if (rest) "들려줘" else "급한 건 듣기", color = DTx, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+            }
         }
-        // H9·H10: 주행 중엔 동승자 확인 버튼을 띄우지 않는다(P 화면에서). 조작은 휴게소 버튼 1개.
-        Column(Modifier.align(Alignment.BottomCenter)) { RestButton(WorkAcc, WorkBg1) }
     }
 }
 
+/** 640dp 링. 들어올 때 한 번 차오르고(600ms) 상태가 바뀌면 그 값으로 이어서 움직인다. 깜빡임·반복 없음, 애니메이션 끔이면 바로. */
 @Composable
-private fun Rest() {
-    val n = todo(RoomService.cards(), RoomService.seen)
-    Column(Modifier.fillMaxSize().padding(24.dp)) {
-        Text(roomName("DRIVE_REST"), color = RestAcc, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Text("오늘 일은 여기까지", color = RestInk, fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Black)
-        Text(readiness(RoomService.offline, RoomService.forwardOk, RoomService.mode), color = RestInk, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.weight(1f))
-        RestButton(RestAcc, RestBg1, Modifier.padding(bottom = 16.dp))
-        // H7: 실제로 다음 첫 업무 운전에서 '어제 넘긴 전화 N건'을 말하고 P 화면 맨 위에 묶는다
-        Text("업무 ${n}건은 다음 출근길에 알려 드릴게요", color = RestInk, fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold)
+private fun Ring(rest: Boolean, ready: Boolean, acc: Color, title: String, sub: String) {
+    var on by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { on = true }
+    val target = when { rest -> 1f; ready -> 0.7f; else -> 0.18f }
+    val sweep by animateFloatAsState(if (on) target else 0f, if (reduceMotion()) snap() else tween(600, easing = FastOutSlowInEasing), label = "ring")
+    val col = if (ready) acc else DMute
+    Box(Modifier.size(640.dp), Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val st = 36.dp.toPx(); val o = 24.dp.toPx(); val box = Size(size.width - 2 * o, size.height - 2 * o)
+            if (!rest) drawArc(Color(0xFF2A1A12), 0f, 360f, false, Offset(o, o), box, style = Stroke(st))
+            else drawCircle(Color(0xFF16302B), 236.dp.toPx(), style = Stroke(2.dp.toPx()))
+            drawArc(col.copy(alpha = if (rest) 0.9f else 1f), -90f, 360f * sweep, false, Offset(o, o), box, style = Stroke(st, cap = StrokeCap.Round))
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(22.dp)) {
+            if (rest) MoonIcon(col, 88.dp) else Icon(Icons.Filled.Call, null, Modifier.size(88.dp), tint = col)
+            Text(title, color = DTx, fontSize = 52.sp, lineHeight = 60.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
+            Text(sub, color = DMute, fontSize = 28.sp, maxLines = 1)
+        }
     }
+}
+
+/** 초승달(아이콘 묶음에 없음): 원에서 원을 뺀 모양. 사용자 배경 사진 위에서도 비치게 차집합으로. */
+@Composable
+private fun MoonIcon(c: Color, s: Dp) = Canvas(Modifier.size(s)) {
+    val u = size.width / 24f
+    val disc = { cx: Float, cy: Float, r: Float -> Path().apply { addOval(Rect(Offset(cx * u, cy * u), r * u)) } }
+    drawPath(Path.combine(PathOperation.Difference, disc(11f, 13f, 8.5f), disc(15.5f, 8.5f, 7.5f)), c)
 }
 
 /** 꾸미기: PARK에서만 열린다. */
