@@ -11,6 +11,43 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import java.time.LocalDate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -36,6 +73,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.activity.compose.BackHandler
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -69,10 +108,16 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-// 시안 B 색 토큰
+// 설정 화면(밝은 바탕) 토큰
 private val ParkBg = Color(0xFFF3EEE4); private val ParkInk = Color(0xFF2B2620); private val ParkBody = Color(0xFF5E554A)
-private val ParkAcc = Color(0xFFC2683A); private val ParkNote = Color(0xFFFFFDF8)
-private val SheetBg = Color(0xFF2B2620); private val SheetInk = Color(0xFFF3EEE4)
+private val ParkAcc = Color(0xFFC2410C); private val ParkNote = Color(0xFFFFFDF8) // Brand: 흰 글자 대비 5.2:1
+// 확정 시안(1B·2B·5A) 토큰. 창 1700x1210dp(밀도 160) = 시안 px 1:1
+private val Ink = Color(0xFF14161A); private val Brand = Color(0xFFC2410C); private val BrandHi = Color(0xFFFF7A33)
+private val RestHi = Color(0xFF4FD1B5); private val Urgent = Color(0xFFB42318)
+private val DBg = Color(0xFF111316); private val DS1 = Color(0xFF1A1D22); private val DS2 = Color(0xFF23272E); private val DLine = Color(0xFF2E333B)
+private val DTx = Color(0xFFF2F3F5); private val DMute = Color(0xFFA6ACB4); private val DOut = Color(0xFF3B414A); private val DriveBg = Color(0xFF0D0F12)
+private val Paper = Color(0xFFEEEFF1); private val Mute = Color(0xFF5B616A); private val Line = Color(0xFFDFE1E5)
+private val SheetBg = DS2; private val SheetInk = DTx
 private val WorkBg1 = Color(0xFF04121F); private val WorkBg2 = Color(0xFF0B3A5C); private val WorkInk = Color(0xFFE6F4FF); private val WorkAcc = Color(0xFF5CE1E6)
 private val RestBg1 = Color(0xFF24183A); private val RestBg2 = Color(0xFF7A3E5C); private val RestBg3 = Color(0xFFE8875A)
 private val RestInk = Color(0xFFFFF3E8); private val RestAcc = Color(0xFFFFD38A)
@@ -162,7 +207,7 @@ private fun AlertFrame(a: Alert) {
 @Composable
 private fun RoomScreen(r: String, live: String, bgFile: File?, ver: Int, onSettings: () -> Unit) {
     val base = when (r) {
-        "PARK" -> SolidColor(ParkBg)
+        "PARK" -> SolidColor(DBg)
         "DRIVE_REST" -> Brush.linearGradient(listOf(RestBg1, RestBg2, RestBg3))
         else -> Brush.radialGradient(listOf(WorkBg2, WorkBg1))
     }
@@ -186,150 +231,276 @@ private fun BgImage(f: File, ver: Int, pol: BgPolicy): Boolean {
     return true
 }
 
+// ── 공통 부품: 누름 피드백(0.97 축소, 120ms) · 알약 버튼 76dp · 둥근 버튼 76dp ──
+@Composable
+private fun reduceMotion(): Boolean {
+    val c = LocalContext.current
+    return remember { android.provider.Settings.Global.getFloat(c.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f }
+}
+
+@Composable
+private fun Modifier.press(onClick: () -> Unit): Modifier {
+    val src = remember { MutableInteractionSource() }
+    val down by src.collectIsPressedAsState()
+    val k by animateFloatAsState(if (down && !reduceMotion()) 0.97f else 1f, tween(120), label = "press")
+    return graphicsLayer { scaleX = k; scaleY = k }.clickable(src, LocalIndication.current, role = Role.Button, onClick = onClick)
+}
+
+/** primary = 주황 채움(어두운 바탕은 BrandHi+검은 글자, 밝은 바탕은 Brand+흰 글자), 아니면 선(어두운)·회색 채움(밝은). */
+@Composable
+private fun Pill(text: String, icon: ImageVector? = null, primary: Boolean = false, m: Modifier = Modifier, light: Boolean = false, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(38.dp)
+    val ink = when { primary && light -> Color.White; primary || light -> Ink; else -> DTx }
+    val box = when { primary -> Modifier.background(if (light) Brand else BrandHi, shape); light -> Modifier.background(Color(0xFFE2E4E8), shape); else -> Modifier.border(2.dp, DOut, shape) }
+    Row(m.heightIn(min = 76.dp).clip(shape).then(box).press(onClick).padding(horizontal = 30.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)) {
+        if (icon != null) Icon(icon, null, Modifier.size(30.dp), tint = ink)
+        Text(text, color = ink, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    }
+}
+
+@Composable
+private fun Round(icon: ImageVector, desc: String, bg: Color = DS1, onClick: () -> Unit) =
+    Box(Modifier.size(76.dp).clip(CircleShape).background(bg).press(onClick), Alignment.Center) { Icon(icon, desc, Modifier.size(30.dp), tint = DTx) }
+
+/** 시안의 마이크 선 아이콘(24 격자). 아이콘 묶음에 마이크가 없어 직접 그린다. */
+@Composable
+private fun MicIcon(c: Color, s: Dp) = Canvas(Modifier.size(s)) {
+    val u = size.width / 24f; val st = Stroke(2.1f * u, cap = StrokeCap.Round)
+    drawRoundRect(c, Offset(9 * u, 3 * u), Size(6 * u, 11 * u), CornerRadius(3 * u), style = st)
+    drawArc(c, 0f, 180f, false, Offset(5.5f * u, 4.5f * u), Size(13 * u, 13 * u), style = st)
+    drawLine(c, Offset(12 * u, 17.5f * u), Offset(12 * u, 21 * u), 2.1f * u, StrokeCap.Round)
+}
+
+private fun dial(ctx: Context, n: String) {
+    runCatching { ctx.startActivity(Intent(Intent.ACTION_DIAL, android.net.Uri.parse("tel:$n")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        .onFailure { toast(ctx, "전화를 걸 수 있는 연결된 폰이 없어요") }
+}
+private fun talk(ctx: Context) { ctx.startService(Intent(ctx, RoomService::class.java).setAction(RoomService.ACTION_TALK)) }
+private fun time(ms: Long) = hhmm.format(Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()))
+
+/** 카드 머리: (이름, 보조 줄). 회신 번호는 끝 4자리만(H15). */
+private fun head(i: InboxItem): Pair<String, String?> = when (i.kind) {
+    "task" -> "할 일" to null
+    "sent" -> "보낸 문자" to "받는 사람 · ${i.fromLabel}"
+    "notif" -> i.fromLabel.ifBlank { i.app } to i.app.takeIf { it.isNotBlank() && i.fromLabel.isNotBlank() }
+    else -> i.fromLabel.ifBlank { "모르는 번호" } to i.fromNumber.takeLast(4).takeIf { it.length == 4 && "끝번호" !in i.fromLabel }?.let { "끝번호 $it" }
+}
+
+// ── 1B 정차 화면: 왼쪽 오늘 요약 레일 + 오른쪽 지금 처리할 1건 + 한 줄 대기열 + [말하기] ──
 @Composable
 private fun Park(onImage: Boolean, onSettings: () -> Unit) {
+    if (!RoomService.setupDone) { Box(Modifier.fillMaxSize().background(ParkBg).padding(24.dp)) { FirstRun() }; return }
+    val ctx = LocalContext.current
     val items = parkOrder(RoomService.cards())
-    val list = rememberLazyListState()
-    val newest = RoomService.inbox.maxOfOrNull { it.id }
-    LaunchedEffect(newest) { if (newest != null) list.animateScrollToItem(0) } // 새 카드가 위에 숨지 않게
+    // H7: 어제(업무 외 시간에) 넘긴 통화를 맨 앞에. 열면 본 것으로 저장(M5).
+    val today = LocalDate.now(RoomService.clock).toEpochDay()
+    val carry = carryOver(items, RoomService.deferred, RoomService.seen, today)
+    val rest = items.filter { it !in carry }
+    // M6: 저녁·주말 P(집 차고 등)는 급한 것만 펼치고 업무 카드는 접는다. 1탭으로 펼침
+    var showAll by rememberSaveable { mutableStateOf(false) }
+    val shown = if (offDuty(java.time.LocalDateTime.now(RoomService.clock), RoomSettings(workEnd = workEndTime(RoomService.workEndHour))) && !showAll) rest.filter { it.urgent } else rest
+    val queue = carry + shown
     var sel by rememberSaveable { mutableStateOf<Long?>(null) }
-    val ink = if (onImage) Color.White else ParkInk
-    Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 12.dp)) {
-        val ctx = LocalContext.current
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(roomName("PARK"), Modifier.weight(1f), color = if (onImage) Color.White else ParkAcc, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            // F5: 차 음성 입구. 한 마디 듣고 '아까 전화 뭐 왔어'·'다음 일정'·'급해요' 에 답한다
-            Button({ ctx.startService(Intent(ctx, RoomService::class.java).setAction(RoomService.ACTION_TALK)) }, Tall, colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
-                Text(if (RoomService.listening) "듣는 중…" else "말하기", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+    var sheet by rememberSaveable { mutableStateOf(false) }
+    val focus = queue.firstOrNull { it.id == sel } ?: queue.firstOrNull() // 고른 게 없으면 맨 앞(급한 것·새것)이 바로 보인다
+    val a = if (onImage) 0.86f else 1f // 사용자 배경 위에선 표면을 살짝 비친다
+    val carryTag = { i: InboxItem -> if (i !in carry) null else if (RoomService.deferred[i.id] == today - 1) "어제 넘긴 건" else "지난번 넘긴 건" }
+    Row(Modifier.fillMaxSize()) {
+        Rail(items, today, a)
+        Column(Modifier.weight(1f).fillMaxHeight().padding(start = 36.dp, end = 40.dp, top = 36.dp, bottom = 36.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("지금 처리할 건", color = DTx, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+                if (focus != null) Text("${queue.indexOf(focus) + 1} / ${queue.size}", Modifier.weight(1f), color = DMute, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+                else Spacer(Modifier.weight(1f))
+                PassengerToggle()
+                Round(Icons.Filled.Settings, "설정", onClick = onSettings)
             }
-            PassengerToggle(ink)
-            TextButton(onSettings, Tall) { Text("설정", color = ink, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
-        }
-        val unseen = todo(items, RoomService.seen)
-        Text(if (unseen == 0) "세워 둔 동안, 볼 건 없어요" else "확인할 게 ${unseen}건 있어요",
-            color = ink, fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Black)
-        val calls = todayCalls(RoomService.inbox, java.time.LocalDate.now()) // 완료한 카드도 '대신 받은 전화'엔 그대로 센다
-        if (calls > 0) Text("오늘 AI가 대신 받은 전화 ${calls}통 = 운전 중 통화 ${calls}번 줄임",
-            Modifier.padding(top = 6.dp), color = if (onImage) Color.White else ParkBody, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        if (RoomService.offline) Text("서버 연결 끊김 — 다시 연결하는 중. 그동안 전화는 통화 서비스가 기본 안내로 받아요",
-            Modifier.padding(top = 6.dp).fillMaxWidth().background(Color(0xFFC62828), RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
-            color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        RoomService.telltale?.let { Text("계기판 빨간 경고등($it) — 출발 전에 확인해 주세요",
-            Modifier.padding(top = 6.dp).fillMaxWidth().background(Color(0xFFC62828), RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
-            color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
-        if (!RoomService.offline && !RoomService.forwardOk && RoomService.setupDone) Text("AI 응대 준비 안 됨(착신 설정 필요) — 설정에서 '처음 설정'을 다시 볼 수 있어요",
-            Modifier.padding(top = 6.dp).fillMaxWidth().background(ParkInk, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
-            color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        PassengerOffer(ParkAcc, Color.White, Modifier.padding(top = 8.dp))
-        if (!RoomService.setupDone) { FirstRun(); return@Column }
-        nextEvent(RoomService.schedule, System.currentTimeMillis())?.let { NextEvent(it) }
-        // H7: 어제(업무 외 시간에) 넘긴 통화를 맨 위에 묶는다. 열면 본 것으로 저장(M5).
-        val today = java.time.LocalDate.now(RoomService.clock).toEpochDay()
-        val carry = carryOver(items, RoomService.deferred, RoomService.seen, today)
-        val rest = items.filter { it !in carry }
-        // M6: 저녁·주말 P(집 차고 등)는 급한 것만 펼치고 업무 카드는 접는다. 1탭으로 펼침
-        var showAll by rememberSaveable { mutableStateOf(false) }
-        val shown = if (offDuty(java.time.LocalDateTime.now(RoomService.clock), RoomSettings(workEnd = workEndTime(RoomService.workEndHour))) && !showAll) rest.filter { it.urgent } else rest
-        val tap = { i: InboxItem -> sel = if (sel == i.id) null else i.id; RoomService.markSeen(ctx, i.id) }
-        LazyColumn(Modifier.weight(1f).padding(top = 16.dp), list, verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
-            if (carry.isNotEmpty()) item(key = "carry") {
-                val y = carry.all { RoomService.deferred[it.id] == today - 1 }
-                Text("${if (y) "어제" else "지난번"} 넘긴 건 ${carry.size}", color = ink, fontSize = 22.sp, fontWeight = FontWeight.Black)
-            }
-            items(carry, key = { it.id }) { i -> Note(i, i.id == sel) { tap(i) } }
-            if (carry.isNotEmpty() && shown.isNotEmpty()) item(key = "new") { Text("그 밖의 것", color = ink, fontSize = 22.sp, fontWeight = FontWeight.Black) }
-            items(shown, key = { it.id }) { i -> Note(i, i.id == sel) { tap(i) } }
-            if (shown.size < rest.size) item(key = "more") {
-                TextButton({ showAll = true }, Tall) { Text("업무 ${rest.size - shown.size}건은 다음 평일 아침에 봐도 돼요 · 지금 보기", color = ink, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+            PassengerOffer()
+            if (focus == null) Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(32.dp)).background(DS1.copy(alpha = a)).padding(horizontal = 32.dp, vertical = 40.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("세워 둔 동안, 볼 건 없어요", color = DTx, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+                Text("전화가 오면 비서가 받아서 여기에 정리해 둘게요", color = DMute, fontSize = 24.sp)
+            } else Focus(focus, carryTag(focus), a) { sheet = true; RoomService.markSeen(ctx, focus.id) }
+            if (sheet && focus != null && focus.kind in setOf("call", "task")) Box(Modifier.weight(1f).fillMaxWidth(), Alignment.BottomCenter) { Sheet(focus) { sheet = false } }
+            else Queue(queue.filter { it != focus }, rest.size - shown.size, a, carryTag, { showAll = true }) { sel = it.id; sheet = false; RoomService.markSeen(ctx, it.id) }
+            Row(Modifier.fillMaxWidth().height(112.dp).clip(RoundedCornerShape(56.dp)).background(BrandHi).press { talk(ctx) },
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)) {
+                MicIcon(Ink, 40.dp)
+                Text(if (RoomService.listening) "듣는 중…" else "말하기", color = Ink, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
             }
         }
-        items.firstOrNull { it.id == sel && it.kind in setOf("call", "task") }?.let { Sheet(it) { sel = null } }
     }
 }
 
+/** 왼쪽 레일: 방 배지 · 오늘 대신 받은 전화 · 급한 건/미룬 건/읽어 준 알림 · 상태 경고 · 다음 일정. */
 @Composable
-private fun Note(i: InboxItem, selected: Boolean, onTap: () -> Unit) {
-    val shape = RoundedCornerShape(14.dp)
-    Column(Tall.fillMaxWidth().clip(shape).background(ParkNote).border(3.dp, if (selected) ParkAcc else ParkNote, shape)
-        .clickable(onClick = onTap).padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(label(i), Modifier.weight(1f), color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
-            Text(hhmm.format(Instant.ofEpochMilli(i.createdAt).atZone(ZoneId.systemDefault())), color = ParkBody, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            if (i.kind == "hint") Text("AI 제안", Modifier.padding(start = 8.dp).background(ParkInk, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 2.dp),
-                color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            if (i.urgent) Text("급함", Modifier.padding(start = 8.dp).background(ParkAcc, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 2.dp),
-                color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+private fun Rail(items: List<InboxItem>, today: Long, a: Float) {
+    val day = LocalDate.ofEpochDay(today)
+    val isToday = { i: InboxItem -> Instant.ofEpochMilli(i.createdAt).atZone(ZoneId.systemDefault()).toLocalDate() == day }
+    Column(Modifier.width(520.dp).fillMaxHeight().background(DS1.copy(alpha = a)).padding(horizontal = 36.dp, vertical = 40.dp), verticalArrangement = Arrangement.spacedBy(26.dp)) {
+        Row(Modifier.height(44.dp).clip(RoundedCornerShape(22.dp)).background(DS2).padding(start = 14.dp, end = 18.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(Modifier.size(24.dp).border(2.dp, BrandHi, RoundedCornerShape(6.dp)), Alignment.Center) { Text("P", color = BrandHi, fontSize = 15.sp, fontWeight = FontWeight.Black) }
+            Text(roomName("PARK"), color = DTx, fontSize = 21.sp, fontWeight = FontWeight.Bold)
         }
-        Text(i.summary.ifBlank { "AI가 통화 내용을 정리하고 있어요" }, color = ParkBody, fontSize = 18.sp, lineHeight = 26.sp)
-        if (i.kind == "sent") Text(sentStatus(i), color = if (i.status == "sent") ParkBody else Color(0xFFC62828), fontSize = 17.sp, fontWeight = FontWeight.Bold)
-        if (i.car.isNotBlank()) Text("쓴 차량 데이터 · ${i.car}", Modifier.padding(top = 6.dp).background(ParkBg, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 3.dp),
-            color = ParkBody, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-        // 카드는 주차 화면에만 있다 = 버튼도 P에서만
-        if (i.kind == "task") Button(onTap, Tall.padding(top = 8.dp), colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
-            Text(if (mailDraft(i.summary) != null) "메일 보내기" else "문자 보내기", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        val calls = todayCalls(RoomService.inbox, day) // 완료한 카드도 '대신 받은 전화'엔 그대로 센다
+        Column {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text("$calls", color = DTx, fontSize = 150.sp, lineHeight = 143.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-6).sp)
+                Text("통", Modifier.padding(start = 6.dp, bottom = 18.dp), color = DTx, fontSize = 44.sp, fontWeight = FontWeight.Bold)
+            }
+            Text(if (calls > 0) "오늘 비서가 대신 받은 전화예요" else "오늘은 대신 받은 전화가 없어요", Modifier.padding(top = 8.dp), color = DMute, fontSize = 24.sp)
         }
-        // H15: 서버가 보관한 실제 번호로 회신(화면엔 끝 4자리만). 문자는 카드를 눌러 확인 시트에서.
-        if (i.kind == "call" && i.fromNumber.isNotBlank()) {
-            val ctx = LocalContext.current
-            Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button({
-                    runCatching { ctx.startActivity(Intent(Intent.ACTION_DIAL, android.net.Uri.parse("tel:${i.fromNumber}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                        .onFailure { toast(ctx, "전화를 걸 수 있는 연결된 폰이 없어요") }
-                }, Tall, colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) { Text("전화 걸기", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
-                OutlinedButton(onTap, Tall) { Text("문자", color = ParkInk, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+        Column {
+            HorizontalDivider(color = DLine)
+            for ((k, v, hot) in listOf(
+                Triple("급한 건", items.count { it.urgent }, true),
+                Triple("내일 아침으로 미룬 건", RoomService.snoozed.count { it.value == today }, false),
+                Triple("차로 읽어 준 알림", RoomService.inbox.count { it.id in RoomService.notifDone && isToday(it) }, false),
+            )) {
+                Row(Modifier.fillMaxWidth().height(72.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(k, Modifier.weight(1f), color = DMute, fontSize = 24.sp)
+                    Text("$v", color = if (hot && v > 0) BrandHi else DTx, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
+                }
+                HorizontalDivider(color = DLine)
             }
         }
-        // F3: 처리한 통화·할 일은 [완료]로 목록·건수에서 뺀다(재시작해도 유지). H2: [내일 아침에]는 오늘만 숨기고 다음 날 첫 업무 운전 때 출근길 이월에 넣는다
-        if (i.kind == "call" || i.kind == "task") {
-            val ctx = LocalContext.current
-            Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton({ RoomService.markCardDone(ctx, i.id) }, Tall) { Text("완료", color = ParkInk, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
-                OutlinedButton({ RoomService.snooze(ctx, i.id) }, Tall) { Text("내일 아침에", color = ParkInk, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
-            }
-        }
+        val warn: @Composable (String) -> Unit = { t -> Text(t, Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Urgent).padding(horizontal = 20.dp, vertical = 14.dp),
+            color = Color.White, fontSize = 21.sp, lineHeight = 29.sp, fontWeight = FontWeight.Bold) }
+        if (RoomService.offline) warn("서버 연결 끊김 — 다시 연결하는 중. 그동안 전화는 통화 서비스가 기본 안내로 받아요")
+        RoomService.telltale?.let { warn("계기판 빨간 경고등($it) — 출발 전에 확인해 주세요") }
+        if (!RoomService.offline && !RoomService.forwardOk) warn("AI 응대 준비 안 됨(착신 설정 필요) — 설정에서 '처음 설정'을 다시 볼 수 있어요")
+        Spacer(Modifier.weight(1f))
+        nextEvent(RoomService.schedule, System.currentTimeMillis())?.let { NextEvent(it) }
     }
 }
 
-/** F7: 다음 일정 카드 + 출발(내비 경로 요청). */
+/** F7: 다음 일정 카드 + 지금 출발(내비 경로 요청). */
 @Composable
 private fun NextEvent(e: Event) {
     val ctx = LocalContext.current
-    Row(Tall.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(14.dp)).background(ParkNote).padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text("다음 일정 · ${hhmm.format(Instant.ofEpochMilli(e.start).atZone(ZoneId.systemDefault()))}", color = ParkBody, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Text(e.title, color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
-            Text(e.place, color = ParkBody, fontSize = 18.sp)
-        }
-        Button({
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(DS2).padding(horizontal = 26.dp, vertical = 24.dp)) {
+        Text("다음 일정", color = DMute, fontSize = 21.sp)
+        Text("${time(e.start)} ${e.title}", Modifier.padding(top = 4.dp, bottom = 2.dp), color = DTx, fontSize = 38.sp, lineHeight = 46.sp, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        if (e.place.isNotBlank()) Text(e.place, color = DMute, fontSize = 21.sp)
+        Pill("지금 출발", Icons.Filled.LocationOn, primary = true, m = Modifier.fillMaxWidth().padding(top = 18.dp)) {
             ctx.startService(Intent(ctx, RoomService::class.java).setAction(RoomService.ACTION_GO)
                 .putExtra("lat", e.at.lat).putExtra("lng", e.at.lng).putExtra("name", e.place))
             toast(ctx, "${e.place}(으)로 길 안내를 시작해요")
-        }, Tall, colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
-            Text("출발", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun Badge(t: String, hot: Boolean = false) = Text(t, Modifier.clip(RoundedCornerShape(10.dp)).background(if (hot) Color(0xFF3A1D14) else DS2).padding(horizontal = 12.dp, vertical = 3.dp),
+    color = if (hot) Color(0xFFFFB28A) else Color(0xFFD7DADF), fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+
+@Composable
+private fun Avatar(i: InboxItem, name: String) {
+    // 진짜 이름이면 첫 글자, 아니면(끝번호·모르는 번호·할 일 등) 종류 아이콘
+    val icon = when (i.kind) { "task" -> Icons.Filled.Check; "sent" -> Icons.Filled.Send; "notif" -> Icons.Filled.Notifications; "hint" -> Icons.Filled.Star; else -> Icons.Filled.Call }
+    val initial = name.firstOrNull()?.takeIf { i.kind in setOf("call", "notif", "hint") && it.isLetter() && !name.startsWith("끝번호") && !name.startsWith("모르는") }
+    Box(Modifier.size(72.dp).clip(CircleShape).background(BrandHi), Alignment.Center) {
+        if (initial != null) Text("$initial", color = Ink, fontSize = 28.sp, fontWeight = FontWeight.Bold) else Icon(icon, null, Modifier.size(32.dp), tint = Ink)
+    }
+}
+
+/** 포커스 카드: 지금 처리할 1건. 버튼은 통화·할 일에만(F3 완료·H2 내일 아침에). */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun Focus(i: InboxItem, carryTag: String?, a: Float, onSms: () -> Unit) {
+    val ctx = LocalContext.current
+    val shape = RoundedCornerShape(32.dp)
+    val (name, sub) = head(i)
+    Column(Modifier.fillMaxWidth().clip(shape).background(DS1.copy(alpha = a)).border(2.dp, Color(0xFF5A3420), shape).padding(horizontal = 32.dp, vertical = 30.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+            Avatar(i, name)
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text(name, Modifier.weight(1f, fill = false), color = DTx, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (i.urgent) Badge("급함", hot = true)
+                    if (i.kind == "hint") Badge("AI 제안")
+                    carryTag?.let { Badge(it) }
+                }
+                sub?.let { Text(it, color = DMute, fontSize = 22.sp, maxLines = 1) }
+            }
+            Text(time(i.createdAt), color = DMute, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Text(i.summary.ifBlank { "AI가 통화 내용을 정리하고 있어요" }, color = DTx, fontSize = 30.sp, lineHeight = 43.sp, fontWeight = FontWeight.SemiBold, maxLines = 4, overflow = TextOverflow.Ellipsis)
+        if (i.kind == "sent") Text(sentStatus(i), color = if (i.status == "sent") DMute else Color(0xFFFF8A80), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        if (i.car.isNotBlank()) FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("쓴 차량 데이터", Modifier.align(Alignment.CenterVertically), color = DMute, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+            for (c in i.car.split(" · ").filter { it.isNotBlank() })
+                Text(c, Modifier.clip(RoundedCornerShape(20.dp)).background(DS2).padding(horizontal = 16.dp, vertical = 6.dp), color = Color(0xFFD7DADF), fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        }
+        if (i.kind == "call" || i.kind == "task") Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // H15: 서버가 보관한 실제 번호로 회신(화면엔 끝 4자리만). 문자는 보내기 전 확인 시트에서.
+            if (i.kind == "call" && i.fromNumber.isNotBlank()) Pill("전화", Icons.Filled.Call, primary = true) { dial(ctx, i.fromNumber) }
+            if (i.kind == "task") Pill(if (mailDraft(i.summary) != null) "메일 보내기" else "문자 보내기", Icons.Filled.Send, primary = true, onClick = onSms)
+            else Pill("문자", Icons.Filled.Send, onClick = onSms)
+            Pill("완료", Icons.Filled.Check) { RoomService.markCardDone(ctx, i.id) }
+            Pill("내일 아침에", Icons.Filled.DateRange) { RoomService.snooze(ctx, i.id) }
+        }
+    }
+}
+
+/** 한 줄 대기열. 줄을 누르면 포커스로 올린다. */
+@Composable
+private fun ColumnScope.Queue(q: List<InboxItem>, hidden: Int, a: Float, carryTag: (InboxItem) -> String?, onShowAll: () -> Unit, onPick: (InboxItem) -> Unit) {
+    val ctx = LocalContext.current
+    val list = rememberLazyListState()
+    val newest = q.maxOfOrNull { it.id }
+    LaunchedEffect(newest) { if (newest != null) list.animateScrollToItem(0) } // 새 카드가 위에 숨지 않게
+    if (q.isEmpty() && hidden == 0) { Spacer(Modifier.weight(1f)); return }
+    LazyColumn(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(DS1.copy(alpha = a)), list) {
+        items(q, key = { it.id }) { i ->
+            val (name, sub) = head(i)
+            Row(Modifier.fillMaxWidth().height(102.dp).press { onPick(i) }.padding(start = 28.dp, end = 14.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                Box(Modifier.size(12.dp).clip(CircleShape).background(if (i.urgent) BrandHi else Color(0xFF4A5059)))
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(name, Modifier.weight(1f, fill = false), color = DTx, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        (carryTag(i) ?: sub ?: if (i.kind == "hint") "AI 제안" else null)?.let { Text(it, color = DMute, fontSize = 20.sp, maxLines = 1) }
+                    }
+                    Text(i.summary.ifBlank { "AI가 통화 내용을 정리하고 있어요" }, color = DMute, fontSize = 23.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Text(time(i.createdAt), color = DMute, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                if (i.kind == "call" && i.fromNumber.isNotBlank()) Round(Icons.Filled.Call, "전화", DS2) { dial(ctx, i.fromNumber) }
+            }
+            HorizontalDivider(color = DLine)
+        }
+        if (hidden > 0) item(key = "more") {
+            Row(Modifier.fillMaxWidth().heightIn(min = 96.dp).press(onShowAll).padding(horizontal = 28.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("업무 ${hidden}건은 다음 평일 아침에 봐도 돼요", Modifier.weight(1f), color = DMute, fontSize = 23.sp)
+                Text("지금 보기", color = BrandHi, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
 
 /** C⑤ 조수석 착석 감지 시 확인 버튼(자동으로 바꾸지 않는다). */
 @Composable
-private fun PassengerOffer(bg: Color, ink: Color, m: Modifier = Modifier) {
+private fun PassengerOffer() {
     if (!RoomService.passengerOffer) return
-    Row(m.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Button({ RoomService.togglePassenger(true); RoomService.passengerOffer = false },
-            Modifier.weight(1f).heightIn(min = 96.dp), colors = ButtonDefaults.buttonColors(containerColor = bg)) {
-            Text("동승자가 탔어요 · 동승자 모드로 바꿀까요?", color = ink, fontSize = 24.sp, fontWeight = FontWeight.Black)
-        }
-        OutlinedButton({ RoomService.passengerOffer = false }, Modifier.heightIn(min = 96.dp)) { Text("아니요", color = bg, fontSize = 22.sp) }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Pill("동승자가 탔어요 · 동승자 모드로 바꿀까요?", Icons.Filled.Person, primary = true, m = Modifier.weight(1f)) { RoomService.togglePassenger(true); RoomService.passengerOffer = false }
+        Pill("아니요") { RoomService.passengerOffer = false }
     }
 }
 
-/** H3 동승자 모드 토글: 정차 화면·설정에 같은 것. H9: 이번 운전만(저장 안 함). */
+/** H3 동승자 모드 토글: 정차 화면(어두운 알약)·설정(밝은 글자 버튼). H9: 이번 운전만(저장 안 함). */
 @Composable
-private fun PassengerToggle(ink: Color) {
+private fun PassengerToggle(light: Boolean = false) {
     val on = RoomService.passenger
-    TextButton({ RoomService.togglePassenger(!on) }, Tall) {
-        Text(if (on) "동승자 켜짐(이번 운전만)" else "동승자 꺼짐", color = if (on) ParkAcc else ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+    val t = if (on) "동승자 켜짐(이번 운전만)" else "동승자 없음"
+    if (light) { TextButton({ RoomService.togglePassenger(!on) }, Tall) { Text(t, color = if (on) ParkAcc else ParkInk, fontSize = 20.sp, fontWeight = FontWeight.Bold) }; return }
+    Row(Modifier.height(76.dp).clip(RoundedCornerShape(38.dp)).background(if (on) Color(0xFF3A1D14) else DS1).press { RoomService.togglePassenger(!on) }.padding(horizontal = 26.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Icon(Icons.Filled.Person, null, Modifier.size(28.dp), tint = if (on) BrandHi else DTx)
+        Text(t, color = if (on) Color(0xFFFFB28A) else DTx, fontSize = 23.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -394,19 +565,26 @@ private fun Sheet(i: InboxItem, onDone: () -> Unit) {
     var edit by remember(i.id) { mutableStateOf(false) }
     var busy by remember(i.id) { mutableStateOf(false) }
     val digits = number.filter { it.isDigit() }
-    Column(Modifier.fillMaxWidth().background(SheetBg, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)).padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(if (mail != null) "메일 · 보내기 전 확인" else "${if (i.kind == "task") "할 일" else "${label(i)}님께"} 문자 · 보내기 전 확인", color = SheetInk.copy(alpha = 0.8f), fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        if (auto) Text("받는 번호 · 끝번호 ${digits.takeLast(4)}(자동)", color = SheetInk, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        else OutlinedTextField(number, { number = it.take(if (mail != null) 80 else 13) }, Modifier.fillMaxWidth(), singleLine = true, label = { Text(if (mail != null) "받는 사람" else "받는 번호", fontSize = 16.sp) },
-            textStyle = TextStyle(color = SheetInk, fontSize = 20.sp))
-        if (mail != null) OutlinedTextField(subject, { subject = it.take(100) }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("제목", fontSize = 16.sp) },
-            textStyle = TextStyle(color = SheetInk, fontSize = 20.sp))
-        if (edit) OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), textStyle = TextStyle(color = SheetInk, fontSize = 20.sp))
-        else Text("“$text”", color = SheetInk, fontSize = 20.sp, lineHeight = 28.sp)
-        Row(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton({ edit = !edit }, Tall) { Text(if (edit) "다 고침" else "고치기", color = SheetInk, fontSize = 20.sp) }
-            Button({
+    val fc = OutlinedTextFieldDefaults.colors(focusedTextColor = SheetInk, unfocusedTextColor = SheetInk, focusedBorderColor = BrandHi, unfocusedBorderColor = DOut,
+        focusedLabelColor = BrandHi, unfocusedLabelColor = DMute, cursorColor = BrandHi)
+    val ts = TextStyle(color = SheetInk, fontSize = 26.sp)
+    val canSend = !busy && (if (mail != null) number.isNotBlank() else digits.length in 9..11) && text.isNotBlank()
+    BackHandler(onBack = onDone)
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(SheetBg).padding(horizontal = 32.dp, vertical = 26.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text(if (mail != null) "메일 · 보내기 전 확인" else "${if (i.kind == "task") "할 일" else "${label(i)}님께"} 문자 · 보내기 전 확인", color = DMute, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+        if (auto) Text("받는 번호 · 끝번호 ${digits.takeLast(4)}(자동)", color = SheetInk, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        else OutlinedTextField(number, { number = it.take(if (mail != null) 80 else 13) }, Modifier.fillMaxWidth(), singleLine = true, label = { Text(if (mail != null) "받는 사람" else "받는 번호", fontSize = 20.sp) },
+            textStyle = ts, colors = fc)
+        if (mail != null) OutlinedTextField(subject, { subject = it.take(100) }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("제목", fontSize = 20.sp) }, textStyle = ts, colors = fc)
+        if (edit) OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), textStyle = ts, colors = fc)
+        else Text("“$text”", color = SheetInk, fontSize = 26.sp, lineHeight = 38.sp, fontWeight = FontWeight.SemiBold)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Pill("닫기", onClick = onDone)
+            Spacer(Modifier.weight(1f))
+            Pill(if (edit) "다 고침" else "고치기") { edit = !edit }
+            Pill(if (busy) "보내는 중…" else "보내기", Icons.Filled.Send, primary = true, m = Modifier.alpha(if (canSend) 1f else 0.45f)) {
+                if (!canSend) return@Pill
                 busy = true
                 scope.launch {
                     val code = withContext(Dispatchers.IO) { if (mail != null) Server.mail(number.trim(), subject.trim(), text.trim()) else Server.send(if (auto) i.fromLabel else "", digits, text.trim()) }
@@ -414,8 +592,6 @@ private fun Sheet(i: InboxItem, onDone: () -> Unit) {
                     toast(ctx, when (code) { "ok" -> "보냈어요"; null -> "서버 연결 실패 — 다시 시도해 주세요"; "overseas_ip_blocked" -> "못 보냄(서버 IP 제한)"; else -> "못 보냄($code)" })
                     if (code == "ok") { RoomService.dropLocal(ctx, i.id); onDone() }
                 }
-            }, Tall, enabled = !busy && (if (mail != null) number.isNotBlank() else digits.length in 9..11) && text.isNotBlank(), colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
-                Text("보내기", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -497,7 +673,7 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("동승자 모드 (업무 음성 끔)", Modifier.weight(1f), color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            PassengerToggle(ParkInk)
+            PassengerToggle(light = true)
         }
         Text("휴식 제안: 연속 운전 ${RoomService.restMin}분부터", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
