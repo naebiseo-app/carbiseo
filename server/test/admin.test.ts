@@ -40,3 +40,9 @@ test("가짜 수신: 체크 안 해도 용건 문장이 급하면 급함(실제 
   assert.equal(parseFakeCall(f({ from_label: "한가람", summary: "급한 일입니다" }))!.urgent, 1);
   assert.equal(parseFakeCall(f({ from_label: "한가람", summary: "급하지 않은 일" }))!.urgent, 0);
 });
+
+test("데모 일정 contact_number: 가짜 번호 3개(서로 다름), /car/schedule 응답에 그대로", () => {
+  const s = demoSchedule(Date.UTC(2026, 9, 29, 5, 10));
+  assert.deepEqual(s.map((e) => e.contact_number), ["01000000001", "01000000002", "01000000003"]);
+  assert.equal(JSON.parse(JSON.stringify({ items: s })).items[0].contact, "김민수 과장"); // 기존 필드 유지
+});
