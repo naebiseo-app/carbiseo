@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test test/script.test.ts test/sig.test.ts test/admin.test.ts test/retention.test.ts test/summary.test.ts test/owner.test.ts test/replay.test.ts test/context.test.ts test/relay.test.ts test/switch.test.ts test/notif.test.ts test/mcp.test.ts test/family.test.ts test/direct.test.ts test/guard.test.ts test/action.test.ts",
+    "test": "node --test test/script.test.ts test/sig.test.ts test/admin.test.ts test/retention.test.ts test/summary.test.ts test/owner.test.ts test/replay.test.ts test/context.test.ts test/relay.test.ts test/switch.test.ts test/notif.test.ts test/mcp.test.ts test/family.test.ts test/direct.test.ts test/guard.test.ts test/action.test.ts test/placephone.test.ts",
     "deploy": "npx --yes wrangler@4 deploy"
   }
 }

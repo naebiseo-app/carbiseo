@@ -15,6 +15,7 @@ interface Env {
   OWNER_NUMBER?: string; // 주인 휴대폰: 이 번호로 오면 주인 모드
   SMS_RELAY_URL?: string; // 문자 중계(Vercel 서울, sms-relay/api/send.js)
   SMS_RELAY_SECRET?: string;
+  KAKAO_REST_KEY?: string; // 카카오 로컬 키워드 검색(가게 번호). 없으면 place-phone은 no_key
 }
 
 const json = (o: unknown, status = 200) =>
@@ -233,6 +234,21 @@ export const retention = (t: number): [string, number][] => [
 ];
 
 const HANGUP_MS = 12_000; // 멘트(약 8초) + 연결 지연. Workers waitUntil은 응답 뒤 30초까지
+
+/** O4: 목적지 이름+좌표 -> 가게 번호(카카오 로컬 키워드 검색, 500m 안 가까운 순 첫 결과). 휴대폰 판정은 차 sendable()과 같다(01x 10~11자리). 키 없음·실패는 조용히 null. */
+export async function placePhone(key: string | undefined, name: string, lat: string, lng: string): Promise<{ phone: string | null; kind: "mobile" | "landline" | null; name: string | null; reason?: string }> {
+  const none = (reason: string) => ({ phone: null, kind: null, name: null, reason });
+  if (!key) return none("no_key");
+  if (!name || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return none("bad_request");
+  try {
+    const r = await fetch(`https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(name)}&x=${lng}&y=${lat}&radius=500&sort=distance`, { headers: { Authorization: `KakaoAK ${key}` } });
+    if (!r.ok) return none("upstream");
+    const d = ((await r.json()) as { documents?: { phone?: string; place_name?: string }[] }).documents?.[0];
+    const digits = (d?.phone ?? "").replace(/\D/g, "");
+    if (!d || digits.length < 8) return none("not_found");
+    return { phone: d.phone!.trim(), kind: /^01\d{8,9}$/.test(digits) ? "mobile" : "landline", name: d.place_name ?? name };
+  } catch { return none("upstream"); }
+}
 
 export default {
   async fetch(req: Request, env: Env, ctx?: { waitUntil(p: Promise<unknown>): void }): Promise<Response> {
@@ -500,6 +516,12 @@ export default {
       if (!authed) return json({ error: "unauthorized" }, 401);
       const ring = await env.DB.prepare("SELECT 1 FROM inbox WHERE kind='ring' LIMIT 1").first();
       return json({ service_number: env.CLAWOPS_NUMBER ?? "", forwarded: !!ring });
+    }
+
+    if (m === "GET" && pathname === "/car/place-phone") {
+      if (!authed) return json({ error: "unauthorized" }, 401);
+      const q = new URL(req.url).searchParams;
+      return json(await placePhone(env.KAKAO_REST_KEY, q.get("name") ?? "", q.get("lat") ?? "", q.get("lng") ?? ""));
     }
 
     if (m === "GET" && pathname === "/car/schedule") {
