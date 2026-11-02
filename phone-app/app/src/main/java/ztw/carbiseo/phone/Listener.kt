@@ -37,7 +37,9 @@ class Listener : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val n = sbn.notification
         val e = n.extras
-        val m = toMsg(sbn.packageName, sbn.key, n.category, e.getString(Notification.EXTRA_TEMPLATE) == Notification.MessagingStyle::class.java.name,
+        // 디버그 빌드만: 시험 메신저(TestSender, 이 앱 자신)의 알림을 카카오톡으로 취급(에뮬엔 카톡이 없다). release에선 BuildConfig.DEBUG=false라 꺼진다.
+        val pkg = if (BuildConfig.DEBUG && sbn.packageName == packageName) "com.kakao.talk" else sbn.packageName
+        val m = toMsg(pkg, sbn.key, n.category, e.getString(Notification.EXTRA_TEMPLATE) == Notification.MessagingStyle::class.java.name,
             n.flags and (Notification.FLAG_GROUP_SUMMARY or Notification.FLAG_ONGOING_EVENT) != 0,
             e.getCharSequence(Notification.EXTRA_TITLE), e.getCharSequence(Notification.EXTRA_TEXT), replyAction(n) != null) ?: return
         if (last[sbn.key]?.text == m.text) return
