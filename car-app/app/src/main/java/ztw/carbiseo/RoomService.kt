@@ -78,7 +78,7 @@ class RoomService : Service() {
     private val notifFresh = mutableSetOf<Long>()
     private val notifSaid = mutableSetOf<Long>()
     // 음성으로 묻고 대답을 기다리는 질문(알림 묻기는 talk가 따로). 대답은 heard()가 받는다.
-    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, INTENT }
+    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, CALL, INTENT }
     private class PendingSend(val label: String, val number: String, val body: String, val task: String) // 보낼 문자(label·number·body)와 못 보냈을 때 남길 할 일 본문
     private var pending = Ask.NONE
     private var lateEvent: Pair<Event, Int>? = null
@@ -88,6 +88,7 @@ class RoomService : Service() {
     private val callbackAsked = mutableSetOf<Long>() // 문자 먼저 보낼지 이미 물은 카드(카드당 한 번)
     private var callback: Pair<InboxItem, String>? = null
     private var sending: PendingSend? = null
+    private var shopCall: Pair<String, String>? = null // O4 유선: 전화 걸까요?를 물은 (번호, 못 걸면 남길 카드)
     private var reserve: Pair<String, String>? = null // 예약 초안을 물은 (목적지 이름, 도착 HH:MM)
     private var forcedPhone: String? = null // 디버그 ROUTE의 --es phone(가짜 번호로 서버 없이 시연)
     private var forcedDest: String? = null // 디버그 ROUTE의 --es name (에뮬은 내비가 목적지 이름을 안 줄 수 있어서)
@@ -192,11 +193,11 @@ class RoomService : Service() {
         if (urgentNeed(said) && machine.room.let { it != null && it != Room.PARK }) { talk.cancel(); askStep = talk.step; return addRestStop(true, true) }
         when (p) {
             // Q1 조용한 비서: 못 알아들으면 한 번만 다시 묻고, 그다음은 화면 2택(unsure). 번호를 알면 초안을 읽어 주고 "이대로 보낼까요?"(SEND). 모르면 지금처럼 카드만.
-            Ask.LATE, Ask.RESERVE, Ask.CALLBACK, Ask.SEND, Ask.REST -> when (voiceCmd(said)) {
+            Ask.LATE, Ask.RESERVE, Ask.CALLBACK, Ask.SEND, Ask.CALL, Ask.REST -> when (voiceCmd(said)) {
                 Cmd.Yes -> answerYn(p, true)
                 Cmd.No, Cmd.Later -> answerYn(p, false) // '나중에'는 이 질문들엔 '아니'
                 else -> if (p == Ask.REST) unsure(p, "들르기" to { answerYn(p, true) }, "괜찮아요" to { answerYn(p, false) }, { answerYn(p, false) })
-                    else unsure(p, (if (p == Ask.RESERVE) "만들기" else "보내기") to { answerYn(p, true) }, "그만두기" to { answerYn(p, false) }, { answerYn(p, false) })
+                    else unsure(p, (when (p) { Ask.RESERVE -> "만들기"; Ask.CALL -> "전화하기"; else -> "보내기" }) to { answerYn(p, true) }, "그만두기" to { answerYn(p, false) }, { answerYn(p, false) })
             }
             // F5: [말하기] 뒤 한 마디. 못 알아들으면 "다시 말씀해 주세요" 한 번만, 그다음은 화면 2택(주행 중엔 그냥 끝).
             // S1 피로 중엔 급해·화장실만 통과, 업무 말은 한 문장으로 거절(fatigueGate)
@@ -224,6 +225,7 @@ class RoomService : Service() {
             // 질문이 이미 초안을 읽어 줬으니 '응'이면 바로 발송(한 번 더 묻지 않는다)
             Ask.CALLBACK -> callback?.let { (i, m) -> if (y) sendOrCard(PendingSend(i.fromLabel, i.fromNumber, m, callbackTask(i, m)), CALLBACK_DONE_SPEECH, false) }
             Ask.SEND -> sending?.let { s -> if (y) doSend(s) else { addLocalTask(s.task); say(SEND_KEEP_SPEECH) } }
+            Ask.CALL -> shopCall?.let { (ph, task) -> if (y) callShop(ph, task) else { addLocalTask(task); say(CALL_KEEP_SPEECH) } }
             Ask.REST -> if (y) addRestStop(true) else { restSnoozeUntil = clock.millis() + REST_SNOOZE_MS; restOnce.reset(); restOffer = false }
             else -> {}
         }
@@ -257,11 +259,19 @@ class RoomService : Service() {
                 val task = reserveTask(n, t, ph); val m = sendable(ph)
                 when {
                     m != null -> sendOrCard(PendingSend(n, m, taskDraft(task).second, task), RESERVE_DONE_SPEECH, true)
-                    !ph.isNullOrBlank() -> { addLocalTask(task); say(landlineSpeech(n)) }
+                    !ph.isNullOrBlank() -> if (canAsk()) { shopCall = ph to task; askVoice(landlineSpeech(n), Ask.CALL) } else { addLocalTask(task); say(CALL_KEEP_SPEECH) }
                     else -> { addLocalTask(task); say(NO_PHONE_SPEECH) }
                 }
             }
         }
+    }
+
+    /** O4 유선 가게: 운전 중에도 핸즈프리 통화(차 블루투스 전화). 권한이 없거나 못 걸면 카드로 남긴다. */
+    private fun callShop(ph: String, task: String) {
+        val call = checkSelfPermission(android.Manifest.permission.CALL_PHONE) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        // 서비스에서 통화 화면(ACTION_CALL)을 띄우면 백그라운드 실행 차단(BAL_BLOCK, 에뮬 실측) → 화면 없이 거는 TelecomManager.placeCall
+        runCatching { check(call); getSystemService(android.telecom.TelecomManager::class.java).placeCall(android.net.Uri.fromParts("tel", ph, null), android.os.Bundle()) }
+            .onFailure { Log.w("ROOM", "call FAIL $it"); addLocalTask(task); say("전화를 걸 수 없어요. 할 일에 가게 번호를 남겨 뒀어요") }
     }
 
     /** 기존 문자 발송 경로(Server.send). 성공하면 "보냈어요", 실패하면 카드로 남긴다. */

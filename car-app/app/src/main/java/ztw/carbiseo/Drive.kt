@@ -238,7 +238,10 @@ fun shopPhone(text: String): String? = Regex("""가게전화\s*[:：]\s*([0-9-]+
 const val NO_PHONE_SPEECH = "가게 번호를 못 찾았어요. 차를 세우면 내비에서 가게를 열어 드릴게요"
 /** 예약 카드("가게 예약 / ...")의 가게 이름. 아니면 null. */
 fun reserveShop(text: String): String? = Regex("""^(.+?) 예약 /""").find(text)?.groupValues?.get(1)
-fun landlineSpeech(name: String) = "${name}는 가게 전화라 문자를 못 받아요. 차를 세우면 전화 연결해 드릴게요"
+/** 받침 있으면 "은", 없으면 "는"(한글이 아니면 "는"). */
+fun eunNeun(w: String) = if (w.lastOrNull()?.let { it in '가'..'힣' && (it - '가') % 28 != 0 } == true) "은" else "는"
+fun landlineSpeech(name: String) = "${name}${eunNeun(name)} 가게 전화라 문자를 못 받아요. 지금 전화 연결할까요?"
+const val CALL_KEEP_SPEECH = "알겠어요. 할 일에 가게 번호를 남겨 뒀어요"
 
 /** 설정 "바로 연결 번호": 쉼표·공백으로 나눠 하이픈을 뗀 숫자 10~11자리, 최대 10개. 하나라도 틀리면 null. */
 fun parseDirect(text: String): List<String>? =
@@ -286,9 +289,9 @@ fun homeFromRecent(recents: List<Pair<String?, LatLng>>): LatLng? = recents.firs
 
 /** L6 런타임 권한(매니페스트의 위험 권한). CAR_SPEED는 AAOS 런타임 권한: 거부되면 속도만 null. RECORD_AUDIO 거부면 알림 대답은 화면 버튼. POST_NOTIFICATIONS는 33+. */
 const val PERM_NOTIF = "android.permission.POST_NOTIFICATIONS"
-val RUNTIME_PERMS = listOf("android.car.permission.CAR_SPEED", "android.permission.RECORD_AUDIO", PERM_NOTIF)
+val RUNTIME_PERMS = listOf("android.car.permission.CAR_SPEED", "android.permission.RECORD_AUDIO", PERM_NOTIF, "android.permission.CALL_PHONE")
 fun missingPermissions(sdk: Int, granted: (String) -> Boolean): List<String> = RUNTIME_PERMS.filter { (it != PERM_NOTIF || sdk >= 33) && !granted(it) }
-fun permName(p: String) = when (p) { "android.permission.RECORD_AUDIO" -> "마이크"; PERM_NOTIF -> "알림"; else -> "차 속도" }
+fun permName(p: String) = when (p) { "android.permission.RECORD_AUDIO" -> "마이크"; PERM_NOTIF -> "알림"; "android.permission.CALL_PHONE" -> "전화"; else -> "차 속도" }
 
 /** 서버 car_context용 기어 한 글자. */
 fun gearCode(g: Gear): String? = when (g) { Gear.PARK -> "P"; Gear.DRIVE -> "D"; Gear.REVERSE -> "R"; Gear.NEUTRAL -> "N"; Gear.UNKNOWN -> null }

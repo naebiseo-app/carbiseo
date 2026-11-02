@@ -268,7 +268,7 @@ class DriveTest {
         assertEquals("01000000000", taskDraft(mob).first); assertEquals("01000000000", sendable(taskDraft(mob).first)); assertEquals(null, shopPhone(mob))
         val land = reserveTask("가명 식당", "04:20", "02-0000-0000")
         assertEquals("02-0000-0000", shopPhone(land)); assertEquals(null, sendable(taskDraft(land).first))
-        assertTrue(landlineSpeech("가명 식당").contains("문자를 못 받아요"))
+        assertTrue(landlineSpeech("가명 식당").startsWith("가명 식당은 ")); assertTrue(landlineSpeech("가명 카페").startsWith("가명 카페는 ")); assertTrue(landlineSpeech("가명 식당").contains("지금 전화 연결할까요"))
         val none = reserveTask("가명 식당", "04:20", null)
         assertEquals(null, shopPhone(none)); assertEquals("" to "안녕하세요, 04:20쯤 도착 예정인데 자리(주차) 가능할까요?", taskDraft(none)); assertEquals(none, reserveTask("가명 식당", "04:20", ""))
         assertEquals("가명 식당", reserveShop(none)); assertEquals(null, reserveShop("김민수 회신 / 내용: 확인"))
@@ -353,8 +353,8 @@ class DriveTest {
     @Test fun 꺼진_권한만_모은다() {
         assertEquals(emptyList<String>(), missingPermissions(34) { true })
         assertEquals(RUNTIME_PERMS, missingPermissions(34) { false })
-        assertEquals(listOf("android.car.permission.CAR_SPEED", "android.permission.RECORD_AUDIO"), missingPermissions(32) { false }) // 알림 권한은 33부터
+        assertEquals(listOf("android.car.permission.CAR_SPEED", "android.permission.RECORD_AUDIO", "android.permission.CALL_PHONE"), missingPermissions(32) { false }) // 알림 권한은 33부터
         assertEquals(listOf(PERM_NOTIF), missingPermissions(34) { it != PERM_NOTIF })
-        assertEquals("마이크·알림", missingPermissions(34) { it == "android.car.permission.CAR_SPEED" }.joinToString("·") { permName(it) })
+        assertEquals("마이크·알림·전화", missingPermissions(34) { it == "android.car.permission.CAR_SPEED" }.joinToString("·") { permName(it) })
     }
 }
