@@ -47,6 +47,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.intl.LocaleList
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -72,7 +74,10 @@ class MainActivity : ComponentActivity() {
         if (BuildConfig.DEBUG && Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 0) // 디버그 시험 알림용
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(background = Bg, surface = Bg, primary = Brand, onPrimary = OnBrand, onBackground = Tx, onSurface = Tx)) {
-                Surface(Modifier.fillMaxSize(), color = Bg, contentColor = Tx) { Root() }
+                Surface(Modifier.fillMaxSize(), color = Bg, contentColor = Tx) {
+                    // 폰 폭에서 한글이 음절 단위로 끊겨 '요' 한 글자만 다음 줄로 넘어가던 것: 어절 단위 줄바꿈(API 33+, 그 아래는 기존대로). 어절 규칙은 한국어 로캘에서만 켜져 글자 로캘을 ko로 고정
+                    ProvideTextStyle(LocalTextStyle.current.copy(lineBreak = LineBreak.Paragraph.copy(wordBreak = LineBreak.WordBreak.Phrase), localeList = LocaleList("ko"))) { Root() }
+                }
             }
         }
     }
