@@ -88,7 +88,7 @@ object Server {
                 InboxItem(it.getLong("id"), it.str("from_label"), it.str("summary"),
                     it.optInt("urgent") != 0, it.optLong("created_at"), it.str("raw"), it.str("kind").ifEmpty { "call" },
                     it.str("status"), meta?.str("code") ?: "", meta?.str("car") ?: "", it.str("room"), it.str("from_number"),
-                    meta?.str("app") ?: "", meta?.optBoolean("replyable") == true, meta?.optBoolean("direct") == true, meta?.optLong("replaces", 0L) ?: 0L)
+                    meta?.str("app") ?: "", meta?.optBoolean("replyable") == true, meta?.optBoolean("direct") == true, meta?.optLong("replaces", 0L) ?: 0L, meta?.str("channel") ?: "")
             } to minId
         } finally { c.disconnect() }
     }.getOrNull()

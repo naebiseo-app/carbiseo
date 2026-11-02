@@ -16,6 +16,7 @@ data class InboxItem(
     val app: String = "", val replyable: Boolean = false, // notif: 폰 알림 앱 이름·답장 가능
     val direct: Boolean = false, // 서버 바로 연결 목록에 있는 발신자(meta.direct). 쉼·피로 중에도 읽는다
     val replaces: Long = 0L, // meta.replaces: 이 요약 카드가 대신하는 '전화 왔어요'(ringing) 카드 id. 0 = 없음
+    val channel: String = "", // sent: meta.channel ("mail" = 데모 메일함, 그 외 문자)
 )
 
 /**
