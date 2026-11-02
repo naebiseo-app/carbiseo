@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { callerNumber, hhmm, nextEventAt, ownerScript, parseMode, pickScript, sameNumber } from "../src/script.ts";
-import { parseSend, taskText } from "../src/index.ts";
+import { parseSend, taskText, taskTexts } from "../src/index.ts";
 
 test("발신번호: 폼·JSON, 키 대소문자 무시, 숫자만 비교", () => {
   assert.equal(callerNumber("from=010-1111-2222&To=070"), "010-1111-2222");
@@ -62,7 +62,14 @@ test("할 일 카드 본문 = 요약 + 후속 조치", () => {
   assert.equal(taskText("SummaryJson=%7B"), "");
 });
 
-test("문자 발송 검증: confirmed·번호 9~11자리·내용", () => {
+test("주인 통화 요청 2건 = 카드 2장, 메일 줄은 따로 보존", () => {
+  const mk = (followUps: string[]) => new URLSearchParams({ SummaryJson: JSON.stringify({ coreSummary: "일정 정리", followUps }) }).toString();
+  assert.deepEqual(taskTexts(mk(["박도윤 과장에게 문자: 3시 도착", "메일: 이지은 / 회의 안내 / 내일 10시"])), ["일정 정리 / 박도윤 과장에게 문자: 3시 도착", "메일: 이지은 / 회의 안내 / 내일 10시"]);
+  assert.equal(taskTexts(mk(["메일: 이지은 / 제목 / 내용", "김민수에게 문자"])).length, 2);
+  assert.deepEqual(taskTexts(mk([])), ["일정 정리"]);
+});
+
+test("문자 발송 검증: confirmed·번호 10~11자리·내용", () => {
   assert.deepEqual(parseSend({ to_number: "010-1234-5678", body: " 안녕 ", confirmed: true, to_label: "박 대리" }), { to: "01012345678", body: "안녕", label: "박 대리" });
   assert.equal(parseSend({ to_number: "01012345678", body: "x", confirmed: true }).label, "끝번호 5678");
   assert.ok("error" in parseSend({ to_number: "01012345678", body: "x" }));

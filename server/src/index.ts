@@ -145,12 +145,21 @@ async function mcp(req: Request, env: Env): Promise<Response> {
   return json({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
 }
 
-/** 주인 모드 통화 요약 → 할 일 카드 본문: 핵심 요약 + 후속 조치. */
-export function taskText(raw: string): string {
+/** 주인 모드 통화 요약 → 할 일 카드 본문들: 후속 조치(요청)마다 1장. 첫 비메일 요청 앞에만 핵심 요약을 붙이고, '메일:' 줄은 따로 둬 120자 가드가 잘라도 다른 요청에 섞이지 않는다. */
+export function taskTexts(raw: string): string[] {
   let j: { coreSummary?: string; followUps?: string[] } = {};
   try { j = JSON.parse(new URLSearchParams(raw).get("SummaryJson") ?? "{}"); } catch { /* 빈 요약 */ }
-  return [j.coreSummary ?? "", ...(j.followUps ?? [])].filter(Boolean).join(" / ").slice(0, 500);
+  const sum = j.coreSummary ?? "";
+  const fus = (j.followUps ?? []).filter(Boolean);
+  if (!fus.length) return sum ? [sum.slice(0, 500)] : [];
+  let used = !sum;
+  return fus.map((f) => {
+    if (used || /^메일\s*:/.test(f)) return f.slice(0, 500);
+    used = true;
+    return `${sum} / ${f}`.slice(0, 500);
+  });
 }
+export const taskText = (raw: string) => taskTexts(raw).join(" / ");
 
 /** /car/send 본문 검증(중계와 같은 한도). 수신번호 숫자 10~11자리, 내용 1~1000자, confirmed=true 필수. */
 // 설계 29: 차 카드 버튼 결과(완료·내일 아침에)를 서버 행에도 남긴다. 경로 /car/inbox/<id>, 본문 {action}
@@ -393,8 +402,10 @@ export default {
       if (card && sameNumber(new URLSearchParams(raw).get("From") ?? "", env.OWNER_NUMBER) && !(await kvGet(env.DB, "owner_as_guest"))) {
         // 주인 모드 통화 → 할 일 카드(문자 초안 등). 재전송 대비 1장만
         const cc = await kvGet(env.DB, "car_context");
-        await env.DB.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,summary,created_at) SELECT 'task','open',?,?,'주인',?,? WHERE NOT EXISTS (SELECT 1 FROM inbox WHERE kind='task' AND call_id=?)")
-          .bind(parseRoom(cc?.room) ?? null, card.call_id, guardText("summary", taskText(raw)), now(), card.call_id).run();
+        const had = await env.DB.prepare("SELECT 1 FROM inbox WHERE kind='task' AND call_id=?").bind(card.call_id).first();
+        if (!had) for (const t of taskTexts(raw).length ? taskTexts(raw) : [""])
+          await env.DB.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,summary,created_at) VALUES('task','open',?,?,'주인',?,?)")
+            .bind(parseRoom(cc?.room) ?? null, card.call_id, guardText("summary", t), now()).run();
       } else if (card) await saveCallCard(env.DB, card, {}, new URLSearchParams(raw).get("From") ?? "");
       return json({ ok: true });
     }
