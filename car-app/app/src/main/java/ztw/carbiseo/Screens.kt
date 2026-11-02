@@ -477,7 +477,10 @@ private fun Focus(i: InboxItem, carryTag: String?, a: Float, onSms: () -> Unit) 
         if (i.kind == "call" || i.kind == "task") Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             // H15: 서버가 보관한 실제 번호로 회신(화면엔 끝 4자리만). 문자는 보내기 전 확인 시트에서.
             if (i.kind == "call" && i.fromNumber.isNotBlank()) Pill("전화", Icons.Filled.Call, primary = true) { dial(ctx, i.fromNumber) }
-            if (i.kind == "task") Pill(if (mailDraft(i.summary) != null) "메일 보내기" else "문자 보내기", Icons.Filled.Send, primary = true, onClick = onSms)
+            val shop = if (i.kind == "task") shopPhone(i.summary) else null // O4 유선 가게: 문자 대신 전화(카드는 정차 중에만 보인다)
+            if (shop != null) Pill("가게에 전화", Icons.Filled.Call, primary = true) { dial(ctx, shop) }
+            else if (i.kind == "task" && reserveShop(i.summary) != null && taskDraft(i.summary).first.isBlank()) Pill("내비에서 가게 찾기", Icons.Filled.Call, primary = true) { RoomService.searchInNavi?.invoke(reserveShop(i.summary)!!) }
+            else if (i.kind == "task") Pill(if (mailDraft(i.summary) != null) "메일 보내기" else "문자 보내기", Icons.Filled.Send, primary = true, onClick = onSms)
             else Pill("문자", Icons.Filled.Send, onClick = onSms)
             Pill("완료", Icons.Filled.Check) { RoomService.markCardDone(ctx, i.id) }
             Pill("내일 아침에", Icons.Filled.DateRange) { RoomService.snooze(ctx, i.id) }

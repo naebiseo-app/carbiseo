@@ -212,6 +212,7 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
             override fun onDestinationInfo(i: DestinationInfo) {
                 naviAnswered()
                 val none = i.latitude == 0.0 && i.longitude == 0.0
+                Log.i(TAG, "dest poi=${i.poiId} provider=${i.poiProvider}") // O4: 실차에서 poiId로 번호 조회가 되는지 실측용
                 val e = if (none) null else etaMinutes(i.remainTime)
                 ui.post { etaMin = e; destName = if (none) null else i.name?.takeIf { it.isNotBlank() } }
                 set { copy(destination = if (none) null else LatLng(i.latitude, i.longitude)) }

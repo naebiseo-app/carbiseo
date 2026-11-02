@@ -89,6 +89,7 @@ class RoomService : Service() {
     private var callback: Pair<InboxItem, String>? = null
     private var sending: PendingSend? = null
     private var reserve: Pair<String, String>? = null // 예약 초안을 물은 (목적지 이름, 도착 HH:MM)
+    private var forcedPhone: String? = null // 디버그 ROUTE의 --es phone(가짜 번호로 서버 없이 시연)
     private var forcedDest: String? = null // 디버그 ROUTE의 --es name (에뮬은 내비가 목적지 이름을 안 줄 수 있어서)
     private var familyDay = -1L // 가족에게 도착 예상을 보낸 날(하루 한 번)
     private var restSnoozeUntil = 0L // 휴식 제안에 '아니'라고 한 뒤 30분(시뮬 시각)
@@ -219,7 +220,7 @@ class RoomService : Service() {
         when (p) {
             // 번호를 알면 초안을 읽어 주고 "이대로 보낼까요?"(SEND). 모르면 지금처럼 카드만.
             Ask.LATE -> lateEvent?.let { (ev, m) -> if (y) lateTask(ev, m).let { t -> taskDraft(t).let { (n, b) -> sendOrCard(PendingSend("", n, b, t), LATE_DONE_SPEECH, true) } } }
-            Ask.RESERVE -> reserve?.let { (n, t) -> if (y) { addLocalTask(reserveTask(n, t)); say(RESERVE_DONE_SPEECH) } }
+            Ask.RESERVE -> reserve?.let { (n, t) -> if (y) reserveWithPhone(n, t) }
             // 질문이 이미 초안을 읽어 줬으니 '응'이면 바로 발송(한 번 더 묻지 않는다)
             Ask.CALLBACK -> callback?.let { (i, m) -> if (y) sendOrCard(PendingSend(i.fromLabel, i.fromNumber, m, callbackTask(i, m)), CALLBACK_DONE_SPEECH, false) }
             Ask.SEND -> sending?.let { s -> if (y) doSend(s) else { addLocalTask(s.task); say(SEND_KEEP_SPEECH) } }
@@ -245,6 +246,22 @@ class RoomService : Service() {
         if (n == null || passenger) { addLocalTask(s.task); say(if (!s.number.isNullOrBlank() && s.number.any(Char::isDigit) && n == null) LANDLINE_SPEECH else doneSpeech); return }
         val ps = PendingSend(s.label, n, s.body, s.task)
         if (confirm && canAsk()) { sending = ps; askVoice(sendConfirmSpeech(s.body), Ask.SEND) } else if (confirm) { addLocalTask(s.task); say(doneSpeech) } else doSend(ps)
+    }
+
+    /** O4: 초안 승인 시 목적지로 가게 번호를 찾아(디버그 --es phone이면 그 값) 휴대폰=문자 승인, 유선=전화 버튼 카드, 못 찾음=카드만. */
+    private fun reserveWithPhone(n: String, t: String) {
+        val dest = machine.signals.destination
+        net.execute {
+            val ph = forcedPhone ?: dest?.let { Server.placePhone(n, it.lat, it.lng) }
+            ui.post {
+                val task = reserveTask(n, t, ph); val m = sendable(ph)
+                when {
+                    m != null -> sendOrCard(PendingSend(n, m, taskDraft(task).second, task), RESERVE_DONE_SPEECH, true)
+                    !ph.isNullOrBlank() -> { addLocalTask(task); say(landlineSpeech(n)) }
+                    else -> { addLocalTask(task); say(NO_PHONE_SPEECH) }
+                }
+            }
+        }
     }
 
     /** 기존 문자 발송 경로(Server.send). 성공하면 "보냈어요", 실패하면 카드로 남긴다. */
@@ -414,6 +431,7 @@ class RoomService : Service() {
         machine.onClockBack = { b -> driveStart = driveStart?.minus(b); parkedAt = parkedAt?.minus(b); Log.i("ROOM", "clock back ${b / 1000}s") } // 짧은 정차·trip_min이 음수가 되지 않게
         adapters = CarAdapters(applicationContext, machine).also { it.start() }
         addHomeFavorite = { runCatching { adapters.navi?.requestNavigationScreen(NavigationScreenRequest.AddHomeFavorite) }.onFailure { Log.w("ROOM", "add home FAIL $it") } }
+        searchInNavi = { q -> runCatching { adapters.navi?.requestNavigationScreen(NavigationScreenRequest.SearchPlace(q)) }.onFailure { Log.w("ROOM", "navi search FAIL $it") } }
         adapters.onNaviReady = { pendingRoute?.let { pendingRoute = null; Log.i("ROOM", "navi ready -> route"); it() } }
         speaker = Speaker(applicationContext).also { it.start() }
         voice = Voice(applicationContext, ::heard).also { it.start() }
@@ -448,13 +466,14 @@ class RoomService : Service() {
         .setContentTitle(notifTitle(r))
         .setOngoing(true).build()
 
-    // 디버그 빌드 전용: adb shell am broadcast -a ztw.carbiseo.ROUTE --ef lat 37.4979 --ef lng 127.0276 [--es name "판교 한정식" = O4 예약 초안용 목적지 이름]
+    // 디버그 빌드 전용: adb shell am broadcast -a ztw.carbiseo.ROUTE --ef lat 37.4979 --ef lng 127.0276 [--es name "판교 한정식" = O4 예약 초안용 목적지 이름] [--es phone 02-0000-0000 = 서버 없이 가게 번호]
     private fun registerDebugRoute() {
         val r = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
                 val lat = i.getFloatExtra("lat", 0f).toDouble()
                 val lng = i.getFloatExtra("lng", 0f).toDouble()
                 forcedDest = i.getStringExtra("name")
+                forcedPhone = i.getStringExtra("phone")
                 Log.i("ROOM", "debug requestRoute $lat,$lng name=$forcedDest")
                 adapters.navi?.requestRoute(RouteInfo(lat, lng, null, null, forcedDest ?: "목적지", "", "", "", RouteOption.RECOMMENDED, "", false))
             }
@@ -669,6 +688,7 @@ class RoomService : Service() {
         var telltale by mutableStateOf<String?>(null); private set // C⑦ 빨간 경고등
         var homeSrc by mutableStateOf("기본값(내비 즐겨찾기 없음)") // C① 집 좌표 출처(설정 화면 표시)
         var addHomeFavorite: (() -> Unit)? = null // C① 설정 화면 버튼 → 내비 '집 즐겨찾기 추가' 화면
+        var searchInNavi: ((String) -> Unit)? = null // O4: 가게 번호를 못 찾은 예약 카드 → 내비 장소 검색 화면(내비 상세에서 바로 전화)
         // 폰 알림(35): 쉼 방에도 바로 알릴 발신자(설정, 기본 빈 목록), 대답 대기 단계·듣는 중·화면 버튼 허용(P·저속)·음성 경로
         var favs by mutableStateOf(setOf<String>())
         var askStep by mutableStateOf(NotifTalk.Step.NONE); private set

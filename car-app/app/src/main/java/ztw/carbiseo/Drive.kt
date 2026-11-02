@@ -225,7 +225,20 @@ fun arriveAt(nowMs: Long, etaMin: Int, zone: java.time.ZoneId): String =
 fun reserveSpeech(name: String, hhmm: String) = "${name}에 도착 시각 ${hhmm}쯤이에요. 예약 문자 초안 만들어 둘까요?"
 const val RESERVE_DONE_SPEECH = "정차하시면 할 일에서 확인해 주세요"
 /** O4: 예약 문자 초안 = 할 일 카드 본문(taskDraft 형식, 번호는 정차 후 입력). */
-fun reserveTask(name: String, hhmm: String) = "$name 예약 / 내용: 안녕하세요, ${hhmm}쯤 도착 예정인데 ○명 자리(주차) 가능할까요?"
+fun reserveTask(name: String, hhmm: String, phone: String? = null): String {
+    val body = "내용: 안녕하세요, ${hhmm}쯤 도착 예정인데 자리(주차) 가능할까요?"
+    return when {
+        phone.isNullOrBlank() -> "$name 예약 / $body"
+        sendable(phone) != null -> "$name 예약 / 번호: $phone / $body" // 휴대폰: taskDraft가 번호를 뽑아 문자로
+        else -> "$name 예약 / 가게전화: $phone / $body" // 유선: 문자 대신 「가게에 전화」 버튼
+    }
+}
+/** 유선 가게 전화(카드의 `가게전화: 번호`). 없으면 null. */
+fun shopPhone(text: String): String? = Regex("""가게전화\s*[:：]\s*([0-9-]+)""").find(text)?.groupValues?.get(1)
+const val NO_PHONE_SPEECH = "가게 번호를 못 찾았어요. 차를 세우면 내비에서 가게를 열어 드릴게요"
+/** 예약 카드("가게 예약 / ...")의 가게 이름. 아니면 null. */
+fun reserveShop(text: String): String? = Regex("""^(.+?) 예약 /""").find(text)?.groupValues?.get(1)
+fun landlineSpeech(name: String) = "${name}는 가게 전화라 문자를 못 받아요. 차를 세우면 전화 연결해 드릴게요"
 
 /** 설정 "바로 연결 번호": 쉼표·공백으로 나눠 하이픈을 뗀 숫자 10~11자리, 최대 10개. 하나라도 틀리면 null. */
 fun parseDirect(text: String): List<String>? =

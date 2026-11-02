@@ -42,6 +42,12 @@ object Server {
         } finally { c.disconnect() }
     }.getOrNull()
 
+    /** O4: 목적지 이름·좌표로 가게 번호 조회. 못 찾음·키 없음·네트워크 실패는 null. */
+    fun placePhone(name: String, lat: Double, lng: Double): String? = runCatching {
+        val c = open("/car/place-phone?name=${java.net.URLEncoder.encode(name, "UTF-8")}&lat=$lat&lng=$lng", "GET")
+        try { JSONObject(c.inputStream.bufferedReader().readText()).str("phone").ifBlank { null } } finally { c.disconnect() }
+    }.getOrNull()
+
     /** JSON 한 번 보내고 응답 JSON(오류 본문 포함). 네트워크 실패면 null. */
     private fun postJson(path: String, body: JSONObject): JSONObject? = runCatching {
         val c = open(path, "POST")

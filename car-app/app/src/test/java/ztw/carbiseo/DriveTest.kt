@@ -258,9 +258,20 @@ class DriveTest {
         assertEquals("13:20", arriveAt(now, 30, java.time.ZoneId.of("Asia/Seoul")))
         assertEquals("판교 한정식에 도착 시각 04:20쯤이에요. 예약 문자 초안 만들어 둘까요?", reserveSpeech("판교 한정식", "04:20"))
         val t = reserveTask("판교 한정식", "04:20")
-        assertEquals("" to "안녕하세요, 04:20쯤 도착 예정인데 ○명 자리(주차) 가능할까요?", taskDraft(t))
+        assertEquals("" to "안녕하세요, 04:20쯤 도착 예정인데 자리(주차) 가능할까요?", taskDraft(t))
         assertTrue(t.startsWith("판교 한정식 예약 / "))
         assertFalse(RESERVE_DONE_SPEECH.contains("누르"))
+    }
+
+    @Test fun 예약_가게번호_휴대폰_유선_없음_세갈래() {
+        val mob = reserveTask("가명 식당", "04:20", "010-0000-0000")
+        assertEquals("01000000000", taskDraft(mob).first); assertEquals("01000000000", sendable(taskDraft(mob).first)); assertEquals(null, shopPhone(mob))
+        val land = reserveTask("가명 식당", "04:20", "02-0000-0000")
+        assertEquals("02-0000-0000", shopPhone(land)); assertEquals(null, sendable(taskDraft(land).first))
+        assertTrue(landlineSpeech("가명 식당").contains("문자를 못 받아요"))
+        val none = reserveTask("가명 식당", "04:20", null)
+        assertEquals(null, shopPhone(none)); assertEquals("" to "안녕하세요, 04:20쯤 도착 예정인데 자리(주차) 가능할까요?", taskDraft(none)); assertEquals(none, reserveTask("가명 식당", "04:20", ""))
+        assertEquals("가명 식당", reserveShop(none)); assertEquals(null, reserveShop("김민수 회신 / 내용: 확인"))
     }
 
     @Test fun 바로_연결_번호_입력_파싱() {
