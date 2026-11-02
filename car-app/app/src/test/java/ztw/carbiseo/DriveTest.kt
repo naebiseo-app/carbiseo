@@ -274,7 +274,8 @@ class DriveTest {
     }
 
     @Test fun 음성_발송은_번호를_알때만_초안을_읽고_확인한다() {
-        assertEquals("01012345678", sendable("010-1234-5678")); assertEquals("0212345678", sendable("02-1234-5678"))
+        assertEquals("01012345678", sendable("010-1234-5678")); assertEquals(null, sendable("02-1234-5678")); assertEquals(null, sendable("1588-1234")); assertEquals("0101234567", sendable("010-123-4567"))
+        assertEquals("번호를 다시 확인해 주세요", sendFailReason("bad_to_number")); assertEquals("잠시 뒤 다시 시도해 주세요", sendFailReason("http_500"))
         assertEquals(null, sendable("")); assertEquals(null, sendable(null)); assertEquals(null, sendable("김부장")); assertEquals(null, sendable("1234"))
         assertEquals("'운전 중이라 약 7분 늦을 것 같습니다. 죄송합니다.' 이대로 보낼까요?", sendConfirmSpeech("운전 중이라 약 7분 늦을 것 같습니다. 죄송합니다."))
         // F4: 서버가 contact_number를 주면 그 번호가 초안 번호가 된다(옛 contact보다 우선). 없으면 지금처럼.

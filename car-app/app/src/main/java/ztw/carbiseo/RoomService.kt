@@ -242,7 +242,7 @@ class RoomService : Service() {
     /** 받는 번호를 알고 동승자 모드가 아니면 음성으로 발송(confirm이면 초안을 읽고 확인), 아니면 할 일 카드만 만들고 "정차하시면" 안내. */
     private fun sendOrCard(s: PendingSend, doneSpeech: String, confirm: Boolean) {
         val n = sendable(s.number)
-        if (n == null || passenger) { addLocalTask(s.task); say(doneSpeech); return }
+        if (n == null || passenger) { addLocalTask(s.task); say(if (!s.number.isNullOrBlank() && s.number.any(Char::isDigit) && n == null) LANDLINE_SPEECH else doneSpeech); return }
         val ps = PendingSend(s.label, n, s.body, s.task)
         if (confirm && canAsk()) { sending = ps; askVoice(sendConfirmSpeech(s.body), Ask.SEND) } else if (confirm) { addLocalTask(s.task); say(doneSpeech) } else doSend(ps)
     }
@@ -250,7 +250,7 @@ class RoomService : Service() {
     /** 기존 문자 발송 경로(Server.send). 성공하면 "보냈어요", 실패하면 카드로 남긴다. */
     private fun doSend(s: PendingSend) = net.execute {
         val code = Server.send(s.label, s.number, s.body); Log.i("ROOM", "voice send -> $code")
-        ui.post { if (code == "ok") say(SENT_SPEECH) else { addLocalTask(s.task); say(SEND_FAIL_SPEECH) } }
+        ui.post { if (code == "ok") say(SENT_SPEECH) else { addLocalTask(s.task); say("$SEND_FAIL_SPEECH. ${sendFailReason(code.orEmpty())}") } }
     }
 
     private fun runTurn(t: Turn) {

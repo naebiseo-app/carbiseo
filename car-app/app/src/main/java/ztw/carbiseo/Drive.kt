@@ -200,8 +200,13 @@ fun headingTo(dest: LatLng?, e: Event): Boolean = dest != null && distanceM(dest
 /** F4: 지연 문자 초안 = 할 일 카드 본문(taskDraft 형식). 연락처가 일정에 있으면 번호로 들어간다. */
 fun lateTask(e: Event, min: Int) = "${e.title} 일정 지연 알림${e.contactNumber.ifBlank { e.contact }.let { if (it.isNotBlank()) " $it" else "" }} / 내용: 운전 중이라 약 ${min}분 늦을 것 같습니다. 죄송합니다."
 
-/** 문자 음성 발송: 번호가 9~11자리 숫자일 때만 숫자만 돌려준다(보내기 시트와 같은 기준). 아니면 null = 카드만. */
-fun sendable(number: String?): String? = number.orEmpty().filter(Char::isDigit).takeIf { it.length in 9..11 }
+/** 문자 음성 발송: 휴대폰 번호(01x로 시작 10~11자리)일 때만 숫자만 돌려준다(보내기 시트와 같은 기준). 아니면 null = 카드만. 유선은 문자를 못 받는다. */
+fun sendable(number: String?): String? = number.orEmpty().filter(Char::isDigit).takeIf { Regex("""01\d{8,9}""").matches(it) }
+
+const val LANDLINE_SPEECH = "유선 번호는 문자를 받을 수 없어요. 가게 전화 예약은 다음 버전에서 지원해요"
+
+/** 서버 에러 코드 -> 사람이 읽을 한국어 한 문장(영어 코드를 그대로 읽지 않는다). */
+fun sendFailReason(code: String) = if (code == "bad_to_number") "번호를 다시 확인해 주세요" else "잠시 뒤 다시 시도해 주세요"
 
 /** 초안을 읽어 주고 확인받는 문장. */
 fun sendConfirmSpeech(body: String) = "'$body' 이대로 보낼까요?"

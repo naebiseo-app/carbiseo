@@ -727,7 +727,7 @@ private fun Sheet(i: InboxItem, onDone: () -> Unit) {
     val fc = OutlinedTextFieldDefaults.colors(focusedTextColor = SheetInk, unfocusedTextColor = SheetInk, focusedBorderColor = BrandHi, unfocusedBorderColor = DOut,
         focusedLabelColor = BrandHi, unfocusedLabelColor = DMute, cursorColor = BrandHi)
     val ts = TextStyle(color = SheetInk, fontSize = 26.sp)
-    val canSend = !busy && (if (mail != null) number.isNotBlank() else digits.length in 9..11) && text.isNotBlank()
+    val canSend = !busy && (if (mail != null) number.isNotBlank() else digits.isNotEmpty()) && text.isNotBlank()
     BackHandler(onBack = onDone)
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(SheetBg).padding(horizontal = 32.dp, vertical = 26.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -744,11 +744,12 @@ private fun Sheet(i: InboxItem, onDone: () -> Unit) {
             Pill(if (edit) "다 고침" else "고치기") { edit = !edit }
             Pill(if (busy) "보내는 중…" else "보내기", Icons.Filled.Send, primary = true, m = Modifier.alpha(if (canSend) 1f else 0.45f)) {
                 if (!canSend) return@Pill
+                if (mail == null && sendable(digits) == null) { toast(ctx, LANDLINE_SPEECH); speak(ctx, LANDLINE_SPEECH); return@Pill }
                 busy = true
                 scope.launch {
                     val code = withContext(Dispatchers.IO) { if (mail != null) Server.mail(number.trim(), subject.trim(), text.trim()) else Server.send(if (auto) i.fromLabel else "", digits, text.trim()) }
                     busy = false
-                    toast(ctx, when (code) { "ok" -> "보냈어요"; null -> "서버 연결 실패 — 다시 시도해 주세요"; "overseas_ip_blocked" -> "못 보냄(서버 IP 제한)"; else -> "못 보냄($code)" })
+                    toast(ctx, when (code) { "ok" -> "보냈어요"; null -> "서버 연결 실패 — 다시 시도해 주세요"; "overseas_ip_blocked" -> "못 보냄(서버 IP 제한)"; else -> "못 보냄 · ${sendFailReason(code)}" })
                     if (code == "ok") { RoomService.dropLocal(ctx, i.id); onDone() }
                 }
             }

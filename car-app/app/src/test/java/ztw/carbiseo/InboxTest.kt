@@ -101,7 +101,7 @@ class InboxTest {
         val s = InboxItem(1, "x", "y", false, 0L, "", kind = "sent")
         assertEquals("보냄", sentStatus(s.copy(status = "sent")))
         assertEquals("못 보냄(서버 IP 제한)", sentStatus(s.copy(status = "failed", code = "overseas_ip_blocked")))
-        assertEquals("못 보냄(http_500)", sentStatus(s.copy(status = "failed", code = "http_500")))
+        assertEquals("못 보냄 · 잠시 뒤 다시 시도해 주세요", sentStatus(s.copy(status = "failed", code = "http_500")))
     }
 
     @Test fun 확인할_건수는_안_연_카드만_보낸문자_제외() {
