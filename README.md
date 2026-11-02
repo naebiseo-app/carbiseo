@@ -122,7 +122,7 @@ npm test
 npx wrangler@4 d1 execute carbiseo --remote --file=schema.sql   # 최초 1회
 npm run deploy
 ```
-- 배포 주소: `https://carbiseo-api.wondi81.workers.dev` · 데모 관리 페이지 `/admin`(Basic 인증)
+- 배포 주소: `https://carbiseo-api.<계정>.workers.dev`(심사용 주소는 제출 메일에 별도 기재) · 데모 관리 페이지 `/admin`(Basic 인증)
 - 비밀값(`wrangler secret put`): `CAR_TOKEN`, `ADMIN_TOKEN`, `CALL_CONTEXT_SECRET`, `OWNER_NUMBER`, `CLAWOPS_ACCOUNT_ID`, `CLAWOPS_API_KEY`, `CLAWOPS_NUMBER`, `CLAWOPS_SIGNING_KEY`, `SMS_RELAY_URL`, `SMS_RELAY_SECRET`
 - 예약 작업: 매일 03시(KST) 보관 정책 실행.
 
@@ -151,8 +151,14 @@ npm run deploy
 - **경고등**: `getTelltalesInfo`는 `PRIVATE_CAR_SAFETY` 권한이 필요해 에뮬에서 SecurityException. 조회 코드만 있고 실패하면 멈춘다.
 - **음성 인식**: SpeechToText는 기기 안(ON_DEVICE) 모드만 쓴다(서버 모드는 콘솔 '준비 중'). 로캘을 `ko`로 주면 엔진이 거절해 `ko_KR`(Locale.KOREA)로 준다(TTS도 같이 바꿔 에뮬 엔진 오류가 사라짐). 에뮬에서는 녹음된 음성 파일을 넣어 "읽어줘" 인식을 확인했지만 결과가 불안정했고, 실제 마이크 음성은 확인하지 못했다. 대화 흐름은 인식 결과를 디버그로 넣어(`SAY`) 확인했다.
 - **폰 알림**: 아이폰은 다른 앱 알림을 읽을 수 없어(애플 정책) 안드로이드 폰만. 메시지 답장은 그 알림이 폰에 떠 있어야 보낼 수 있다.
-- **휴게소 목록**: NaviHelper에 장소 검색 API가 없어 경부선 휴게소 4곳 데모 좌표를 앱에 둔다.
+- **휴게소 목록**: NaviHelper에 장소 검색 API가 없어 졸음쉼터 253곳·고속도로 휴게소 92곳 목록(`assets/reststops.tsv`)을 앱에 넣어 둔다. 휴게소 좌표는 공식 좌표 파일이 없어 OpenStreetMap에서 가져왔다.
 - **충전 중 판정**: SDK에 충전 중 읽기 API가 없어 기어 P로만 판단한다.
 - **동승자 감지**: 에뮬의 조수석 착석 값이 반대로 오는 것으로 보여, 자동 전환 대신 확인 버튼 1번을 거친다.
 - **착신 전환**: 010 무응답 → 서비스 070 착신 실통화와 발신번호 전달은 아직 검증하지 못했다. 시연의 수신 장면 일부는 관리 페이지의 재현 주입이다.
 - **블루투스 통화 중 낭독 보류**: `AudioManager` 모드로 판단하며 실차에서 확인하지 않았다.
+
+## 데이터·오픈소스 출처
+- 졸음쉼터: 공공데이터포털 「한국도로공사_졸음쉼터 현황」 (data.go.kr 15028203, 기준일 2026-02-25), 공공누리 조건에 따라 이용
+- 고속도로 휴게소 이름: 공공데이터포털 (data.go.kr 15164198)
+- 휴게소 좌표: © OpenStreetMap contributors, Open Database License(ODbL) — https://www.openstreetmap.org/copyright
+- 차량·내비·음성 기능: Pleos SDK(현대자동차그룹) — 공모전 제공 SDK 약관에 따름
