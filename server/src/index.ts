@@ -251,7 +251,14 @@ export async function placePhone(key: string | undefined, name: string, lat: str
   } catch { return none("upstream"); }
 }
 
-const CHAT_SYSTEM = "당신은 운전자의 말동무 '내비서'입니다. 운전 중이므로 존댓말로 한두 문장, 80자 안으로 짧게 답합니다. 편안한 잡담을 이어 가고 가끔 짧은 질문을 던져 운전자가 깨어 있게 돕습니다. 화면을 보라는 말, 목록, 이모지, 기호는 쓰지 않습니다. 의학·법률·투자 조언은 하지 않습니다. 졸리다, 피곤하다는 말에는 가까운 휴게소에서 쉬기를 권합니다.";
+const CHAT_SYSTEM = "당신은 운전자의 말동무 '내비서'입니다. 운전 중이므로 존댓말로 두 문장 이내, 60자 안으로 짧게 답합니다. 편안한 잡담을 이어 가고 가끔 짧은 질문을 던져 운전자가 깨어 있게 돕습니다. 화면을 보라는 말, 목록, 이모지, 기호는 쓰지 않습니다. 의학·법률·투자 조언은 하지 않습니다. 추월·속도·차선 같은 운전 조작은 권하지 않습니다. 식당 찾기, 날씨 확인처럼 할 수 없는 일을 해 주겠다고 말하지 않습니다. 졸리다, 피곤하다는 말에는 가까운 휴게소에서 쉬기를 권합니다.";
+
+/** 말동무 답이 길면 문장 단위로 110자 안까지만 남긴다(가드 120자에 걸려 고정 문구로 바뀌지 않게). */
+export function chatCut(t: string): string {
+  let out = "";
+  for (const s of t.match(/[^.?!]+[.?!]*\s*/g) ?? []) { if ((out + s).length > 110) break; out += s; }
+  return out.trim() || t.slice(0, 110);
+}
 
 /** 말동무 대화. 대화 내용은 저장·로그하지 않는다. 키 없음 no_key, 실패·금칙어는 고정 문구 fallback. */
 export async function carChat(key: string | undefined, text: string, history: { role: "user" | "assistant"; text: string }[]): Promise<{ reply: string; source: "llm" | "fallback" | "no_key" }> {
@@ -263,12 +270,13 @@ export async function carChat(key: string | undefined, text: string, history: { 
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model: "claude-haiku-5-5", max_tokens: 120, system: CHAT_SYSTEM, messages }),
+      body: JSON.stringify({ model: "claude-haiku-5-5", max_tokens: 200, thinking: { type: "disabled" }, system: CHAT_SYSTEM, messages }),
       signal: AbortSignal.timeout(6000),
     });
     if (!r.ok) return fb;
-    const c = ((await r.json()) as { content?: { type?: string; text?: string }[] }).content?.find((b) => b.type === "text");
-    const reply = guardText("chat", c?.text);
+    const d = (await r.json()) as { stop_reason?: string; content?: { type?: string; text?: string }[] };
+    if (d.stop_reason === "max_tokens") return fb; // 잘린 문장은 읽지 않는다
+    const reply = guardText("chat", chatCut(d.content?.find((b) => b.type === "text")?.text ?? ""));
     return reply === FALLBACK.chat ? fb : { reply, source: "llm" };
   } catch { return fb; }
 }

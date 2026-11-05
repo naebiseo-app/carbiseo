@@ -32,7 +32,8 @@ test("성공: llm, 모델·max_tokens·헤더 확인", async () => {
   assert.deepEqual(await r.json(), { reply: "오늘 날씨가 좋네요. 어디 가시는 길이세요?", source: "llm" });
   assert.equal(sent[0].url, "https://api.anthropic.com/v1/messages");
   assert.equal(sent[0].body.model, "claude-haiku-5-5");
-  assert.equal(sent[0].body.max_tokens, 120);
+  assert.equal(sent[0].body.max_tokens, 200);
+  assert.deepEqual(sent[0].body.thinking, { type: "disabled" });
   assert.equal(sent[0].headers["x-api-key"], "k");
   assert.equal(sent[0].headers["anthropic-version"], "2023-06-01");
 });
@@ -64,4 +65,14 @@ test("금칙어 답은 가드가 고정 문구로 대체", async () => {
 });
 test("미인증은 401", async () => {
   assert.equal((await call(env("k"), { text: "안녕" }, false)).status, 401);
+});
+test("긴 답은 문장 단위로 110자 안까지만 남긴다", async () => {
+  const a = "가".repeat(60) + "요. ", b = "나".repeat(60) + "요?";
+  mock(a + b);
+  const j: any = await (await call(env("k"), { text: "안녕" })).json();
+  assert.equal(j.reply, a.trim()); assert.equal(j.source, "llm");
+});
+test("잘린 답(max_tokens)은 읽지 않고 fallback", async () => {
+  globalThis.fetch = (async () => ({ ok: true, json: async () => ({ stop_reason: "max_tokens", content: [{ type: "thinking" }, { type: "text", text: "운전 중에 많" }] }) })) as unknown as typeof fetch;
+  assert.deepEqual(await (await call(env("k"), { text: "안녕" })).json(), { reply: FALLBACK.chat, source: "fallback" });
 });
