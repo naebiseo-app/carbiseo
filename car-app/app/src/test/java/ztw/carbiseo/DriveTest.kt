@@ -357,4 +357,15 @@ class DriveTest {
         assertEquals(listOf(PERM_NOTIF), missingPermissions(34) { it != PERM_NOTIF })
         assertEquals("마이크·알림·전화", missingPermissions(34) { it == "android.car.permission.CAR_SPEED" }.joinToString("·") { permName(it) })
     }
+
+    @Test fun 주행_규제_글자수와_자막() {
+        val long = "가".repeat(130)
+        assertEquals(long, UxLimits(0x50, 120).clip(long))               // 에뮬 실측 0x50: 길이 규제 꺼짐
+        assertEquals(120, UxLimits(0x4, 120).clip(long).length)          // 켜지면 플랫폼 길이까지
+        assertEquals("짧음", UxLimits(0x4, 120).clip("짧음"))
+        assertEquals(long, UxLimits(0x4, 0).clip(long))                  // 길이를 안 주면 자르지 않음
+        assertTrue(UxLimits(0x50, 120).caption)
+        assertFalse(UxLimits(0x80, 120).caption)
+        assertFalse(UxLimits(0x100, 120).caption)
+    }
 }

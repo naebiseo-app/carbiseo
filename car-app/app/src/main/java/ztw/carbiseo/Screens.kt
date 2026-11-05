@@ -176,11 +176,11 @@ private fun ReplayBar() {
         v.hint?.let { h ->
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(ParkAcc).padding(horizontal = 24.dp, vertical = 14.dp)) {
                 Text(h.label, color = Color.White.copy(alpha = 0.86f), fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Text(h.text, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
+                Text(RoomService.ux.clip(h.text), color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
             }
         }
         Text("통화 중 · ${v.title}", color = DMute, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-        v.caption?.let { c -> Text("${when (c.who) { "ai" -> "AI 비서"; "peer" -> "상대"; else -> "나" }}  ${c.text}", color = SheetInk, fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 2) }
+        v.caption?.takeIf { RoomService.ux.caption }?.let { c -> Text("${when (c.who) { "ai" -> "AI 비서"; "peer" -> "상대"; else -> "나" }}  ${RoomService.ux.clip(c.text)}", color = SheetInk, fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 2) }
     }
 }
 

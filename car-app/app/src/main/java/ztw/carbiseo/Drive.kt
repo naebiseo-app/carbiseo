@@ -295,3 +295,11 @@ fun permName(p: String) = when (p) { "android.permission.RECORD_AUDIO" -> "마�
 
 /** 서버 car_context용 기어 한 글자. */
 fun gearCode(g: Gear): String? = when (g) { Gear.PARK -> "P"; Gear.DRIVE -> "D"; Gear.REVERSE -> "R"; Gear.NEUTRAL -> "N"; Gear.UNKNOWN -> null }
+
+/** 플랫폼이 내려주는 주행 규제(CarUxRestrictions). 영상·설정·키보드는 PARK 방에만 있어 방 판정으로 막히고, 주행 화면에 남는 글자만 여기서 깎는다. */
+data class UxLimits(val active: Int = 0, val maxStr: Int = 0) {
+    /** 통화 자막: NO_TEXT_MESSAGE(0x80)·NO_VOICE_TRANSCRIPTION(0x100)이 켜지면 숨긴다. */
+    val caption get() = active and 0x180 == 0
+    /** LIMIT_STRING_LENGTH(0x4)가 켜지면 플랫폼 길이로 자른다. */
+    fun clip(t: String) = if (active and 0x4 != 0 && maxStr in 1 until t.length) t.take(maxStr - 1) + "…" else t
+}

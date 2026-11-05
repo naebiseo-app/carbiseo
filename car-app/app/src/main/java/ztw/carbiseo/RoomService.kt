@@ -631,6 +631,7 @@ class RoomService : Service() {
         const val ACTION_SPEAK = "ztw.carbiseo.SPEAK" // extra t: 읽을 문장
         var etaMin by mutableStateOf<Int?>(null); private set // 목적지까지 남은 분(내비). null = 목적지 없음
         var destName by mutableStateOf<String?>(null); private set
+        var ux by mutableStateOf(UxLimits()) // CarAdapters가 규제 바뀔 때마다 넣는다
         var screenOverride by mutableStateOf<String?>(null); private set // 디버그 SCREEN 브로드캐스트(화면 확인용)
         private const val NAVI_PKG = "ai.umos.maps.android.navigation.app" // Pleos 내비 앱(26 실측)
         var restOffer by mutableStateOf(false); private set // S2: 화면에 휴게소 버튼

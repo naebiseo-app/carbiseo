@@ -183,12 +183,17 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
         val name = carCls.getField("CAR_UX_RESTRICTION_SERVICE").get(null) as String
         val mgr = carCls.getMethod("getCarManager", String::class.java).invoke(car, name) ?: return
         fun isDo(o: Any?) = o?.let { it.javaClass.getMethod("isRequiresDistractionOptimization").invoke(it) as Boolean } ?: false
-        val cur = isDo(mgr.javaClass.getMethod("getCurrentCarUxRestrictions").invoke(mgr))
+        fun limits(o: Any?) = o?.let { UxLimits(it.javaClass.getMethod("getActiveRestrictions").invoke(it) as Int, it.javaClass.getMethod("getMaxRestrictedStringLength").invoke(it) as Int) } ?: UxLimits()
+        fun apply(o: Any?) { val u = limits(o); ui.post { RoomService.ux = u }; Log.i(TAG, "ux active=0x${u.active.toString(16)} maxStr=${u.maxStr}") }
+        val first = mgr.javaClass.getMethod("getCurrentCarUxRestrictions").invoke(mgr)
+        val cur = isDo(first)
         set { copy(distractionOptimized = cur) }
+        apply(first)
         val iface = Class.forName("android.car.drivingstate.CarUxRestrictionsManager\$OnUxRestrictionsChangedListener")
         val l = Proxy.newProxyInstance(iface.classLoader, arrayOf(iface)) { _, method, args ->
             if (method.name == "onUxRestrictionsChanged") {
                 val d = isDo(args?.firstOrNull()); set { copy(distractionOptimized = d) }
+                apply(args?.firstOrNull())
             }
             null
         }
