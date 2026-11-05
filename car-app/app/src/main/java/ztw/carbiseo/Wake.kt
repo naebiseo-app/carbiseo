@@ -17,19 +17,24 @@ import java.util.concurrent.LinkedBlockingQueue
 
 /**
  * 이름 호출 문장 나누기(순수 함수). 공백을 뺀 text에 이름이 있으면 이름 뒤 문장(없으면 ""), 이름이 없으면 null.
- * 이름의 첫 글자가 '내'·'네'면 둘 다 같은 것으로 본다("네비서야" → "야").
+ * 이름의 첫 글자가 '내'·'네'면 둘 다 같은 것으로 본다("네비서야" → "야"). 기본 이름은 인식기가 잘못 적는 꼴도 받는다.
  */
+private val DEFAULT_NAMES = setOf("내비서", "네비서") // 인식기가 잘못 받아 적는 꼴을 함께 받는 이름
+
 fun wakeSplit(text: String, name: String): String? {
     val t = text.filterNot { it.isWhitespace() }
     val n = name.filterNot { it.isWhitespace() }
     if (n.isEmpty()) return null
     val swap = when (n[0]) { '내' -> '네'; '네' -> '내'; else -> null }
-    val names = listOfNotNull(n, swap?.let { it + n.substring(1) })
-    val hit = names.map { t.indexOf(it) to it.length }.filter { it.first >= 0 }.minByOrNull { it.first } ?: return null
+    val names = listOfNotNull(n, swap?.let { it + n.substring(1) }) + if (n in DEFAULT_NAMES) listOf("내비사", "네비사") else emptyList()
+    val hit = names.map { t.indexOf(it) to it.length }.filter { it.first >= 0 }.minByOrNull { it.first }
+        ?: "넷이서".takeIf { n in DEFAULT_NAMES && t.startsWith(it) }?.let { 0 to it.length } // 흔한 낱말이라 문장 맨 앞만 (에뮬 실측 오인식)
+        ?: return null
     var left = hit.first + hit.second // 공백을 뺀 글자 수로 센 이름 끝을 원문 위치로 옮긴다(말동무 AI에 띄어쓰기를 살려 보낸다)
     var i = 0
     while (left > 0) { if (!text[i].isWhitespace()) left--; i++ }
-    return text.substring(i).trim()
+    val rest = text.substring(i).trim()
+    return if (rest.trimEnd('.', '?', '!') in setOf("야", "아")) "" else rest // "내비서야"는 이름만 부른 것
 }
 
 /**

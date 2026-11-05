@@ -16,8 +16,15 @@ class WakeTest {
     }
 
     @Test fun 내와_네는_같은_것() {
-        assertEquals("야", wakeSplit("네비서야", "내비서"))
+        assertEquals("", wakeSplit("네비서야.", "내비서")) // 부름 조사만 남으면 이름만 부른 것
         assertEquals("", wakeSplit("내비서", "네비서"))
+    }
+
+    @Test fun 기본_이름은_잘못_적힌_꼴도_받는다() {
+        assertEquals("", wakeSplit("내비사", "내비서"))
+        assertEquals("오늘 일정", wakeSplit("넷이서 오늘 일정", "내비서"))
+        assertNull(wakeSplit("우리 넷이서 밥 먹자", "내비서")) // 넷이서는 맨 앞만
+        assertNull(wakeSplit("넷이서 가자", "마루"))
     }
 
     @Test fun 이름이_없으면_null() {
