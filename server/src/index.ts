@@ -275,8 +275,9 @@ export async function carChat(key: string | undefined, text: string, history: { 
     });
     if (!r.ok) return fb;
     const d = (await r.json()) as { stop_reason?: string; content?: { type?: string; text?: string }[] };
-    if (d.stop_reason === "max_tokens") return fb; // 잘린 문장은 읽지 않는다
-    const reply = guardText("chat", chatCut(d.content?.find((b) => b.type === "text")?.text ?? ""));
+    const raw = d.content?.find((b) => b.type === "text")?.text ?? "";
+    const whole = d.stop_reason === "max_tokens" ? raw.replace(/[^.?!]*$/, "") : raw; // 잘린 끝 조각만 버린다(이야기 요청은 200토큰을 넘긴다)
+    const reply = guardText("chat", chatCut(whole));
     return reply === FALLBACK.chat ? fb : { reply, source: "llm" };
   } catch { return fb; }
 }

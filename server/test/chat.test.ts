@@ -72,7 +72,11 @@ test("긴 답은 문장 단위로 110자 안까지만 남긴다", async () => {
   const j: any = await (await call(env("k"), { text: "안녕" })).json();
   assert.equal(j.reply, a.trim()); assert.equal(j.source, "llm");
 });
-test("잘린 답(max_tokens)은 읽지 않고 fallback", async () => {
+test("잘린 답(max_tokens)은 완성된 문장까지 읽는다", async () => {
+  globalThis.fetch = (async () => ({ ok: true, json: async () => ({ stop_reason: "max_tokens", content: [{ type: "text", text: "옛날에 토끼가 살았어요. 어느 날 토" }] }) })) as unknown as typeof fetch;
+  assert.deepEqual(await (await call(env("k"), { text: "안녕" })).json(), { reply: "옛날에 토끼가 살았어요.", source: "llm" });
+});
+test("완성 문장 없이 잘린 답은 fallback", async () => {
   globalThis.fetch = (async () => ({ ok: true, json: async () => ({ stop_reason: "max_tokens", content: [{ type: "thinking" }, { type: "text", text: "운전 중에 많" }] }) })) as unknown as typeof fetch;
   assert.deepEqual(await (await call(env("k"), { text: "안녕" })).json(), { reply: FALLBACK.chat, source: "fallback" });
 });
