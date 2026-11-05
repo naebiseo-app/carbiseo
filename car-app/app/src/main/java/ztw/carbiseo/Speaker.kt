@@ -47,6 +47,8 @@ class Speaker(private val ctx: Context) {
     private class Item(val text: String, val then: (() -> Unit)?)
     private val queue = ArrayDeque<Item>()
     private var playing = false
+    val busy get() = playing // 말하는 중(이름 호출이 자기 음성을 듣지 않게)
+    var onBusy: (() -> Unit)? = null // 말하기 시작·끝날 때(끝난 뒤 할 일을 한 다음)
     private var then: (() -> Unit)? = null    // 지금 읽는 문장이 끝난 뒤 할 일(음성 응답 듣기 시작)
     private var carried: (() -> Unit)? = null // 뒤에 더 읽을 게 있으면 듣기는 마지막 문장 뒤로 미룬다
     private var gen = 0 // 옛 문장의 어림 타이머가 새 문장을 끝내지 않게
@@ -55,7 +57,7 @@ class Speaker(private val ctx: Context) {
     private fun afterSpeech() = ui.post {
         if (!playing) return@post
         val t = then ?: carried; then = null; carried = null
-        if (queue.isEmpty()) { playing = false; t?.invoke() } else { carried = t; playNext() }
+        if (queue.isEmpty()) { playing = false; t?.invoke(); onBusy?.invoke() } else { carried = t; playNext() }
     }
 
     /** then: 다 읽은 뒤 할 일. 엔진 완료 콜백이 안 오면 글자 수로 어림한 시간 뒤. */
@@ -66,7 +68,7 @@ class Speaker(private val ctx: Context) {
 
     private fun playNext() {
         val item = queue.removeFirstOrNull() ?: run { playing = false; return }
-        playing = true; then = item.then; val g = ++gen
+        playing = true; onBusy?.invoke(); then = item.then; val g = ++gen
         ui.postDelayed({ if (g == gen) afterSpeech() }, 1500L + item.text.length * 200L) // ponytail: 어림값(완료 콜백이 안 올 때만 쓰임), 콜백이 늘 오면 지워도 됨
         lastText = item.text
         Log.i("ROOM", "TTS speak: ${item.text}")
