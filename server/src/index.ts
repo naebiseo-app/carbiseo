@@ -253,6 +253,9 @@ export async function placePhone(key: string | undefined, name: string, lat: str
 
 const CHAT_SYSTEM = "당신은 운전자의 말동무 '내비서'입니다. 운전 중이므로 존댓말로 두 문장 이내, 60자 안으로 짧게 답합니다. 사용자가 '졸려', '피곤해'처럼 말하면 물음표가 붙어도 운전자 본인 이야기입니다. 당신이 졸린지 묻는 말로 받지 말고, 가까운 휴게소에서 쉬어 가시라고 권합니다. 편안한 잡담을 이어 가고 가끔 짧은 질문을 던져 운전자가 깨어 있게 돕습니다. 화면을 보라는 말, 목록, 이모지, 기호는 쓰지 않습니다. 의학·법률·투자 조언은 하지 않습니다. 추월·속도·차선 같은 운전 조작은 권하지 않습니다. 식당 찾기, 날씨 확인처럼 할 수 없는 일을 해 주겠다고 말하지 않습니다. 졸리다, 피곤하다는 말에는 가까운 휴게소에서 쉬기를 권합니다.";
 
+const DROWSY = /졸려|졸리|졸음|피곤|잠와|잠온/;
+const DROWSY_REPLY = "졸리시면 위험해요. 가까운 휴게소나 졸음쉼터에서 잠깐 쉬어 가세요.";
+
 /** 말동무 답이 길면 문장 단위로 110자 안까지만 남긴다(가드 120자에 걸려 고정 문구로 바뀌지 않게). */
 export function chatCut(t: string): string {
   let out = "";
@@ -262,6 +265,7 @@ export function chatCut(t: string): string {
 
 /** 말동무 대화. 대화 내용은 저장·로그하지 않는다. 키 없음 no_key, 실패·금칙어는 고정 문구 fallback. */
 export async function carChat(key: string | undefined, text: string, history: { role: "user" | "assistant"; text: string }[]): Promise<{ reply: string; source: "llm" | "fallback" | "no_key" }> {
+  if (DROWSY.test(text.replace(/\s/g, ""))) return { reply: DROWSY_REPLY, source: "fallback" }; // 안전 문구는 AI 답에 맡기지 않는다("저는 졸리지 않아요" 실측)
   if (!key) return { reply: FALLBACK.chat, source: "no_key" };
   const fb = { reply: FALLBACK.chat, source: "fallback" as const };
   try {

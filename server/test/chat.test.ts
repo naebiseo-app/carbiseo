@@ -37,6 +37,13 @@ test("성공: llm, 모델·max_tokens·헤더 확인", async () => {
   assert.equal(sent[0].headers["x-api-key"], "k");
   assert.equal(sent[0].headers["anthropic-version"], "2023-06-01");
 });
+test("졸음 말은 키가 없어도 AI 없이 고정 휴식 권유", async () => {
+  globalThis.fetch = (async () => { throw new Error("called"); }) as unknown as typeof fetch;
+  for (const text of ["나 졸려?", "너 졸려?", "너무 피곤해", "잠 와"]) {
+    const j: any = await (await call(env(), { text })).json();
+    assert.equal(j.source, "fallback"); assert.match(j.reply, /쉬어 가세요/);
+  }
+});
 test("API 500이면 fallback", async () => {
   mock("x", false);
   assert.deepEqual(await (await call(env("k"), { text: "안녕" })).json(), { reply: FALLBACK.chat, source: "fallback" });
