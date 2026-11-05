@@ -170,5 +170,5 @@ npm run deploy
 - 고속도로 휴게소 이름: 한국도로공사 휴게소 현황 (data.go.kr 15164198, 2026-08-28)
 - 휴게소 좌표: © OpenStreetMap contributors, Open Database License(ODbL) — https://www.openstreetmap.org/copyright
 - 차량·내비·음성 기능: Pleos SDK(현대자동차그룹) — 공모전 제공 SDK 약관에 따름
-- 이름 호출 음성 인식: sherpa-onnx(k2-fsa) — Apache License 2.0 / 한국어 모델 `sherpa-onnx-streaming-zipformer-korean-2024-06-16`, 원본 [icefall KsponSpeech 모델](https://huggingface.co/johnBamma/icefall-asr-ksponspeech-pruned-transducer-stateless7-streaming-2024-06-12) — Apache License 2.0(학습 데이터 KsponSpeech)
+- 이름 호출 음성 인식: sherpa-onnx(k2-fsa) — Apache License 2.0 / 한국어 모델 `sherpa-onnx-streaming-zipformer-korean-2024-06-16`, 원본 [icefall KsponSpeech 모델](https://huggingface.co/johnBamma/icefall-asr-ksponspeech-pruned-transducer-stateless7-streaming-2024-06-12) — Apache License 2.0. 이 음성 모델은 한국지능정보사회진흥원의 사업결과인 AI Hub 「한국어 음성」(KsponSpeech) 데이터로 학습됨(AI Hub 이용정책에 따른 출처 표기)
 - 주요 라이브러리(Gradle 의존성): Jetpack Compose(BOM 2024.09.03)·Material3·Activity Compose 1.9.3·Kotlin 1.9.25 — Apache License 2.0 / JUnit 4.13.2(테스트 전용) — Eclipse Public License 1.0

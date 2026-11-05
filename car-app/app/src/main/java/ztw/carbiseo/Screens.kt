@@ -929,6 +929,7 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
             var wakeName by rememberSaveable { mutableStateOf(RoomService.wakeName) }
             NameField("부를 이름", wakeName, "2~10자, 글자·숫자·공백만") { wakeName = it; if (validName(it) && it.count { c -> !c.isWhitespace() } >= 2) RoomService.setWakeName(ctx, it.trim()) }
             Text("이름을 듣기 전 음성은 저장·전송하지 않아요", color = ParkInk, fontSize = 18.sp)
+            Text("음성 모델은 한국지능정보사회진흥원 사업결과인 AI Hub 「한국어 음성」 데이터로 학습됐어요", color = ParkInk, fontSize = 18.sp) // AI Hub 이용정책: 2차적 저작물에도 출처 표기
             Text("켜 두면 Gleo 버튼이 듣지 않아요", color = ParkInk, fontSize = 18.sp) // Gleo는 마이크가 쓰이는 중이면 버튼을 무시한다(에뮬 실측)
         }
         Text("휴식 제안: 연속 운전 ${RoomService.restMin}분부터", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
