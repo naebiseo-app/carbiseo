@@ -277,9 +277,9 @@ fun fatigueSpeech(gear: Gear): String = "두 시간째 운전 중이에요. 전�
     if (gear == Gear.PARK) "쉬어 가시려면 휴게소 버튼을 누르세요." else "다음 휴게소에서 쉬어 가세요."
 fun fatigued(room: Room?, tripMin: Int?): Boolean = room != null && room != Room.PARK && (tripMin ?: 0) >= FATIGUE_MIN
 
-/** S1 피로 중 [말하기]: 급해·화장실(Q3)만 통과, 그 외 업무 말은 실행하지 않고 이 한 문장으로 거절. */
+/** S1 피로 중 [말하기]: 급해·화장실(Q3)과 잡담(UNKNOWN, 졸음 방지)은 통과, 전화·일정 같은 업무 말은 실행하지 않고 이 한 문장으로 거절. */
 const val FATIGUE_BLOCK_SPEECH = "두 시간 넘게 운전하셨어요. 업무는 쉬고 나서 할게요. 급하면 '화장실'이나 '급해'라고 말씀하세요."
-fun fatigueGate(intent: CarIntent, fatigued: Boolean): String? = if (fatigued && intent != CarIntent.URGENT) FATIGUE_BLOCK_SPEECH else null
+fun fatigueGate(intent: CarIntent, fatigued: Boolean): String? = if (fatigued && intent != CarIntent.URGENT && intent != CarIntent.UNKNOWN) FATIGUE_BLOCK_SPEECH else null
 
 const val TELLTALE_SPEECH = "계기판에 빨간 경고등이 켜졌어요. 안전한 곳에 세운 뒤 확인해 주세요"
 

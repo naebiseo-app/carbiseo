@@ -57,6 +57,11 @@ object Server {
         try { JSONObject((if (c.responseCode in 200..299) c.inputStream else c.errorStream).bufferedReader().readText()) } finally { c.disconnect() }
     }.getOrNull()
 
+    /** 말동무: 못 알아들은 말을 AI에 묻는다. 결과 = (답, source: llm·fallback·no_key 등). 실패·답 없음이면 null. */
+    fun chat(text: String, history: List<Pair<String, String>>): Pair<String, String>? =
+        postJson("/car/chat", JSONObject().put("text", text).put("history", org.json.JSONArray().also { a -> history.forEach { (r, t) -> a.put(JSONObject().put("role", r).put("text", t)) } }))
+            ?.let { j -> j.str("reply").takeIf { it.isNotBlank() }?.let { it to j.str("source") } }
+
     /** H1 가족 번호 저장(숫자 10~11, ""=삭제). 성공하면 가려진 표시("****1234", 삭제면 ""), 실패면 null. 번호는 서버에만 둔다. */
     fun postFamilyNumber(number: String): String? =
         postJson("/car/settings", JSONObject().put("family_number", number))?.takeIf { it.optBoolean("ok") }?.optJSONObject("settings")?.str("family_label")

@@ -81,6 +81,7 @@ class RoomService : Service() {
     private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, CALL, INTENT }
     private class PendingSend(val label: String, val number: String, val body: String, val task: String) // 보낼 문자(label·number·body)와 못 보냈을 때 남길 할 일 본문
     private var pending = Ask.NONE
+    private val chatHistory = mutableListOf<Pair<String, String>>() // 말동무 대화 맥락(메모리만, 저장·로그 없음). 메인 스레드에서만
     private var lateEvent: Pair<Event, Int>? = null
     private val lateAsked = mutableSetOf<Long>() // 이미 물은 일정(start)
     private val reserveOnce = Once() // O4: 운전 1회당 한 번
@@ -205,13 +206,30 @@ class RoomService : Service() {
                 CarIntent.URGENT -> addRestStop(true, true)
                 CarIntent.RECENT_CALLS -> say(recentCallsSpeech(cards()))
                 CarIntent.NEXT_EVENT -> say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis())))
-                CarIntent.UNKNOWN -> unsure(p, "아까 전화" to { say(recentCallsSpeech(cards())) }, "다음 일정" to { say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis()))) }, {}, "어떤 걸 알려 드릴까요?")
+                CarIntent.UNKNOWN -> {
+                    val unk = { unsure(p, "아까 전화" to { say(recentCallsSpeech(cards())) }, "다음 일정" to { say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis()))) }, {}, "어떤 걸 알려 드릴까요?") }
+                    if (said.isNullOrBlank()) unk() else chatOr(said, unk)
+                }
             } }
             Ask.NONE -> {
                 // 알림 묻기(제안·보낼까요)도 같은 규칙: 못 알아들으면 한 번만 다시 묻고, 그다음은 P의 화면 버튼(읽어줘/나중에·보내/취소)·주행 중엔 카드로
                 val st = talk.step
                 if ((st == NotifTalk.Step.OFFER || st == NotifTalk.Step.CONFIRM) && voiceCmd(said) == Cmd.Unknown && reask.again()) speaker.speak(REASK_SPEECH, ::listenNow)
                 else runTurn(talk.hear(said, favs, machine.room == Room.PARK))
+            }
+        }
+    }
+
+    /** 말동무: 못 알아들은 말을 서버 AI에 묻고 답을 읽는다. 실패·no_key면 fallback(기존 못 알아들음 경로). 대화는 메모리에만(최근 6개, PARK로 바뀌면 비움). */
+    private fun chatOr(said: String, fallback: () -> Unit) {
+        val hist = chatHistory.toList()
+        net.execute {
+            val r = Server.chat(said, hist)
+            ui.post {
+                if (r == null || (r.second != "llm" && r.second != "fallback")) { fallback(); return@post }
+                chatHistory.add("user" to said); chatHistory.add("assistant" to r.first)
+                while (chatHistory.size > CHAT_KEEP) chatHistory.removeAt(0)
+                say(r.first)
             }
         }
     }
@@ -416,7 +434,7 @@ class RoomService : Service() {
             room = to.name; choice = null
             val now = clock.millis()
             if (to == Room.PARK) {
-                parkedAt = now; restOffer = false; hold.clear(); parkRemind.reset()
+                parkedAt = now; restOffer = false; hold.clear(); parkRemind.reset(); chatHistory.clear()
                 // 정차 요약: 이번 실행에 와서 아직 안 알리고 안 본 알림(쉼 방 비즐겨찾기·피로·동승자 등으로 미룬 것)
                 notifQueue.clear(); talk.cancel(); listening = false; pending = Ask.NONE
                 val left = inbox.filter { it.id in notifFresh && it.id !in notifSaid && it.id !in seen && !isAd(it) }.sortedBy { it.id }
@@ -623,6 +641,7 @@ class RoomService : Service() {
     companion object {
         private const val CH = "room"
         private const val HEARTBEAT_MS = 5 * 60_000L
+        private const val CHAT_KEEP = 6 // 말동무 기억: 최근 user/assistant 합쳐 6개
         private const val POLL_MS = 5_000L
         private const val SLOW_EVERY = 6 // 일정·설정 조회 주기(폴링 6번에 한 번)
         const val ACTION_REST = "ztw.carbiseo.REST"
