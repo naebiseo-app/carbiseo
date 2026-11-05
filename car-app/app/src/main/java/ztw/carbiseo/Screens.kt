@@ -823,11 +823,18 @@ private fun Drive(r: String) {
             }
             Spacer(Modifier.weight(1f))
             RestButton(acc)
-            Row(Modifier.fillMaxWidth().height(104.dp).clip(RoundedCornerShape(52.dp)).background(Color(0xFF1C2026)).press {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(Modifier.weight(1f).height(104.dp).clip(RoundedCornerShape(52.dp)).background(Color(0xFF1C2026)).press {
                 speak(ctx, if (rest) recentCallsSpeech(cards) else if (urgent.none { it.kind == "call" }) "급한 전화는 없어요" else recentCallsSpeech(urgent).replaceFirst("최근 전화", "급한 전화"))
             }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)) {
                 Icon(Icons.Filled.PlayArrow, null, Modifier.size(40.dp), tint = DTx)
                 Text(if (rest) "들려줘" else "급한 건 듣기", color = DTx, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+            }
+            Row(Modifier.weight(1f).height(104.dp).clip(RoundedCornerShape(52.dp)).background(acc).press { talk(ctx) },
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)) {
+                MicIcon(Ink, 40.dp)
+                Text(if (RoomService.listening) "듣는 중…" else "말하기", color = Ink, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+            }
             }
         }
     }
