@@ -49,8 +49,9 @@ object Server {
     }.getOrNull()
 
     /** JSON 한 번 보내고 응답 JSON(오류 본문 포함). 네트워크 실패면 null. */
-    private fun postJson(path: String, body: JSONObject): JSONObject? = runCatching {
+    private fun postJson(path: String, body: JSONObject, readMs: Int = 5000): JSONObject? = runCatching {
         val c = open(path, "POST")
+        c.readTimeout = readMs
         c.doOutput = true
         c.setRequestProperty("Content-Type", "application/json")
         c.outputStream.use { it.write(body.toString().toByteArray()) }
@@ -59,7 +60,7 @@ object Server {
 
     /** 말동무: 못 알아들은 말을 AI에 묻는다. 결과 = (답, source: llm·fallback·no_key 등). 실패·답 없음이면 null. */
     fun chat(text: String, history: List<Pair<String, String>>): Pair<String, String>? =
-        postJson("/car/chat", JSONObject().put("text", text).put("history", org.json.JSONArray().also { a -> history.forEach { (r, t) -> a.put(JSONObject().put("role", r).put("text", t)) } }))
+        postJson("/car/chat", JSONObject().put("text", text).put("history", org.json.JSONArray().also { a -> history.forEach { (r, t) -> a.put(JSONObject().put("role", r).put("text", t)) } }), readMs = 8000) // 서버 쪽 AI 제한 6초 + 여유
             ?.let { j -> j.str("reply").takeIf { it.isNotBlank() }?.let { it to j.str("source") } }
 
     /** H1 가족 번호 저장(숫자 10~11, ""=삭제). 성공하면 가려진 표시("****1234", 삭제면 ""), 실패면 null. 번호는 서버에만 둔다. */

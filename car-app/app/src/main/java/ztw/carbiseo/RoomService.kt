@@ -40,6 +40,7 @@ class RoomService : Service() {
     private lateinit var speaker: Speaker
     private val audio by lazy { getSystemService(AudioManager::class.java) }
     private val net = Executors.newSingleThreadExecutor() // 상태·발송 등 쓰기 호출은 여기서만(순서 보장, 메인 차단 방지)
+    private val chatNet = Executors.newSingleThreadExecutor() // 말동무 AI 호출(최대 8초)만. 상태 전송·문자 발송을 막지 않는다
     @Volatile private var alive = true
     private var pollN = 0 // 메인 스레드에서만
     private val pollNet = Executors.newSingleThreadExecutor() // 폴링(읽기)만. 쓰기와 줄 서지 않는다
@@ -223,12 +224,14 @@ class RoomService : Service() {
     /** 말동무: 못 알아들은 말을 서버 AI에 묻고 답을 읽는다. 실패·no_key면 fallback(기존 못 알아들음 경로). 대화는 메모리에만(최근 6개, PARK로 바뀌면 비움). */
     private fun chatOr(said: String, fallback: () -> Unit) {
         val hist = chatHistory.toList()
-        net.execute {
+        chatNet.execute {
             val r = Server.chat(said, hist)
             ui.post {
                 if (r == null || (r.second != "llm" && r.second != "fallback")) { fallback(); return@post }
-                chatHistory.add("user" to said); chatHistory.add("assistant" to r.first)
-                while (chatHistory.size > CHAT_KEEP) chatHistory.removeAt(0)
+                if (machine.room != Room.PARK) { // 정차(PARK)로 바뀐 뒤 늦게 온 답은 기록하지 않는다(PARK에서 기록을 비웠으니)
+                    chatHistory.add("user" to said); chatHistory.add("assistant" to r.first)
+                    while (chatHistory.size > CHAT_KEEP) chatHistory.removeAt(0)
+                }
                 say(r.first)
             }
         }
@@ -635,7 +638,7 @@ class RoomService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        alive = false; ui.removeCallbacks(ticker); ui.removeCallbacks(poller); net.shutdown(); pollNet.shutdown(); speaker.stop(); voice.stop(); adapters.stop(); receivers.forEach { unregisterReceiver(it) }; super.onDestroy()
+        alive = false; ui.removeCallbacks(ticker); ui.removeCallbacks(poller); net.shutdown(); chatNet.shutdown(); pollNet.shutdown(); speaker.stop(); voice.stop(); adapters.stop(); receivers.forEach { unregisterReceiver(it) }; super.onDestroy()
     }
 
     companion object {
