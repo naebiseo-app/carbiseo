@@ -1,0 +1,17 @@
+{
+  "packageName": "ztw.carbiseo",
+  "appDescription": "Car assistant that answers calls while driving and keeps call summaries and the next schedule.",
+  "version": "0.1",
+  "invokeWord": "내비서",
+  "actionCalls": [
+    { "type": "function", "function": { "component": "service", "name": "READ_RECENT_CALLS",
+      "description": "Reads aloud the summary of recent calls the assistant answered.",
+      "parameters": { "type": "object", "properties": {}, "required": [] } } },
+    { "type": "function", "function": { "component": "service", "name": "READ_NEXT_SCHEDULE",
+      "description": "Reads aloud the time and place of the next schedule.",
+      "parameters": { "type": "object", "properties": {}, "required": [] } } },
+    { "type": "function", "function": { "component": "service", "name": "ADD_REST_STOP",
+      "description": "Adds the nearest rest stop with a restroom to the current route.",
+      "parameters": { "type": "object", "properties": {}, "required": [] } } }
+  ]
+}

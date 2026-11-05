@@ -37,6 +37,15 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+        <!-- Gleo Interface: assets/schema.json의 함수마다 action. -->
+        <receiver android:name=".GleoReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="READ_RECENT_CALLS" />
+                <action android:name="READ_NEXT_SCHEDULE" />
+                <action android:name="ADD_REST_STOP" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </receiver>
         <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
             <meta-data android:name="distractionOptimized" android:value="true" />
             <intent-filter>

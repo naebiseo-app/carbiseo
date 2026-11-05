@@ -208,21 +208,29 @@ class RoomService : Service() {
             }
             // F5: [말하기] 뒤 한 마디. 못 알아들으면 "다시 말씀해 주세요" 한 번만, 그다음은 화면 2택(주행 중엔 그냥 끝).
             // S1 피로 중엔 급해·화장실만 통과, 업무 말은 한 문장으로 거절(fatigueGate)
-            Ask.INTENT -> carIntent(said).let { ci -> fatigueGate(ci, fatigued(machine.room, tripMin()))?.let(::say) ?: when (ci) {
-                CarIntent.URGENT -> addRestStop(true, true)
-                CarIntent.RECENT_CALLS -> say(recentCallsSpeech(cards()))
-                CarIntent.NEXT_EVENT -> say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis())))
-                CarIntent.UNKNOWN -> {
+            Ask.INTENT -> carIntent(said).let { ci ->
+                if (ci != CarIntent.UNKNOWN) runIntent(ci) else {
                     val unk = { unsure(p, "아까 전화" to { say(recentCallsSpeech(cards())) }, "다음 일정" to { say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis()))) }, {}, "어떤 걸 알려 드릴까요?") }
                     if (said.isNullOrBlank()) unk() else chatOr(said, unk)
                 }
-            } }
+            }
             Ask.NONE -> {
                 // 알림 묻기(제안·보낼까요)도 같은 규칙: 못 알아들으면 한 번만 다시 묻고, 그다음은 P의 화면 버튼(읽어줘/나중에·보내/취소)·주행 중엔 카드로
                 val st = talk.step
                 if ((st == NotifTalk.Step.OFFER || st == NotifTalk.Step.CONFIRM) && voiceCmd(said) == Cmd.Unknown && reask.again()) speaker.speak(REASK_SPEECH, ::listenNow)
                 else runTurn(talk.hear(said, favs, machine.room == Room.PARK))
             }
+        }
+    }
+
+    /** [말하기]·이름 호출·Gleo가 같이 쓰는 의도 실행. 피로 중 업무는 여기서 거절한다. */
+    private fun runIntent(ci: CarIntent) {
+        fatigueGate(ci, fatigued(machine.room, tripMin()))?.let { say(it); return }
+        when (ci) {
+            CarIntent.URGENT -> addRestStop(true, true)
+            CarIntent.RECENT_CALLS -> say(recentCallsSpeech(cards()))
+            CarIntent.NEXT_EVENT -> say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis())))
+            CarIntent.UNKNOWN -> {}
         }
     }
 
@@ -471,6 +479,7 @@ class RoomService : Service() {
             val sd = p.getBoolean("setup_done", false); val md = p.getString("mode", "ai") ?: "ai"; val bd = p.getLong("brief_day", -1)
             ui.post { restMin = r; workEndHour = we; inbox = (lt.filter { t -> inbox.none { it.id == t.id } } + inbox).sortedByDescending { it.id }; seen = sn + seen; notifDone = nd + notifDone; cardDone = cd + cardDone; snoozed = sz + snoozed; deferred = df + deferred; forwardOk = forwardOk || fw; setupDone = sd; mode = md; briefDay = bd }
         }
+        gleo = { ci -> ui.post { if (alive) runIntent(ci) } }
         latch = AlertLatch(Clock.systemDefaultZone())
         machine = RoomStateMachine(clock) // settings = 기본 상수. 설정 화면이 machine.settings를 덮어쓴다.
         machine.onChange = { from, to ->
@@ -683,10 +692,11 @@ class RoomService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        alive = false; ui.removeCallbacks(ticker); ui.removeCallbacks(poller); wake?.stop(); wake = null; net.shutdown(); chatNet.shutdown(); pollNet.shutdown(); speaker.stop(); voice.stop(); adapters.stop(); receivers.forEach { unregisterReceiver(it) }; super.onDestroy()
+        gleo = null; alive = false; ui.removeCallbacks(ticker); ui.removeCallbacks(poller); wake?.stop(); wake = null; net.shutdown(); chatNet.shutdown(); pollNet.shutdown(); speaker.stop(); voice.stop(); adapters.stop(); receivers.forEach { unregisterReceiver(it) }; super.onDestroy()
     }
 
     companion object {
+        @Volatile var gleo: ((CarIntent) -> Unit)? = null // GleoReceiver가 부른다. 서비스가 살아 있을 때만 있다
         private const val CH = "room"
         private const val HEARTBEAT_MS = 5 * 60_000L
         private const val CHAT_KEEP = 6 // 말동무 기억: 최근 user/assistant 합쳐 6개
