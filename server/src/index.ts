@@ -1,6 +1,6 @@
 import { CALL_ID, carChip, callerNumber, cleanMent, cleanName, field, freshCtx, hhmm, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, reportLine, isDirect, sameNumber, type Mode, type Recent } from "./script.ts";
 import { adminPage, basicOk, demoSchedule, encodeReplay, parseFakeCall, replayScript, type MailRow, type ReplyRow } from "./admin.ts";
-import { guardText, isBlocked } from "./guard.ts";
+import { FALLBACK, guardText, isBlocked } from "./guard.ts";
 import { parseNotify, parseReply, TAKE_REPLIES_SQL, type Notif } from "./notif.ts";
 
 interface Env {
@@ -15,6 +15,7 @@ interface Env {
   OWNER_NUMBER?: string; // 주인 휴대폰: 이 번호로 오면 주인 모드
   SMS_RELAY_URL?: string; // 문자 중계(Vercel 서울, sms-relay/api/send.js)
   SMS_RELAY_SECRET?: string;
+  ANTHROPIC_API_KEY?: string; // 말동무 대화(/car/chat). 없으면 no_key 고정 문구
   KAKAO_REST_KEY?: string; // 카카오 로컬 키워드 검색(가게 번호). 없으면 place-phone은 no_key
 }
 
@@ -248,6 +249,28 @@ export async function placePhone(key: string | undefined, name: string, lat: str
     if (!d || digits.length < 8) return none("not_found");
     return { phone: d.phone!.trim(), kind: /^01\d{8,9}$/.test(digits) ? "mobile" : "landline", name: d.place_name ?? name };
   } catch { return none("upstream"); }
+}
+
+const CHAT_SYSTEM = "당신은 운전자의 말동무 '내비서'입니다. 운전 중이므로 존댓말로 한두 문장, 80자 안으로 짧게 답합니다. 편안한 잡담을 이어 가고 가끔 짧은 질문을 던져 운전자가 깨어 있게 돕습니다. 화면을 보라는 말, 목록, 이모지, 기호는 쓰지 않습니다. 의학·법률·투자 조언은 하지 않습니다. 졸리다, 피곤하다는 말에는 가까운 휴게소에서 쉬기를 권합니다.";
+
+/** 말동무 대화. 대화 내용은 저장·로그하지 않는다. 키 없음 no_key, 실패·금칙어는 고정 문구 fallback. */
+export async function carChat(key: string | undefined, text: string, history: { role: "user" | "assistant"; text: string }[]): Promise<{ reply: string; source: "llm" | "fallback" | "no_key" }> {
+  if (!key) return { reply: FALLBACK.chat, source: "no_key" };
+  const fb = { reply: FALLBACK.chat, source: "fallback" as const };
+  try {
+    const messages = [...history, { role: "user" as const, text }].map((h) => ({ role: h.role, content: h.text }));
+    while (messages[0].role === "assistant") messages.shift(); // API는 user로 시작해야 한다
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-haiku-5-5", max_tokens: 120, system: CHAT_SYSTEM, messages }),
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!r.ok) return fb;
+    const c = ((await r.json()) as { content?: { type?: string; text?: string }[] }).content?.find((b) => b.type === "text");
+    const reply = guardText("chat", c?.text);
+    return reply === FALLBACK.chat ? fb : { reply, source: "llm" };
+  } catch { return fb; }
 }
 
 export default {
@@ -522,6 +545,17 @@ export default {
       if (!authed) return json({ error: "unauthorized" }, 401);
       const q = new URL(req.url).searchParams;
       return json(await placePhone(env.KAKAO_REST_KEY, q.get("name") ?? "", q.get("lat") ?? "", q.get("lng") ?? ""));
+    }
+
+    if (m === "POST" && pathname === "/car/chat") {
+      if (!authed) return json({ error: "unauthorized" }, 401);
+      const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+      const text = typeof b.text === "string" ? b.text.trim().slice(0, 200) : "";
+      if (!text) return json({ error: "text required" }, 400);
+      const history = (Array.isArray(b.history) ? b.history : []).slice(-6)
+        .filter((h): h is { role: "user" | "assistant"; text: string } => !!h && (h.role === "user" || h.role === "assistant") && typeof h.text === "string")
+        .map((h) => ({ role: h.role, text: h.text.slice(0, 200) }));
+      return json(await carChat(env.ANTHROPIC_API_KEY, text, history));
     }
 
     if (m === "GET" && pathname === "/car/schedule") {
