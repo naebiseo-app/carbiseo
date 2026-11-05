@@ -16,6 +16,7 @@
     <uses-permission android:name="android.car.permission.CAR_SPEED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" /><!-- 이름 호출(스위치 켠 때만 마이크 대기) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <queries>
@@ -26,7 +27,7 @@
     <application android:theme="@android:style/Theme.DeviceDefault.NoActionBar" android:label="내비서" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="false">
         <uses-library android:name="android.car" android:required="false" />
         <meta-data android:name="distractionOptimized" android:value="true" />
-        <service android:name=".RoomService" android:exported="false" android:foregroundServiceType="specialUse">
+        <service android:name=".RoomService" android:exported="false" android:foregroundServiceType="specialUse|microphone">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="vehicle-room-state" />
         </service>
         <!-- H1: 시동(부팅)·앱 업데이트 뒤 앱을 안 열어도 방 판정 서비스가 돈다. AAOS는 사용자(10)가 시작될 때마다 BOOT_COMPLETED를 보낸다(사용자 전환 포함). -->

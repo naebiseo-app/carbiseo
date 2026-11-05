@@ -13,7 +13,9 @@ android {
     defaultConfig { applicationId = "ztw.carbiseo"; minSdk = 28; targetSdk = 34; versionCode = 1; versionName = "0.1"
         buildConfigField("String", "SERVER_URL", "\"https://carbiseo-api.wondi81.workers.dev\"")
         buildConfigField("String", "CAR_TOKEN", "\"$carToken\"")
+        ndk { abiFilters += listOf("x86_64", "arm64-v8a") } // sherpa-onnx 네이티브 라이브러리: 에뮬·차(arm64)만
     }
+    androidResources { noCompress += "onnx" } // 이름 호출 모델(assets/sherpa-ko, git 제외)을 압축 없이 담아 빨리 연다
     if (keyProps.isNotEmpty()) signingConfigs.create("release") {
         storeFile = File(keyDir, keyProps.getValue("storeFile"))
         storePassword = keyProps["storePassword"]; keyAlias = keyProps["keyAlias"]; keyPassword = keyProps["keyPassword"]
@@ -30,6 +32,7 @@ dependencies {
     implementation("ai.pleos.playground:NaviHelper:3.0.5")
     implementation("ai.pleos.playground:TextToSpeech:3.3.1")
     implementation("ai.pleos.playground:SpeechToText:3.3.1") // 알림 음성 응답(35)
+    implementation(files("libs/sherpa-onnx-2.0.1.aar")) // 이름 호출: 기기 안 스트리밍 음성 인식(k2-fsa/sherpa-onnx v2.0.1)
     implementation(platform("androidx.compose:compose-bom:2024.09.03"))
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.9.3")

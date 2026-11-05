@@ -823,11 +823,18 @@ private fun Drive(r: String) {
             }
             Spacer(Modifier.weight(1f))
             RestButton(acc)
-            Row(Modifier.fillMaxWidth().height(104.dp).clip(RoundedCornerShape(52.dp)).background(Color(0xFF1C2026)).press {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(Modifier.weight(1f).height(104.dp).clip(RoundedCornerShape(52.dp)).background(Color(0xFF1C2026)).press {
                 speak(ctx, if (rest) recentCallsSpeech(cards) else if (urgent.none { it.kind == "call" }) "급한 전화는 없어요" else recentCallsSpeech(urgent).replaceFirst("최근 전화", "급한 전화"))
             }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)) {
                 Icon(Icons.Filled.PlayArrow, null, Modifier.size(40.dp), tint = DTx)
                 Text(if (rest) "들려줘" else "급한 건 듣기", color = DTx, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+            }
+            Row(Modifier.weight(1f).height(104.dp).clip(RoundedCornerShape(52.dp)).background(acc).press { talk(ctx) },
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)) {
+                MicIcon(Ink, 40.dp)
+                Text(if (RoomService.listening) "듣는 중…" else "말하기", color = Ink, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+            }
             }
         }
     }
@@ -911,6 +918,17 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("동승자 모드 (업무 음성 끔)", Modifier.weight(1f), color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
             PassengerToggle(light = true)
+        }
+        // 이름 호출: 켜 두면 운전 중(정차 아님)에만 마이크로 이름을 기다린다. 이름 전 음성은 기기 안에서 바로 버린다.
+        val wakeOn = RoomService.wakeOn
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("이름으로 부르기", Modifier.weight(1f), color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            TextButton({ RoomService.setWakeOn(ctx, !wakeOn) }, Tall) { Text(if (wakeOn) "켜짐" else "꺼짐", color = if (wakeOn) ParkAcc else ParkInk, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+        }
+        if (wakeOn) {
+            var wakeName by rememberSaveable { mutableStateOf(RoomService.wakeName) }
+            NameField("부를 이름", wakeName, "2~10자, 글자·숫자·공백만") { wakeName = it; if (validName(it) && it.count { c -> !c.isWhitespace() } >= 2) RoomService.setWakeName(ctx, it.trim()) }
+            Text("이름을 듣기 전 음성은 저장·전송하지 않아요", color = ParkInk, fontSize = 18.sp)
         }
         Text("휴식 제안: 연속 운전 ${RoomService.restMin}분부터", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

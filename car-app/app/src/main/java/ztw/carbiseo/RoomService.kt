@@ -5,6 +5,7 @@ import ai.pleos.playground.navi.constants.WaypointIndex
 import ai.pleos.playground.navi.data.NavigationScreenRequest
 import ai.pleos.playground.navi.data.RequestWaypointInfo
 import ai.pleos.playground.navi.data.RouteInfo
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -14,6 +15,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.media.AudioManager
 import android.os.Build
@@ -40,6 +42,10 @@ class RoomService : Service() {
     private lateinit var speaker: Speaker
     private val audio by lazy { getSystemService(AudioManager::class.java) }
     private val net = Executors.newSingleThreadExecutor() // 상태·발송 등 쓰기 호출은 여기서만(순서 보장, 메인 차단 방지)
+    private var wake: Wake? = null // 이름 호출 대기(스위치 켜짐·마이크 허용·모델 있음·시동 켜짐일 때만 있다). 메인 스레드에서만
+    private var micFgs = false     // 포그라운드 서비스 종류에 마이크가 들어갔나
+    private val wakeModelOk by lazy { Wake.hasModel(applicationContext) }
+    private val chatNet = Executors.newSingleThreadExecutor() // 말동무 AI 호출(최대 8초)만. 상태 전송·문자 발송을 막지 않는다
     @Volatile private var alive = true
     private var pollN = 0 // 메인 스레드에서만
     private val pollNet = Executors.newSingleThreadExecutor() // 폴링(읽기)만. 쓰기와 줄 서지 않는다
@@ -81,6 +87,7 @@ class RoomService : Service() {
     private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, CALL, INTENT }
     private class PendingSend(val label: String, val number: String, val body: String, val task: String) // 보낼 문자(label·number·body)와 못 보냈을 때 남길 할 일 본문
     private var pending = Ask.NONE
+    private val chatHistory = mutableListOf<Pair<String, String>>() // 말동무 대화 맥락(메모리만, 저장·로그 없음). 메인 스레드에서만
     private var lateEvent: Pair<Event, Int>? = null
     private val lateAsked = mutableSetOf<Long>() // 이미 물은 일정(start)
     private val reserveOnce = Once() // O4: 운전 1회당 한 번
@@ -205,13 +212,32 @@ class RoomService : Service() {
                 CarIntent.URGENT -> addRestStop(true, true)
                 CarIntent.RECENT_CALLS -> say(recentCallsSpeech(cards()))
                 CarIntent.NEXT_EVENT -> say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis())))
-                CarIntent.UNKNOWN -> unsure(p, "아까 전화" to { say(recentCallsSpeech(cards())) }, "다음 일정" to { say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis()))) }, {}, "어떤 걸 알려 드릴까요?")
+                CarIntent.UNKNOWN -> {
+                    val unk = { unsure(p, "아까 전화" to { say(recentCallsSpeech(cards())) }, "다음 일정" to { say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis()))) }, {}, "어떤 걸 알려 드릴까요?") }
+                    if (said.isNullOrBlank()) unk() else chatOr(said, unk)
+                }
             } }
             Ask.NONE -> {
                 // 알림 묻기(제안·보낼까요)도 같은 규칙: 못 알아들으면 한 번만 다시 묻고, 그다음은 P의 화면 버튼(읽어줘/나중에·보내/취소)·주행 중엔 카드로
                 val st = talk.step
                 if ((st == NotifTalk.Step.OFFER || st == NotifTalk.Step.CONFIRM) && voiceCmd(said) == Cmd.Unknown && reask.again()) speaker.speak(REASK_SPEECH, ::listenNow)
                 else runTurn(talk.hear(said, favs, machine.room == Room.PARK))
+            }
+        }
+    }
+
+    /** 말동무: 못 알아들은 말을 서버 AI에 묻고 답을 읽는다. 실패·no_key면 fallback(기존 못 알아들음 경로). 대화는 메모리에만(최근 6개, PARK로 바뀌면 비움). */
+    private fun chatOr(said: String, fallback: () -> Unit) {
+        val hist = chatHistory.toList()
+        chatNet.execute {
+            val r = Server.chat(said, hist)
+            ui.post {
+                if (r == null || (r.second != "llm" && r.second != "fallback")) { fallback(); return@post }
+                if (machine.room != Room.PARK) { // 정차(PARK)로 바뀐 뒤 늦게 온 답은 기록하지 않는다(PARK에서 기록을 비웠으니)
+                    chatHistory.add("user" to said); chatHistory.add("assistant" to r.first)
+                    while (chatHistory.size > CHAT_KEEP) chatHistory.removeAt(0)
+                }
+                say(r.first)
             }
         }
     }
@@ -298,8 +324,37 @@ class RoomService : Service() {
     /** 음성 인식이 없고(path none) 주행 중이면 대답을 못 받으니 '나중에'(카드로 보관). */
     private fun listenNow() {
         if (voice.path == "none") { if (!touchOk() || pending == Ask.CALLBACK || pending == Ask.SEND) heard("나중에"); return }
-        listening = true; voice.listen()
+        listening = true; voice.listen(); syncWake()
     }
+
+    private fun micGranted() = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    private fun inCall() = audio.mode == AudioManager.MODE_IN_CALL || audio.mode == AudioManager.MODE_IN_COMMUNICATION || replayRun != null
+
+    /** 포그라운드 서비스 종류에 마이크를 더한다(권한이 있을 때만). 백그라운드에서 막히면(안드로이드 14) 조용히 포기. */
+    private fun promoteMic() {
+        if (Build.VERSION.SDK_INT < 34 || micFgs || !micGranted()) return
+        runCatching { startForeground(1, notification(room), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE); micFgs = true }
+            .onFailure { Log.w("ROOM", "mic fgs FAIL ${it.javaClass.simpleName}") }
+    }
+
+    /** 이름 호출 켜기·끄기·쉬기를 한 곳에서. 말하는 중·다른 질문 대기·듣는 중·통화 중에는 쉰다(자기 음성 인식 방지). */
+    private fun syncWake() {
+        val w = wake
+        val want = wakeOn && machine.room != null && micGranted() && wakeModelOk // 시동이 켜진 동안 대기(대표님 지시, 정차 포함)
+        if (!want) { if (w != null) { w.stop(); wake = null; Log.i("ROOM", "wake off") }; return }
+        val cur = w ?: Wake(applicationContext, wakeName, ::onWake).also { wake = it; it.pause(); it.start(); promoteMic(); Log.i("ROOM", "wake on") }
+        if (cur.dead) return // 모델·마이크를 못 열었다: 스위치를 껐다 켤 때까지 다시 안 시도
+        cur.name = wakeName
+        if (speaker.busy || pending != Ask.NONE || listening || inCall()) cur.pause() else cur.resume()
+    }
+
+    /** 이름 호출 결과(Wake 스레드에서 옴 → 메인으로). "" = 이름만 불렀다, 그 외 = 이름 뒤 문장(또는 이름만 부른 뒤의 다음 문장). */
+    private fun onWake(text: String) { ui.post {
+        if (!alive || wake == null) return@post
+        if (pending != Ask.NONE || listening || talk.step != NotifTalk.Step.NONE) return@post // 이미 다른 대화 중
+        if (text.isEmpty()) { if (!quiet) speaker.speak(WAKE_ACK); return@post } // 대답 듣기는 Wake가 이어 받는다(Pleos 듣기를 또 켜지 않는다)
+        reask.reset(); choice = null; pending = Ask.INTENT; heard(text)
+    } }
 
     private fun touchOk() = machine.room == Room.PARK || (adapters.speedKmh ?: 0f) < 10f
 
@@ -340,6 +395,7 @@ class RoomService : Service() {
             if (q != quiet) { quiet = q; Log.i("ROOM", "quiet $q"); hold.release(q, machine.room)?.let { speaker.speak(it) } }
             if (passenger) { hold.clear(); notifQueue.clear() } // 동승자 모드면 보류분도 버린다
             tickReplay()
+            syncWake()
             // 폰 알림: 미루기 조건(경고·깜빡이·후진·큰 조향·통화·피로)이 다 풀리고 대화 중이 아니면 쌓인 것을 묶어서 한 번
             // 대답 없이 남은 묻기(P의 바)도 새 알림이 오면 닫고, 못 읽어 준 알림과 합쳐 다시 묻는다(같은 알림은 한 번만)
             if (!q && (talk.step == NotifTalk.Step.NONE || talk.waiting && !listening) && pending == Ask.NONE && notifQueue.isNotEmpty() && machine.room != null && !passenger && !fatigued(machine.room, tripMin())) {
@@ -392,7 +448,12 @@ class RoomService : Service() {
         getSystemService(NotificationManager::class.java)
             .createNotificationChannel(NotificationChannel(CH, "내비서", NotificationManager.IMPORTANCE_LOW))
         val n = notification(room)
-        if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(1, n)
+        if (Build.VERSION.SDK_INT >= 34) {
+            // 마이크 권한이 있으면 마이크 종류도 같이(이름 호출용). 시동 직후 백그라운드 시작 등으로 거부되면 특수 용도만으로 다시.
+            micFgs = micGranted()
+            runCatching { startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or (if (micFgs) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)) }
+                .onFailure { micFgs = false; Log.w("ROOM", "fgs with mic FAIL ${it.javaClass.simpleName}"); startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) }
+        } else startForeground(1, n)
         net.execute { restStops = runCatching { assets.open("reststops.tsv").bufferedReader().use { parseRestStops(it.readText()) } }.onFailure { Log.w("ROOM", "reststops FAIL $it") }.getOrDefault(emptyList()) } // 실패하면 빈 목록 = 내비 검색 폴백
         net.execute { // 첫 SharedPreferences 로드는 디스크 읽기 → 메인 밖에서
             val p = getSharedPreferences("car_ui", MODE_PRIVATE)
@@ -406,6 +467,7 @@ class RoomService : Service() {
             val df = decodeDeferred(p.getString("deferred", "")); val fw = p.getBoolean("forward_ok", false)
             val fv = p.getString("fav_senders", "").orEmpty(); ui.post { favs = parseFavs(fv) }
             val fd = p.getLong("family_day", -1); ui.post { familyDay = fd }
+            val wo = p.getBoolean("wake_on", false); val wn = p.getString("wake_name", null)?.takeIf { validName(it) } ?: WAKE_DEFAULT_NAME; ui.post { wakeOn = wo; wakeName = wn }
             val sd = p.getBoolean("setup_done", false); val md = p.getString("mode", "ai") ?: "ai"; val bd = p.getLong("brief_day", -1)
             ui.post { restMin = r; workEndHour = we; inbox = (lt.filter { t -> inbox.none { it.id == t.id } } + inbox).sortedByDescending { it.id }; seen = sn + seen; notifDone = nd + notifDone; cardDone = cd + cardDone; snoozed = sz + snoozed; deferred = df + deferred; forwardOk = forwardOk || fw; setupDone = sd; mode = md; briefDay = bd }
         }
@@ -416,7 +478,7 @@ class RoomService : Service() {
             room = to.name; choice = null
             val now = clock.millis()
             if (to == Room.PARK) {
-                parkedAt = now; restOffer = false; hold.clear(); parkRemind.reset()
+                parkedAt = now; restOffer = false; hold.clear(); parkRemind.reset(); chatHistory.clear()
                 // 정차 요약: 이번 실행에 와서 아직 안 알리고 안 본 알림(쉼 방 비즐겨찾기·피로·동승자 등으로 미룬 것)
                 notifQueue.clear(); talk.cancel(); listening = false; pending = Ask.NONE
                 val left = inbox.filter { it.id in notifFresh && it.id !in notifSaid && it.id !in seen && !isAd(it) }.sortedBy { it.id }
@@ -443,7 +505,7 @@ class RoomService : Service() {
         addHomeFavorite = { runCatching { adapters.navi?.requestNavigationScreen(NavigationScreenRequest.AddHomeFavorite) }.onFailure { Log.w("ROOM", "add home FAIL $it") } }
         searchInNavi = { q -> runCatching { adapters.navi?.requestNavigationScreen(NavigationScreenRequest.SearchPlace(q)) }.onFailure { Log.w("ROOM", "navi search FAIL $it") } }
         adapters.onNaviReady = { pendingRoute?.let { pendingRoute = null; Log.i("ROOM", "navi ready -> route"); it() } }
-        speaker = Speaker(applicationContext).also { it.start() }
+        speaker = Speaker(applicationContext).also { it.onBusy = ::syncWake; it.start() }
         voice = Voice(applicationContext, ::heard).also { it.start() }
         answer = { if (it == "답장하기") { if (!listening) listenNow() } else voice.inject(it) } // '답장하기'는 대답이 아니라 다시 듣기
         ui.post(ticker)
@@ -551,7 +613,11 @@ class RoomService : Service() {
         val hear = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { runCatching { java.io.File(filesDir, "hear.pcm").readBytes() }.onSuccess { Log.i("ROOM", "debug hear ${it.size}B"); voice.armed = it } }
         }
-        for ((rc, action) in listOf(cc to "ztw.carbiseo.CALLCARD", hear to "ztw.carbiseo.HEAR", say to "ztw.carbiseo.SAY", wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP", loc to "ztw.carbiseo.LOC", tm to "ztw.carbiseo.TIME", sig to "ztw.carbiseo.SIGNAL")) {
+        // adb shell am broadcast -a ztw.carbiseo.WAKEPCM (앱 files/wake.pcm(16kHz·16bit·mono)을 마이크 대신 이름 호출 인식기에 넣기. 이름 호출이 켜져 있고 방이 PARK가 아닐 때)
+        val wakePcm = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) { runCatching { java.io.File(filesDir, "wake.pcm").readBytes() }.onSuccess { Log.i("ROOM", "debug wake pcm ${it.size}B active=${wake != null}"); wake?.feedPcm(it) } }
+        }
+        for ((rc, action) in listOf(cc to "ztw.carbiseo.CALLCARD", hear to "ztw.carbiseo.HEAR", wakePcm to "ztw.carbiseo.WAKEPCM", say to "ztw.carbiseo.SAY", wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP", loc to "ztw.carbiseo.LOC", tm to "ztw.carbiseo.TIME", sig to "ztw.carbiseo.SIGNAL")) {
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(rc, IntentFilter(action), Context.RECEIVER_EXPORTED) else registerReceiver(rc, IntentFilter(action))
             receivers += rc
         }
@@ -617,12 +683,13 @@ class RoomService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        alive = false; ui.removeCallbacks(ticker); ui.removeCallbacks(poller); net.shutdown(); pollNet.shutdown(); speaker.stop(); voice.stop(); adapters.stop(); receivers.forEach { unregisterReceiver(it) }; super.onDestroy()
+        alive = false; ui.removeCallbacks(ticker); ui.removeCallbacks(poller); wake?.stop(); wake = null; net.shutdown(); chatNet.shutdown(); pollNet.shutdown(); speaker.stop(); voice.stop(); adapters.stop(); receivers.forEach { unregisterReceiver(it) }; super.onDestroy()
     }
 
     companion object {
         private const val CH = "room"
         private const val HEARTBEAT_MS = 5 * 60_000L
+        private const val CHAT_KEEP = 6 // 말동무 기억: 최근 user/assistant 합쳐 6개
         private const val POLL_MS = 5_000L
         private const val SLOW_EVERY = 6 // 일정·설정 조회 주기(폴링 6번에 한 번)
         const val ACTION_REST = "ztw.carbiseo.REST"
@@ -638,6 +705,12 @@ class RoomService : Service() {
         var restMin by mutableIntStateOf(REST_DEFAULT_MIN) // 연속 주행 기준(분). 설정 화면이 바꾼다.
         var workEndHour by mutableIntStateOf(18) // 업무 끝 시각(시, 17~20). 설정 화면이 바꾼다. 방 판정·업무 외 판정이 이 값을 쓴다.
         fun setWorkEnd(c: Context, h: Int) { workEndHour = h; save(c) { putInt("work_end", h) } }
+        const val WAKE_DEFAULT_NAME = "내비서"
+        private const val WAKE_ACK = "네" // 이름만 불렸을 때
+        var wakeOn by mutableStateOf(false); private set // 이름으로 부르기 스위치(prefs wake_on, 기본 끔). 설정 화면이 바꾼다.
+        var wakeName by mutableStateOf(WAKE_DEFAULT_NAME); private set
+        fun setWakeOn(c: Context, on: Boolean) { wakeOn = on; save(c) { putBoolean("wake_on", on) } }
+        fun setWakeName(c: Context, n: String) { wakeName = n; save(c) { putString("wake_name", n) } }
         var passenger by mutableStateOf(false); private set // H3: 켜면 업무 TTS(부재중 낭독)·쉼 방 선언(H1)을 끈다. 휴식 제안(S2)은 안전이라 유지.
         var passengerAt = 0L; private set
         /** H9: 이번 운전만. 저장하지 않고, 30분 넘게 세운 뒤 출발하면 자동 해제. */
