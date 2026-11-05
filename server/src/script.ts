@@ -47,7 +47,7 @@ export function parseRoom(v: unknown): Room | null {
 export function greeting(owner?: string, name?: string, sit = "지금 바로 받기 어려우셔서"): string {
   const ai = name ? `AI 비서 ${name}입니다` : "AI 비서입니다";
   const who = owner ? `${owner}님의 ${ai}` : `이 번호로 대신 전화 받는 ${ai}`;
-  return `전화가 연결되면 첫 마디로 '안녕하세요, ${who}. {owner}님이 ${sit} 제가 대신 받았어요. 몇 가지만 여쭤보고 내용을 기록해 정리해서 전해 드릴게요. 어느 분이세요?'라고 말합니다.`;
+  return `전화가 연결되면 첫 마디로 '안녕하세요, ${who}. 서비스 품질을 위해 통화 내용은 녹음됩니다. {owner}님이 ${sit} 제가 대신 받았어요. 몇 가지만 여쭤보고 내용을 기록해 정리해서 전해 드릴게요. 어느 분이세요?'라고 말합니다.`;
 }
 // 인사 속 방별 상황(BY_ROOM 의미 그대로)
 const SIT: Record<Room, string> = { DRIVE_WORK: "지금 운전 중이셔서", DRIVE_REST: "오늘 업무를 마치셔서", PARK: "잠시 자리를 비우셔서" };

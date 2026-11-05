@@ -46,7 +46,7 @@ test("호칭 미설정이면 '주인님' 없이 호칭 없는 인사", () => {
   for (const r of ["PARK", "DRIVE_WORK", "DRIVE_REST"] as const) {
     const s = pickScript(r, undefined, undefined, 12, "ai", null, { trip_min: 130 }).instruction;
     assert.doesNotMatch(s, /주인|\{owner\}|님은|님의/, r);
-    assert.match(s, /^전화가 연결되면 첫 마디로 '안녕하세요, 이 번호로 대신 전화 받는 AI 비서입니다\. (지금|잠시|오늘) [^']*제가 대신 받았어요\. 몇 가지만 여쭤보고 내용을 기록해 정리해서 전해 드릴게요\. 어느 분이세요\?'/);
+    assert.match(s, /^전화가 연결되면 첫 마디로 '안녕하세요, 이 번호로 대신 전화 받는 AI 비서입니다\. 서비스 품질을 위해 통화 내용은 녹음됩니다\. (지금|잠시|오늘) [^']*제가 대신 받았어요\. 몇 가지만 여쭤보고 내용을 기록해 정리해서 전해 드릴게요\. 어느 분이세요\?'/);
   }
   assert.match(pickScript("PARK", undefined, "하루").instruction, /대신 전화 받는 AI 비서 하루입니다/);
   assert.match(pickScript("DRIVE_WORK").instruction, /당신은 휴대폰을 대신 받는 AI 비서입니다.*지금 운전 중입니다/);
@@ -101,9 +101,9 @@ test("첫 인사: AI 비서 소개 + 방별 상황 + 하나씩 묻는다는 안�
   const g = (r: "PARK" | "DRIVE_WORK" | "DRIVE_REST" | null, t: number) => pickScript(r, "김도윤", undefined, null, "ai", null, null, t).instruction.match(/^전화가 연결되면 첫 마디로 '([^']+)'/)![1];
   const WED_14 = WED_19 - 5 * 3_600_000;
   const tail = " 제가 대신 받았어요. 몇 가지만 여쭤보고 내용을 기록해 정리해서 전해 드릴게요. 어느 분이세요?";
-  assert.equal(g("DRIVE_WORK", WED_14), "안녕하세요, 김도윤님의 AI 비서입니다. 김도윤님이 지금 운전 중이셔서" + tail);
-  assert.equal(g("PARK", WED_14), "안녕하세요, 김도윤님의 AI 비서입니다. 김도윤님이 잠시 자리를 비우셔서" + tail);
-  assert.equal(g("DRIVE_REST", WED_19), "안녕하세요, 김도윤님의 AI 비서입니다. 김도윤님이 오늘 업무를 마치셔서" + tail);
+  assert.equal(g("DRIVE_WORK", WED_14), "안녕하세요, 김도윤님의 AI 비서입니다. 서비스 품질을 위해 통화 내용은 녹음됩니다. 김도윤님이 지금 운전 중이셔서" + tail);
+  assert.equal(g("PARK", WED_14), "안녕하세요, 김도윤님의 AI 비서입니다. 서비스 품질을 위해 통화 내용은 녹음됩니다. 김도윤님이 잠시 자리를 비우셔서" + tail);
+  assert.equal(g("DRIVE_REST", WED_19), "안녕하세요, 김도윤님의 AI 비서입니다. 서비스 품질을 위해 통화 내용은 녹음됩니다. 김도윤님이 오늘 업무를 마치셔서" + tail);
   assert.equal(g("PARK", WED_19), g("DRIVE_REST", WED_19)); // 저녁 정차 = 쉼 방
   assert.match(g("DRIVE_REST", Date.UTC(2026, 10, 7, 5, 0)), /오늘 쉬는 날이라 제가/); // 토
   assert.match(g(null, WED_14), /김도윤님이 지금 바로 받기 어려우셔서 제가/);
