@@ -919,7 +919,7 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
             Text("동승자 모드 (업무 음성 끔)", Modifier.weight(1f), color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
             PassengerToggle(light = true)
         }
-        // 이름 호출: 켜 두면 운전 중(정차 아님)에만 마이크로 이름을 기다린다. 이름 전 음성은 기기 안에서 바로 버린다.
+        // 이름 호출: 켜 두면 시동이 켜진 동안 마이크로 이름을 기다린다. 이름 전 음성은 기기 안에서 바로 버린다.
         val wakeOn = RoomService.wakeOn
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("이름으로 부르기", Modifier.weight(1f), color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -929,6 +929,7 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
             var wakeName by rememberSaveable { mutableStateOf(RoomService.wakeName) }
             NameField("부를 이름", wakeName, "2~10자, 글자·숫자·공백만") { wakeName = it; if (validName(it) && it.count { c -> !c.isWhitespace() } >= 2) RoomService.setWakeName(ctx, it.trim()) }
             Text("이름을 듣기 전 음성은 저장·전송하지 않아요", color = ParkInk, fontSize = 18.sp)
+            Text("켜 두면 Gleo 버튼이 듣지 않아요", color = ParkInk, fontSize = 18.sp) // Gleo는 마이크가 쓰이는 중이면 버튼을 무시한다(에뮬 실측)
         }
         Text("휴식 제안: 연속 운전 ${RoomService.restMin}분부터", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

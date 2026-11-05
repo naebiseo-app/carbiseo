@@ -43,6 +43,9 @@
                 <action android:name="READ_RECENT_CALLS" />
                 <action android:name="READ_NEXT_SCHEDULE" />
                 <action android:name="ADD_REST_STOP" />
+                <action android:name="ztw.carbiseo.READ_RECENT_CALLS" />
+                <action android:name="ztw.carbiseo.READ_NEXT_SCHEDULE" />
+                <action android:name="ztw.carbiseo.ADD_REST_STOP" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </receiver>

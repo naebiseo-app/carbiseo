@@ -3,10 +3,13 @@ package ztw.carbiseo
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import org.json.JSONObject
 
+private const val GLEO_PREFIX = "ztw.carbiseo." // 에뮬 Gleo 4.2는 action에 패키지를 붙여 보낸다(공식 예시는 안 붙임)
+
 /** Gleo 함수 이름(assets/schema.json) → 음성 의도. */
-fun gleoIntent(action: String?): CarIntent? = when (action) {
+fun gleoIntent(action: String?): CarIntent? = when (action?.removePrefix(GLEO_PREFIX)) {
     "READ_RECENT_CALLS" -> CarIntent.RECENT_CALLS
     "READ_NEXT_SCHEDULE" -> CarIntent.NEXT_EVENT
     "ADD_REST_STOP" -> CarIntent.URGENT
@@ -19,8 +22,9 @@ fun gleoIntent(action: String?): CarIntent? = when (action) {
  */
 class GleoReceiver : BroadcastReceiver() {
     override fun onReceive(c: Context, i: Intent) {
-        val fn = i.action ?: return
-        val intent = gleoIntent(fn) ?: return
+        val intent = gleoIntent(i.action) ?: return
+        val fn = i.action.orEmpty().removePrefix(GLEO_PREFIX)
+        Log.i("ROOM", "gleo $fn")
         val run = RoomService.gleo
         run?.invoke(intent)
         val res = JSONObject().put("functionName", fn)

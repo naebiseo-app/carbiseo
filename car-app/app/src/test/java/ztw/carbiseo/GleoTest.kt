@@ -12,6 +12,7 @@ class GleoTest {
         assertEquals(CarIntent.RECENT_CALLS, gleoIntent("READ_RECENT_CALLS"))
         assertEquals(CarIntent.NEXT_EVENT, gleoIntent("READ_NEXT_SCHEDULE"))
         assertEquals(CarIntent.URGENT, gleoIntent("ADD_REST_STOP"))
+        assertEquals(CarIntent.URGENT, gleoIntent("ztw.carbiseo.ADD_REST_STOP"))
         assertNull(gleoIntent("OTHER"))
     }
 
