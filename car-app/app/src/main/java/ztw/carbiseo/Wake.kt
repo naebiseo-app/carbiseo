@@ -26,7 +26,7 @@ fun wakeSplit(text: String, name: String): String? {
     val n = name.filterNot { it.isWhitespace() }
     if (n.isEmpty()) return null
     val swap = when (n[0]) { '내' -> '네'; '네' -> '내'; else -> null }
-    val names = listOfNotNull(n, swap?.let { it + n.substring(1) }) + if (n in DEFAULT_NAMES) listOf("내비사", "네비사", "내디서", "내리서") else emptyList()
+    val names = listOfNotNull(n, swap?.let { it + n.substring(1) }) + if (n in DEFAULT_NAMES) listOf("내비사", "네비사", "내디서", "내리서", "앱이서") else emptyList()
     val hit = names.map { t.indexOf(it) to it.length }.filter { it.first >= 0 }.minByOrNull { it.first }
         ?: "넷이서".takeIf { n in DEFAULT_NAMES && t.startsWith(it) }?.let { 0 to it.length } // 흔한 낱말이라 문장 맨 앞만 (에뮬 실측 오인식)
         ?: return null
