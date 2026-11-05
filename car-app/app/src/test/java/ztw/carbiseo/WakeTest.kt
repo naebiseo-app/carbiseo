@@ -22,6 +22,8 @@ class WakeTest {
 
     @Test fun 기본_이름은_잘못_적힌_꼴도_받는다() {
         assertEquals("", wakeSplit("내비사", "내비서"))
+        assertEquals("오늘날씨어때?", wakeSplit("내디서오늘날씨어때?", "내비서"))
+        assertEquals("졸려.", wakeSplit("내리서? 졸려.", "내비서")?.trimStart('?', ' '))
         assertEquals("오늘 일정", wakeSplit("넷이서 오늘 일정", "내비서"))
         assertNull(wakeSplit("우리 넷이서 밥 먹자", "내비서")) // 넷이서는 맨 앞만
         assertNull(wakeSplit("넷이서 가자", "마루"))
