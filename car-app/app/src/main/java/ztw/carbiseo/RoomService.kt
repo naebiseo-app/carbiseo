@@ -42,7 +42,7 @@ class RoomService : Service() {
     private lateinit var speaker: Speaker
     private val audio by lazy { getSystemService(AudioManager::class.java) }
     private val net = Executors.newSingleThreadExecutor() // 상태·발송 등 쓰기 호출은 여기서만(순서 보장, 메인 차단 방지)
-    private var wake: Wake? = null // 이름 호출 대기(스위치 켜짐·마이크 허용·모델 있음·방이 PARK 아님일 때만 있다). 메인 스레드에서만
+    private var wake: Wake? = null // 이름 호출 대기(스위치 켜짐·마이크 허용·모델 있음·시동 켜짐일 때만 있다). 메인 스레드에서만
     private var micFgs = false     // 포그라운드 서비스 종류에 마이크가 들어갔나
     private val wakeModelOk by lazy { Wake.hasModel(applicationContext) }
     private val chatNet = Executors.newSingleThreadExecutor() // 말동무 AI 호출(최대 8초)만. 상태 전송·문자 발송을 막지 않는다
@@ -340,7 +340,7 @@ class RoomService : Service() {
     /** 이름 호출 켜기·끄기·쉬기를 한 곳에서. 말하는 중·다른 질문 대기·듣는 중·통화 중에는 쉰다(자기 음성 인식 방지). */
     private fun syncWake() {
         val w = wake
-        val want = wakeOn && machine.room.let { it != null && it != Room.PARK } && micGranted() && wakeModelOk
+        val want = wakeOn && machine.room != null && micGranted() && wakeModelOk // 시동이 켜진 동안 대기(대표님 지시, 정차 포함)
         if (!want) { if (w != null) { w.stop(); wake = null; Log.i("ROOM", "wake off") }; return }
         val cur = w ?: Wake(applicationContext, wakeName, ::onWake).also { wake = it; it.pause(); it.start(); promoteMic(); Log.i("ROOM", "wake on") }
         if (cur.dead) return // 모델·마이크를 못 열었다: 스위치를 껐다 켤 때까지 다시 안 시도
@@ -350,7 +350,7 @@ class RoomService : Service() {
 
     /** 이름 호출 결과(Wake 스레드에서 옴 → 메인으로). "" = 이름만 불렀다, 그 외 = 이름 뒤 문장(또는 이름만 부른 뒤의 다음 문장). */
     private fun onWake(text: String) { ui.post {
-        if (!alive || wake == null || machine.room == Room.PARK) return@post
+        if (!alive || wake == null) return@post
         if (pending != Ask.NONE || listening || talk.step != NotifTalk.Step.NONE) return@post // 이미 다른 대화 중
         if (text.isEmpty()) { if (!quiet) speaker.speak(WAKE_ACK); return@post } // 대답 듣기는 Wake가 이어 받는다(Pleos 듣기를 또 켜지 않는다)
         reask.reset(); choice = null; pending = Ask.INTENT; heard(text)

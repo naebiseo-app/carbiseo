@@ -26,7 +26,10 @@ fun wakeSplit(text: String, name: String): String? {
     val swap = when (n[0]) { '내' -> '네'; '네' -> '내'; else -> null }
     val names = listOfNotNull(n, swap?.let { it + n.substring(1) })
     val hit = names.map { t.indexOf(it) to it.length }.filter { it.first >= 0 }.minByOrNull { it.first } ?: return null
-    return t.substring(hit.first + hit.second)
+    var left = hit.first + hit.second // 공백을 뺀 글자 수로 센 이름 끝을 원문 위치로 옮긴다(말동무 AI에 띄어쓰기를 살려 보낸다)
+    var i = 0
+    while (left > 0) { if (!text[i].isWhitespace()) left--; i++ }
+    return text.substring(i).trim()
 }
 
 /**

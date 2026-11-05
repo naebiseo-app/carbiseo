@@ -11,7 +11,8 @@ class WakeTest {
     }
 
     @Test fun 이름_뒤_문장을_공백_없이_돌려준다() {
-        assertEquals("오늘일정알려줘", wakeSplit("내비서 오늘 일정 알려줘", "내비서"))
+        assertEquals("오늘 일정 알려줘", wakeSplit("내비서 오늘 일정 알려줘", "내비서"))
+        assertEquals("오늘 일정", wakeSplit("내 비서 오늘 일정", "내비서"))
     }
 
     @Test fun 내와_네는_같은_것() {
