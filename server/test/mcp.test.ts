@@ -95,7 +95,7 @@ test("report_call: 주인 통화는 카드 없이 ok(스위치 켜면 손님처�
 
 test("call-context: 손님 대본 끝에 report_call 줄(CallId 포함), 주인·CallId 없음은 제외", async () => {
   const env = mkEnv();
-  assert.match((await ring(env, GUEST)).Instruction, new RegExp(`report_call 도구를 한 번 호출합니다\\(call_id: "${CID}"`));
+  assert.match((await ring(env, GUEST)).Instruction, new RegExp(`report_call 도구를 말없이 한 번 호출합니다\\(call_id: "${CID}"`));
   assert.doesNotMatch((await ring(env, GUEST, "")).Instruction, /report_call/);
   assert.doesNotMatch((await ring(env, OWNER)).Instruction, /report_call/);
   env.DB.db.prepare("INSERT INTO kv(key,value,updated_at) VALUES('owner_as_guest','true',0)").run();

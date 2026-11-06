@@ -93,7 +93,7 @@ async function saveCallCard(db: D1Database, c: Card, extra: object = {}, from = 
   if (ringId) await db.prepare("DELETE FROM inbox WHERE id=?").bind(ringId).run();
 }
 
-// MCP report_call: AI가 끝맺음 직전에 요약을 보낸다 → 끊는 순간 카드. 결과 "ok" 또는 오류 문구.
+// MCP report_call: AI가 끝맺음 뒤에 요약을 보낸다 → 끊는 순간 카드. 결과 "ok" 또는 오류 문구.
 export async function reportCall(env: Env, a: Record<string, unknown>): Promise<string> {
   const id = String(a.call_id ?? "");
   if (!CALL_ID.test(id)) return "bad call_id";
@@ -114,7 +114,7 @@ export async function reportCall(env: Env, a: Record<string, unknown>): Promise<
 const STR = { type: "string" };
 const REPORT_TOOL = {
   name: "report_call",
-  description: "끝맺음 말 직전에 한 번 호출. 이 통화에서 들은 내용만 보낸다(지어내지 않음).",
+  description: "끝맺음 말을 마친 뒤 말없이 한 번 호출. 이 통화에서 들은 내용만 보낸다(지어내지 않음).",
   inputSchema: {
     type: "object", required: ["call_id"],
     properties: {
