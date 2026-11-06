@@ -165,8 +165,8 @@ fun firstWords(owner: String, assistant: String, mode: String, ment: String = ""
     val o = owner.trim(); val a = assistant.trim(); val subj = if (o.isNotEmpty()) "${o}님이 " else ""
     if (modeShown(mode) == "ment") return ment.trim().ifEmpty { "${subj}지금 운전 중이라 전화를 받을 수 없습니다. 정차하시면 연락드리겠습니다." }
     val ai = if (a.isNotEmpty()) "AI 비서 ${a}입니다" else "AI 비서입니다"
-    val who = if (o.isNotEmpty()) "${o}님의 $ai" else "이 번호로 대신 전화 받는 $ai"
-    return "안녕하세요, $who. 서비스 품질을 위해 통화 내용은 녹음됩니다. ${subj}지금 운전 중이셔서 제가 대신 받았어요. 몇 가지만 여쭤보고 내용을 기록해 정리해서 전해 드릴게요. 어느 분이세요?"
+    val who = if (o.isNotEmpty()) "${o}님 $ai" else "이 번호로 대신 전화 받는 $ai"
+    return "안녕하세요, $who. ${subj}운전 중이셔서 제가 듣고 전달해 드릴게요. 해당 내용은 녹음됩니다. 어떤 일로 전화 주셨나요?"
 }
 
 fun readiness(offline: Boolean, forwardOk: Boolean, mode: String): String = when {
