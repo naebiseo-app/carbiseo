@@ -158,3 +158,144 @@ test("call-context: 어떤 대본에도 report_call이 없다(카드는 통화 �
   assert.doesNotMatch((await ring(env, GUEST)).Instruction, /report_call/);
   assert.doesNotMatch((await ring(env, OWNER)).Instruction, /report_call/);
 });
+
+// 주인 통화: 되읽은 문자는 끊은 뒤 자동 발송. 받아쓰기·요약·중계 fetch를 가짜로(쓴 쪽이 finally에서 되돌린다)
+const ownerFetch = (memo: object, relayStatus = 200) => {
+  const real = globalThis.fetch, st = { relay: [] as any[], real };
+  globalThis.fetch = (async (u: string, init: any) => {
+    if (String(u).includes("relay.test")) { st.relay.push({ headers: init.headers, ...JSON.parse(init.body) }); return new Response(JSON.stringify(relayStatus === 200 ? { messageId: "m1", status: "queued" } : { code: "boom" }), { status: relayStatus }); }
+    if (String(u).includes("anthropic")) return new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify(memo) }] }));
+    return new Response(JSON.stringify({ segments: [{ speaker: "speaker_0", text: "네" }, { speaker: "speaker_1", text: "문자 보내줘" }] }));
+  }) as unknown as typeof fetch;
+  return st;
+};
+const mkEnvS = () => mkEnvA({ ANTHROPIC_API_KEY: "k", SMS_RELAY_URL: "https://relay.test/send", SMS_RELAY_SECRET: "s" });
+const rows = (env: any, kind: string) => env.DB.db.prepare("SELECT * FROM inbox WHERE kind=? ORDER BY id").all(kind) as any[];
+const callCard = (env: any, label: string, num: string | null) => env.DB.db.prepare("INSERT INTO inbox(kind,status,from_label,from_number,created_at) VALUES('call','summarized',?,?,0)").run(label, num);
+const kvSet = (env: any, key: string, v: unknown) => env.DB.db.prepare("INSERT INTO kv(key,value,updated_at) VALUES(?,?,0)").run(key, JSON.stringify(v));
+const SEND = { to: "이지은", body: "3시에 도착합니다." };
+
+test("주인 통화: 최근 전화 카드에 이름이 있으면 자동 발송, sent 행이 남고 할 일 카드는 없음", async () => {
+  const f = ownerFetch({ tasks: [], sends: [SEND] });
+  try {
+    const env = mkEnvS();
+    callCard(env, "이지은", GUEST);
+    await hook(env, OWNER);
+    assert.equal(f.relay.length, 1);
+    assert.equal(f.relay[0].to, GUEST);
+    assert.equal(f.relay[0].body, SEND.body);
+    assert.equal(f.relay[0].headers["x-relay-secret"], "s");
+    const s = rows(env, "sent");
+    assert.equal(s.length, 1);
+    assert.equal(s[0].status, "sent");
+    assert.equal(s[0].call_id, CID);
+    assert.equal(s[0].summary, SEND.body);
+    assert.equal(rows(env, "task").length, 0);
+  } finally { globalThis.fetch = f.real; }
+});
+
+test("주인 통화: 연락처 이름으로 발송, '님'을 붙여도 일치", async () => {
+  const f = ownerFetch({ tasks: [], sends: [{ to: "박도윤 님", body: "회의 10분 늦어요." }] });
+  try {
+    const env = mkEnvS();
+    kvSet(env, "contacts", { 박도윤: "010-2222-3333".replace(/-/g, "") });
+    await hook(env, OWNER);
+    assert.equal(f.relay.length, 1);
+    assert.equal(f.relay[0].to, "01022223333");
+    assert.equal(rows(env, "task").length, 0);
+  } finally { globalThis.fetch = f.real; }
+});
+
+test("주인 통화: 일정의 연락처 이름 첫 단어로도 번호를 찾음", async () => {
+  const f = ownerFetch({ tasks: [], sends: [{ to: "김민수", body: "곧 도착해요." }] });
+  try {
+    const env = mkEnvS();
+    kvSet(env, "schedule", [{ title: "미팅", contact: "김민수 팀장", contact_number: "01044445555" }]);
+    await hook(env, OWNER);
+    assert.equal(f.relay[0].to, "01044445555");
+  } finally { globalThis.fetch = f.real; }
+});
+
+test("주인 통화: 번호를 못 찾으면 발송 없이 할 일 카드로 남김", async () => {
+  const f = ownerFetch({ tasks: [], sends: [SEND] });
+  try {
+    const env = mkEnvS();
+    await hook(env, OWNER);
+    assert.equal(f.relay.length, 0);
+    assert.deepEqual(rows(env, "task").map((r) => r.summary), ["이지은에게 문자 / 내용: 3시에 도착합니다."]);
+    assert.equal(rows(env, "sent").length, 0);
+  } finally { globalThis.fetch = f.real; }
+});
+
+test("주인 통화: 비슷한 이름(박도연 vs 박도윤)은 보내지 않고 할 일 카드", async () => {
+  const f = ownerFetch({ tasks: [], sends: [{ to: "박도연", body: "연락 주세요." }] });
+  try {
+    const env = mkEnvS();
+    callCard(env, "박도윤", GUEST);
+    kvSet(env, "contacts", { 박도윤: GUEST });
+    await hook(env, OWNER);
+    assert.equal(f.relay.length, 0);
+    assert.deepEqual(rows(env, "task").map((r) => r.summary), ["박도연에게 문자 / 내용: 연락 주세요."]);
+  } finally { globalThis.fetch = f.real; }
+});
+
+test("주인 통화: 가짜 시연 번호는 보내지 않음", async () => {
+  const f = ownerFetch({ tasks: [], sends: [SEND] });
+  try {
+    const env = mkEnvS();
+    callCard(env, "이지은", "01000001234");
+    await hook(env, OWNER);
+    assert.equal(f.relay.length, 0);
+    assert.equal(rows(env, "task").length, 1);
+  } finally { globalThis.fetch = f.real; }
+});
+
+test("주인 통화: 중계가 실패하면 할 일 카드가 남고 sent 행은 failed", async () => {
+  const f = ownerFetch({ tasks: [], sends: [SEND] }, 500);
+  try {
+    const env = mkEnvS();
+    callCard(env, "이지은", GUEST);
+    await hook(env, OWNER);
+    assert.equal(f.relay.length, 1);
+    assert.equal(rows(env, "sent")[0].status, "failed");
+    assert.deepEqual(rows(env, "task").map((r) => r.summary), ["이지은에게 문자 / 내용: 3시에 도착합니다."]);
+  } finally { globalThis.fetch = f.real; }
+});
+
+test("주인 통화: 같은 웹훅을 다시 보내도 문자는 한 번만", async () => {
+  const f = ownerFetch({ tasks: [], sends: [SEND] });
+  try {
+    const env = mkEnvS();
+    callCard(env, "이지은", GUEST);
+    await hook(env, OWNER);
+    await hook(env, OWNER);
+    assert.equal(f.relay.length, 1);
+    assert.equal(rows(env, "sent").length, 1);
+  } finally { globalThis.fetch = f.real; }
+});
+
+test("주인 통화: 요약 실패면 자동 발송 없이 주인 말 그대로 할 일 1장", async () => {
+  const f = ownerFetch(null as any);
+  try {
+    const env = mkEnvS();
+    callCard(env, "이지은", GUEST);
+    await hook(env, OWNER);
+    assert.equal(f.relay.length, 0);
+    assert.deepEqual(rows(env, "task").map((r) => r.summary), ["문자 보내줘"]);
+  } finally { globalThis.fetch = f.real; }
+});
+
+test("/phone/contacts: 인증 없으면 401, 잘못된 번호·중복 이름 제외, 빈 배열이면 삭제", async () => {
+  const env = mkEnv();
+  const post = (body: object, auth = true) => worker.fetch(new Request("https://x/phone/contacts", { method: "POST", headers: auth ? { authorization: "Bearer t" } : {}, body: JSON.stringify(body) }), env);
+  const kv = () => env.DB.db.prepare("SELECT value FROM kv WHERE key='contacts'").get();
+  assert.equal((await post({ contacts: [] }, false)).status, 401);
+  const r = (await (await post({ contacts: [
+    { name: " 이지은 ", number: "010-5555-6789" }, { name: "이지은", number: "01099998888" }, { name: "김도윤", number: "02-123-4567" },
+    { name: "", number: "01011112222" }, { name: "박도윤", number: "01011112222" },
+  ] })).json()) as any;
+  assert.deepEqual(r, { ok: true, count: 2 });
+  assert.deepEqual(JSON.parse((kv() as any).value), { 이지은: "01055556789", 박도윤: "01011112222" });
+  assert.deepEqual(await (await post({ contacts: [] })).json(), { ok: true, count: 0 });
+  assert.equal(kv(), undefined);
+});
