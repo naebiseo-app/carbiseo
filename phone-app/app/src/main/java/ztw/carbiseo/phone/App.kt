@@ -4,14 +4,18 @@ import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Intent
 import android.content.SharedPreferences
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.ContactsContract
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
@@ -54,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import java.time.ZoneId
+import java.util.concurrent.Executors
 
 // 시안 4B '다크 흐름형' 색
 private val Bg = Color(0xFF101215); private val S1 = Color(0xFF1A1D22); private val S2 = Color(0xFF23272E)
@@ -84,11 +89,45 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() { super.onStart(); prefs.registerOnSharedPreferenceChangeListener(watch) }
     override fun onStop() { prefs.unregisterOnSharedPreferenceChangeListener(watch); super.onStop() }
-    override fun onResume() { super.onResume(); refresh() } // 설정 화면에서 돌아오면 권한 상태를 다시 읽는다
+    override fun onResume() { super.onResume(); refresh(); syncContactsDaily() } // 설정 화면에서 돌아오면 권한 상태를 다시 읽는다
 
     private fun refresh() {
         listenerOn = getSystemService(NotificationManager::class.java).isNotificationListenerAccessGranted(ComponentName(this, Listener::class.java))
         events = Store.events(this); now = System.currentTimeMillis()
+    }
+
+    // ───────── 연락처 연결 ─────────
+    private val net = Executors.newSingleThreadExecutor() // 네트워크는 메인 스레드 밖에서
+    private val contactsOn by lazy { pref("contactsOn") }
+    private val askContacts = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) { set(contactsOn, "contactsOn", true); sendContacts() } // 거부면 꺼진 채로 둔다
+    }
+    private fun hasContactsPermission() = checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+
+    private fun setContacts(on: Boolean) {
+        if (!on) { set(contactsOn, "contactsOn", false); net.execute { Relay.contacts(emptyList()) } }
+        else if (hasContactsPermission()) { set(contactsOn, "contactsOn", true); sendContacts() }
+        else askContacts.launch(Manifest.permission.READ_CONTACTS)
+    }
+
+    /** 폰 연락처를 읽어 서버로(이름·번호는 로그에 남기지 않는다). 성공한 시각만 저장해 실패하면 다음에 다시 보낸다. */
+    private fun sendContacts() {
+        val r = contentResolver
+        net.execute {
+            val rows = runCatching {
+                r.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)?.use { c ->
+                    buildList { while (c.moveToNext()) add(c.getString(0) to c.getString(1)) }
+                }
+            }.getOrNull() ?: return@execute
+            if (Relay.contacts(normalizeContacts(rows))) prefs.edit().putLong("contactsAt", System.currentTimeMillis()).apply()
+        }
+    }
+
+    /** 켜져 있고 권한이 있으면 앱을 열 때 하루 1번만 다시 보낸다. 권한이 회수됐으면 끄고 서버분도 지운다. */
+    private fun syncContactsDaily() {
+        if (!contactsOn.value) return
+        if (!hasContactsPermission()) { setContacts(false); return }
+        if (System.currentTimeMillis() - prefs.getLong("contactsAt", 0L) >= 24 * 3600_000L) sendContacts()
     }
 
     private fun open(i: Intent) = runCatching { startActivity(i) }
@@ -323,6 +362,11 @@ class MainActivity : ComponentActivity() {
         LazyColumn(pad, state, contentPad, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { TabTitle("설정") }
             item { SetupCard() }
+            item {
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(S1).padding(horizontal = 18.dp, vertical = 4.dp)) {
+                    ToggleRow(Ic.msg, "연락처 연결", "이름으로 문자를 보낼 때 번호를 찾아요. 휴대폰 번호와 이름이 내비서 서버에 저장되고, 끄면 지워요.", contactsOn.value) { setContacts(it) }
+                }
+            }
             item { Text("통화 내용은 요약만 차에 남고, 원본 녹음은 저장하지 않아요. 알림은 메시지 앱 이름과 보낸 사람만 이 폰에 기록돼요.", color = Mute, fontSize = 13.sp, lineHeight = 20.sp, modifier = Modifier.padding(horizontal = 4.dp)) }
             item {
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(S1).padding(18.dp)) {

@@ -25,6 +25,20 @@ fun toMsg(pkg: String, key: String, category: String?, messagingStyle: Boolean, 
     return Msg(MESSAGE_APPS[pkg] ?: "메시지", s.take(30), t.take(500), replyable, key)
 }
 
+/** 연락처 원본 행 → 서버로 보낼 (이름, 번호). 이름 1~40자, 번호는 01로 시작하는 10~11자리(+82/82는 0으로), 같은 이름은 먼저 온 것만, 최대 3000건. */
+fun normalizeContacts(rows: List<Pair<String?, String?>>): List<Pair<String, String>> {
+    val out = LinkedHashMap<String, String>()
+    for ((n, p) in rows) {
+        if (out.size >= 3000) break
+        val name = n?.trim().orEmpty()
+        var num = p.orEmpty().filter { it in '0'..'9' }
+        if (num.startsWith("82")) num = "0" + num.substring(2)
+        if (name.length !in 1..40 || !num.startsWith("01") || num.length !in 10..11) continue
+        out.putIfAbsent(name, num)
+    }
+    return out.map { it.key to it.value }
+}
+
 /** 서버 호출(블로킹, 백그라운드에서만). 토큰은 차 앱과 같은 CAR_TOKEN. */
 object Relay {
     private fun open(path: String, method: String) = (URL(BuildConfig.SERVER_URL + path).openConnection() as HttpURLConnection).apply {
@@ -36,6 +50,16 @@ object Relay {
         val c = open("/phone/notify", "POST")
         c.doOutput = true; c.setRequestProperty("Content-Type", "application/json")
         c.outputStream.use { it.write(JSONObject().put("app", m.app).put("sender", m.sender).put("text", m.text).put("replyable", m.replyable).put("key", m.key).toString().toByteArray()) }
+        (c.responseCode in 200..299).also { c.disconnect() }
+    }.getOrDefault(false)
+
+    /** 연락처 통째로 교체. 빈 목록이면 서버가 저장분을 지운다. 많을 수 있어 읽기 제한만 15초. */
+    fun contacts(list: List<Pair<String, String>>): Boolean = runCatching {
+        val c = open("/phone/contacts", "POST")
+        c.readTimeout = 15000
+        c.doOutput = true; c.setRequestProperty("Content-Type", "application/json")
+        val a = org.json.JSONArray().also { arr -> list.forEach { arr.put(JSONObject().put("name", it.first).put("number", it.second)) } }
+        c.outputStream.use { it.write(JSONObject().put("contacts", a).toString().toByteArray()) }
         (c.responseCode in 200..299).also { c.disconnect() }
     }.getOrDefault(false)
 
