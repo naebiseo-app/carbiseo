@@ -92,9 +92,10 @@ fun chargeOffer(soc: Int) = "배터리가 ${soc}퍼센트 남았어요. 근처 �
 
 /** 주차 메모: "주차 지하 2층 C구역" -> "지하 2층 C구역". '주차'가 없거나 층·구역을 못 읽거나 답장 문장이면 null. */
 private val PARK_SPOT = Regex("""지하\s?\d+층|\d+층|[A-Za-z가-힣]?\d*구역""")
+private val PARK_QUESTION = Regex("""자리\s?있|있어\?|있나|어디""") // "주차장 3층 자리 있어?"는 메모가 아니라 문의
 fun parkMemo(said: String?): String? {
     val t = said.orEmpty()
-    if ("주차" !in t || "답장" in t) return null
+    if ("주차" !in t || "답장" in t || PARK_QUESTION.containsMatchIn(t)) return null
     return PARK_SPOT.findAll(t).joinToString(" ") { it.value }.ifEmpty { null }
 }
 const val PARK_MEMO_SPEECH = "주차 위치를 적어 뒀어요"

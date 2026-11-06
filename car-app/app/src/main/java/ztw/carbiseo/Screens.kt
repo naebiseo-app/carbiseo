@@ -392,7 +392,7 @@ private val SendIcon = lineIcon("M10 14l11-11M21 3l-6.5 18a.55 .55 0 0 1-1 0l-3.
 private val CheckIcon = lineIcon("M5 12l5 5l10-10")
 
 /** 하차 카드 할 일 아이콘: 보내기·문자·메일이 든 일은 보내기, 전화는 전화, 나머지는 서류. */
-private fun taskIcon(t: ParkTask) = if (listOf("보내", "문자", "메일").any { it in t.title }) SendIcon else if (t.kind == "call") CallIcon else FileIcon
+private fun taskIcon(t: ParkTask) = if (t.kind == "call") CallIcon else if (listOf("보내", "문자", "메일").any { it in t.title }) SendIcon else FileIcon
 
 private fun ampm(ms: Long) = Instant.ofEpochMilli(ms).atZone(RoomService.clock.zone).let { "${if (it.hour < 12) "오전" else "오후"} ${if (it.hour % 12 == 0) 12 else it.hour % 12}:${"%02d".format(it.minute)}" }
 

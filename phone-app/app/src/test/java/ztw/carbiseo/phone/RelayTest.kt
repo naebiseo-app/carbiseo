@@ -79,4 +79,11 @@ class RelayTest {
         assertEquals(ParkedRead.Failed, parseParkedRead("""{"parked":{"lng":2}}"""))
         assertTrue(parseParkedRead("") is ParkedRead.Failed)
     }
+
+    @Test fun `저장본엔_번호가_없고_끝낸_일은_빠진다`() {
+        val raw = """{"parked":{"lat":1,"lng":2,"total":3,"tasks":[{"id":5,"title":"김민수님께 전화하기","number":"01000000000"},{"id":6,"title":"견적서 확인"}]}}"""
+        assertEquals(listOf(5L to null, 6L to null), parseParked(parkedCache(raw))!!.tasks.map { it.id to it.number })
+        val left = parseParked(parkedCache(raw, 5))!!
+        assertEquals(listOf(6L), left.tasks.map { it.id }); assertEquals(2, left.total)
+    }
 }

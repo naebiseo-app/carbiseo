@@ -130,14 +130,14 @@ class MainActivity : ComponentActivity() {
         if (fake != null) { parked = fake; return }
         net.execute {
             val n = parkedNext(Relay.parked(), prefs.getString("parked", null))
-            if (n.clear) prefs.edit().remove("parked").apply() else n.write?.let { prefs.edit().putString("parked", it).apply() }
+            if (n.clear) prefs.edit().remove("parked").apply() else n.write?.let { prefs.edit().putString("parked", parkedCache(it)).apply() }
             runOnUiThread { parked = n.show }
         }
     }
 
     private fun finishParked(id: Long) {
         parkedHide += id; parkedMsg = ""
-        net.execute { if (!Relay.parkedDone(id)) runOnUiThread { parkedHide -= id; parkedMsg = "끝내지 못했어요. 다시 눌러 주세요" } }
+        net.execute { if (Relay.parkedDone(id)) prefs.getString("parked", null)?.let { prefs.edit().putString("parked", parkedCache(it, id)).apply() } else runOnUiThread { parkedHide -= id; parkedMsg = "끝내지 못했어요. 다시 눌러 주세요" } }
     }
 
     // ───────── 연락처 연결 ─────────

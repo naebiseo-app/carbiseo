@@ -1,5 +1,6 @@
 package ztw.carbiseo.phone
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -70,6 +71,17 @@ fun parseParkedRead(text: String): ParkedRead = runCatching {
     else if (o.isNull("parked")) ParkedRead.None
     else parseParked(text)?.let { ParkedRead.Found(it, text) } ?: ParkedRead.Failed
 }.getOrDefault(ParkedRead.Failed)
+
+/** 저장본용 원문: 번호는 폰에도 남기지 않고, 끝낸 일(done)은 목록·건수에서 뺀다. */
+fun parkedCache(raw: String, done: Long? = null): String = runCatching {
+    val o = JSONObject(raw); val p = o.getJSONObject("parked"); val a = p.optJSONArray("tasks") ?: return@runCatching raw
+    val keep = JSONArray()
+    for (i in 0 until a.length()) {
+        val t = a.optJSONObject(i) ?: continue
+        if (done != null && t.optLong("id") == done) p.put("total", maxOf(0, p.optInt("total") - 1)) else { t.remove("number"); keep.put(t) }
+    }
+    p.put("tasks", keep); o.toString()
+}.getOrDefault(raw)
 
 /** 서버 호출(블로킹, 백그라운드에서만). 토큰은 차 앱과 같은 CAR_TOKEN. */
 object Relay {

@@ -513,7 +513,7 @@ class DriveTest {
     @Test fun 주차_자리_문의는_주차_메모와_안_섞인다() {
         for (t in listOf("주차 자리 있어?", "근처에 주차장 있어", "주차할 곳 찾아줘", "여기 주차 돼?", "주차 가능해?", "주차할 수 있어?", "근처 식당 주차 돼?")) assertEquals(t, CarIntent.PARKING, carIntent(t))
         for (t in listOf("주차 지하 2층 C구역", "지하2층 B2구역에 주차했어", "3층에 주차했어", "주차는 A구역")) assertEquals(t, CarIntent.PARK_MEMO, carIntent(t))
-        for (t in listOf("주차 자리 있어?", "주차장 어디야")) assertEquals(t, null, parkMemo(t))
+        for (t in listOf("주차 자리 있어?", "주차장 어디야", "주차장 3층 자리 있어?")) assertEquals(t, null, parkMemo(t))
         for (t in listOf("주차 지하 2층 C구역", "주차했어", "2층", "답장 주차 돼냐고 해줘", "")) assertFalse(t, parkingWish(t))
         assertEquals(CarIntent.RESERVE, carIntent("주차 가능한 식당 예약해 줘")); assertEquals(CarIntent.UNKNOWN, carIntent("답장 주차 돼냐고 해줘")); assertEquals(CarIntent.NEARBY, carIntent("배고파"))
         // 피로 모드: 예약·일정 같은 업무 말과 같이 한 문장 거절, 켜지지 않았으면 통과
