@@ -78,6 +78,6 @@ test("/car/family-eta: 번호 없음 skipped·하루 한 번·정상 발송", as
 });
 
 test("ownerScript에 '메일:' 안내, 관리 페이지 메일 목록", () => {
-  assert.match(ownerScript({ room: "PARK", eta: null, schedule: null, recent: [], nowMs: 0 }), /메일: 받는사람 \/ 제목 \/ 내용/);
+  assert.match(ownerScript({ room: "PARK", eta: null, schedule: null, recent: [], nowMs: 0 }), /메일이면 받는 사람.*모두 되묻고.*할 일로 남겨 줘/);
   assert.match(mailsHtml([{ from_label: "김부장", summary: "가".repeat(100), created_at: 0, meta: '{"subject":"견적"}' }]), /김부장님께 · 견적 · 가{80} · 09:00/);
 });

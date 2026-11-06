@@ -95,14 +95,16 @@ async function saveCallCard(db: D1Database, c: Card, extra: object = {}, from = 
 
 const SUMMARY_SYSTEM = "전화 받아쓰기를 운전자가 볼 메모로 정리합니다. 받아쓰기에 있는 내용만 쓰고, 상대가 말하지 않은 것은 없다고도 쓰지 않습니다. 연락 시각을 말했으면 summary에 반드시 넣습니다. '아, 네' 같은 맞장구는 이름이 아니고, 비서가 되읽어 상대가 고친 이름이 있으면 고친 이름을 씁니다. JSON 한 줄만 답합니다: {\"caller\":\"상대 이름·소속, 없으면 빈 문자열\",\"summary\":\"존댓말 한두 문장. 예: 김민수 님이 미팅 변경 건으로 전화하셨고 3시까지 연락을 부탁하셨어요. 자료도 보내 달라고 하셨어요.\",\"callback_by\":\"상대가 말한 연락 시각 표현 그대로(예: 3시까지), 없으면 빈 문자열\"}";
 
+const TASK_SYSTEM = `주인이 비서에게 건 전화 받아쓰기에서 주인이 시킨 일만 뽑습니다. 받아쓰기에 있는 내용만 씁니다. JSON 한 줄만 답합니다: {"tasks":["일 한 건","일 한 건"]}. 문자는 '박도윤에게 문자 / 내용: 3시 도착', 메일은 '메일: 받는사람 / 제목 / 내용', 그 밖의 일은 '내일 오전 박도윤 님께 견적서 보내기'처럼 짧게 씁니다. 일정이나 전화 내용을 묻기만 한 통화는 {"tasks":[]}로 답합니다.`;
+
 // 받아쓰기 → 메모. 실패는 null(호출한 쪽이 상대 말 그대로 쓴다)
-async function summarizeCall(key: string | undefined, dialog: string): Promise<{ caller?: string; summary?: string; callback_by?: string } | null> {
+async function summarizeCall(key: string | undefined, system: string, dialog: string): Promise<{ caller?: string; summary?: string; callback_by?: string; tasks?: string[] } | null> {
   if (!key) return null;
   try {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model: "claude-haiku-5-5", max_tokens: 300, thinking: { type: "disabled" }, system: SUMMARY_SYSTEM, messages: [{ role: "user", content: dialog }] }),
+      body: JSON.stringify({ model: "claude-haiku-5-5", max_tokens: 300, thinking: { type: "disabled" }, system, messages: [{ role: "user", content: dialog }] }),
       signal: AbortSignal.timeout(10000),
     });
     if (!r.ok) return null;
@@ -115,13 +117,24 @@ async function summarizeCall(key: string | undefined, dialog: string): Promise<{
 async function transcriptCard(env: Env, raw: string) {
   const f = new URLSearchParams(raw), id = f.get("CallId") ?? "", from = f.get("From") ?? "";
   if (f.get("Event") !== "transcript.completed" || f.get("Direction") !== "inbound" || !env.CLAWOPS_API_KEY) return;
-  if (sameNumber(from, env.OWNER_NUMBER) && !(await kvGet(env.DB, "owner_as_guest"))) return;
-  if (await env.DB.prepare("SELECT 1 FROM inbox WHERE kind='call' AND call_id=? AND status<>'ringing'").bind(id).first()) return;
+  const owner = sameNumber(from, env.OWNER_NUMBER) && !(await kvGet(env.DB, "owner_as_guest"));
+  const had = owner ? "SELECT 1 FROM inbox WHERE kind='task' AND call_id=?" : "SELECT 1 FROM inbox WHERE kind='call' AND call_id=? AND status<>'ringing'";
+  if (await env.DB.prepare(had).bind(id).first()) return;
   const r = await fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls/${id}/transcript`, { headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}` } });
   const segs = ((await r.json()) as { segments?: { speaker: string; text: string }[] }).segments ?? [];
   const ai = segs[0]?.speaker; // 첫 화자 = AI 소개
   const said = segs.filter((s) => s.speaker !== ai).map((s) => s.text).join(" ");
-  const memo = said ? await summarizeCall(env.ANTHROPIC_API_KEY, segs.map((s) => `${s.speaker === ai ? "비서" : "상대"}: ${s.text}`).join("\n")) : null;
+  const dialog = segs.map((s) => `${s.speaker === ai ? "비서" : "상대"}: ${s.text}`).join("\n");
+  if (owner) { // 주인 통화 → 시킨 일마다 할 일 카드. 요약 실패면 주인 말 그대로 1장
+    if (!said) return;
+    const memo = await summarizeCall(env.ANTHROPIC_API_KEY, TASK_SYSTEM, dialog);
+    const cc = await kvGet(env.DB, "car_context");
+    for (const t of Array.isArray(memo?.tasks) ? memo.tasks : [said])
+      await env.DB.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,summary,created_at) VALUES('task','open',?,?,'주인',?,?)")
+        .bind(parseRoom(cc?.room) ?? null, id, guardText("summary", String(t)), now()).run();
+    return;
+  }
+  const memo = said ? await summarizeCall(env.ANTHROPIC_API_KEY, SUMMARY_SYSTEM, dialog) : null;
   const summary = memo?.summary || (said ? `상대 말: ${said}` : "말씀 없이 끊긴 전화예요");
   const cols = fromCols(from), who = String(memo?.caller ?? "").replace(/["'`{}]/g, "").slice(0, 40);
   await saveCallCard(env.DB, { call_id: id, ...cols, from_label: who || cols.from_label, summary, urgent: isUrgent(`${summary} ${said}`) ? 1 : 0 },

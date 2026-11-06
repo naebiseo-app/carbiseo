@@ -123,6 +123,24 @@ test("transcript.completed: 받아쓰기를 AI가 요약한 메모로 카드, �
   } finally { globalThis.fetch = f.real; }
 });
 
+test("transcript.completed: 주인 통화는 시킨 일마다 할 일 카드, 재전송 1벌, 묻기만 하면 없음", async () => {
+  const real = globalThis.fetch; let tasks = ["내일 오전 박도윤 님께 견적서 보내기", "메일: 이지은 / 회의 안내 / 내일 10시"];
+  globalThis.fetch = (async (u: string) => new Response(JSON.stringify(String(u).includes("anthropic")
+    ? { content: [{ type: "text", text: JSON.stringify({ tasks }) }] }
+    : { segments: [{ speaker: "speaker_0", text: "네" }, { speaker: "speaker_1", text: "할 일로 남겨줘" }] }))) as unknown as typeof fetch;
+  try {
+    const env = mkEnvA({ ANTHROPIC_API_KEY: "k" });
+    await hook(env, OWNER);
+    await hook(env, OWNER);
+    const rows = env.DB.db.prepare("SELECT summary FROM inbox WHERE kind='task'").all().map((r: any) => r.summary);
+    assert.deepEqual(rows, tasks);
+    tasks = [];
+    const env2 = mkEnvA({ ANTHROPIC_API_KEY: "k" });
+    await hook(env2, OWNER);
+    assert.equal(env2.DB.db.prepare("SELECT count(*) n FROM inbox WHERE kind='task'").get().n, 0);
+  } finally { globalThis.fetch = real; }
+});
+
 test("transcript.completed: 주인 통화는 카드 없음, owner_as_guest 켜면 손님처럼 카드", async () => {
   const f = fakeFetch();
   try {
