@@ -11,6 +11,16 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.graphics.vector.addPathNodes
+import androidx.compose.ui.text.intl.LocaleList
+import androidx.compose.ui.text.style.LineBreak
+import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.unit.em
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.ui.text.SpanStyle
@@ -73,6 +83,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -325,6 +336,7 @@ private fun head(i: InboxItem): Pair<String, String?> = when (i.kind) {
 @Composable
 private fun Park(onImage: Boolean, onSettings: () -> Unit) {
     if (!RoomService.setupDone) { FirstRun(); return }
+    RoomService.parkCard?.let { ParkCardScreen(it); return } // [확인했어요]를 누르면 아래 정차 화면
     val ctx = LocalContext.current
     // 시각을 상태로: 1분마다, 그리고 디버그 TIME 때 다시 읽는다 → 자정·아침이 지나면 미룬 카드 복귀·퇴근 후 접기가 저절로 바뀐다
     val now by produceState(RoomService.clock.millis(), RoomService.timeVer) { while (true) { value = RoomService.clock.millis(); kotlinx.coroutines.delay(60_000) } }
@@ -366,6 +378,110 @@ private fun Park(onImage: Boolean, onSettings: () -> Unit) {
                 Text(if (RoomService.listening) "듣는 중…" else "말하기", color = Ink, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
             }
         }
+    }
+}
+
+// ── 1a 하차 카드: 왼쪽 링(조각 수 = 남은 일, 안에 주차 메모) + 오른쪽 남은 일. 치수는 시안 px 1:1 ──
+private fun lineIcon(d: String) = ImageVector.Builder(defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f)
+    .addPath(addPathNodes(d), stroke = SolidColor(Color.Black), strokeLineWidth = 1.8f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round).build()
+private val PinIcon = lineIcon("M9 11a3 3 0 1 0 6 0a3 3 0 0 0-6 0M17.657 16.657l-4.243 4.243a2 2 0 0 1-2.827 0l-4.244-4.243a8 8 0 1 1 11.314 0z")
+private val CallIcon = lineIcon("M5 4h4l2 5l-2.5 1.5a11 11 0 0 0 5 5l1.5-2.5l5 2v4a2 2 0 0 1-2 2a16 16 0 0 1-15-15a2 2 0 0 1 2-2")
+private val FileIcon = lineIcon("M14 3v4a1 1 0 0 0 1 1h4M17 21h-10a2 2 0 0 1-2-2v-14a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z")
+private val CheckIcon = lineIcon("M5 12l5 5l10-10")
+
+private fun ampm(ms: Long) = Instant.ofEpochMilli(ms).atZone(RoomService.clock.zone).let { "${if (it.hour < 12) "오전" else "오후"} ${if (it.hour % 12 == 0) 12 else it.hour % 12}:${"%02d".format(it.minute)}" }
+
+@Composable
+private fun ParkCardScreen(c: ParkCard) {
+    // ParkCard에 방이 없어 저장 시각으로 가른다. ponytail: 이른 아침 집 목적지 쉼·사무실 목적지 업무는 못 가린다. 정확히 하려면 카드 만들 때 주행 방을 담기
+    val rest = offDuty(Instant.ofEpochMilli(c.savedAt).atZone(RoomService.clock.zone).toLocalDateTime(), RoomSettings(workEnd = workEndTime(RoomService.workEndHour)))
+    val acc = if (rest) RestHi else BrandHi
+    val n = c.tasks.size
+    Row(Modifier.fillMaxSize().background(DBg).padding(horizontal = 64.dp, vertical = 60.dp)) { // 사용자 배경 사진 위에서도 읽히게 불투명
+        Column(Modifier.width(776.dp).fillMaxHeight().padding(end = 72.dp), Arrangement.spacedBy(36.dp, Alignment.CenterVertically), Alignment.CenterHorizontally) {
+            Box(Modifier.size(640.dp), Alignment.Center) {
+                SegRing(n, acc, if (rest) Color(0xFF16302B) else Color(0xFF2A1A12))
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                    Icon(PinIcon, null, Modifier.size(72.dp), tint = acc)
+                    Text(c.memo.ifBlank { "메모 없음" }, Modifier.width(460.dp), color = if (c.memo.isBlank()) DMute else DTx, fontSize = 84.sp, lineHeight = 94.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.02).em,
+                        textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis, style = TextStyle(lineBreak = LineBreak.Heading, localeList = LocaleList("ko")))
+                    Text("${ampm(c.savedAt)} 저장", color = DMute, fontSize = 30.sp, lineHeight = 45.sp)
+                }
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(c.place ?: "위치를 받지 못했어요", color = DTx, fontSize = 36.sp, lineHeight = 47.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("다음 출발 때 지워져요", color = DMute, fontSize = 30.sp, lineHeight = 45.sp)
+            }
+        }
+        Column(Modifier.weight(1f).fillMaxHeight().padding(vertical = 20.dp)) {
+            RoomBadge(if (rest) "DRIVE_REST" else "DRIVE_WORK")
+            if (n == 0) Column(Modifier.weight(1f), Arrangement.spacedBy(18.dp, Alignment.CenterVertically)) {
+                ParkedPic(220.dp, acc)
+                Text("남은 일이 없어요", color = DTx, fontSize = 64.sp, lineHeight = 77.sp, fontWeight = FontWeight.ExtraBold)
+                Text("주차 위치만 남겨 둘게요", color = DMute, fontSize = 32.sp, lineHeight = 48.sp)
+            } else {
+                Row(Modifier.padding(top = 44.dp).height(170.dp).offset(y = (-30).dp), horizontalArrangement = Arrangement.spacedBy(28.dp)) { // 이 글꼴은 170dp 칸에서 숫자가 30dp 아래로 내려앉아 시안 자리로 올린다
+                    Text("$n", Modifier.alignByBaseline(), color = acc, fontSize = 200.sp, lineHeight = 170.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-10).sp, overflow = TextOverflow.Visible, style = TextStyle(lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both)))
+                    Text("남은 일", Modifier.alignByBaseline(), color = DTx, fontSize = 48.sp, fontWeight = FontWeight.Bold)
+                }
+                Column(Modifier.padding(top = 52.dp).weight(1f), Arrangement.spacedBy(44.dp)) {
+                    for (t in c.tasks.take(if (n > 4) 4 else n)) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(26.dp)) {
+                        Box(Modifier.size(80.dp).clip(CircleShape).background(DS2), Alignment.Center) { Icon(if (t.kind == "call") CallIcon else FileIcon, null, Modifier.size(36.dp), tint = DTx) }
+                        Column(Modifier.weight(1f)) {
+                            Text(t.title, color = DTx, fontSize = 46.sp, lineHeight = 57.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(t.sub, color = DMute, fontSize = 30.sp, lineHeight = 39.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    if (n > 4) Text("외 ${n - 4}건", Modifier.padding(start = 106.dp), color = DMute, fontSize = 30.sp, lineHeight = 39.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(Modifier.weight(1f).height(104.dp).clip(RoundedCornerShape(52.dp)).background(DS2).press { RoomService.editParkMemo() },
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)) {
+                    MicIcon(DTx, 40.dp)
+                    Text(if (RoomService.listening) "듣는 중…" else if (c.memo.isBlank()) "메모 남기기" else "메모 고치기", color = DTx, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                }
+                Row(Modifier.weight(1f).height(104.dp).clip(RoundedCornerShape(52.dp)).background(acc).press { RoomService.ackParkCard() },
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)) {
+                    Icon(CheckIcon, null, Modifier.size(40.dp), tint = Ink)
+                    Text("확인했어요", color = Ink, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
+/** 조각 n개(0이면 온전한 링). 시안 dasharray처럼 조각마다 16도를 비우고 8도 밀어 시작. 처음 600ms 동안 시계 방향으로 쓸어 그리고, 애니메이션 끔이면 바로. */
+@Composable
+private fun SegRing(n: Int, acc: Color, track: Color) {
+    val still = reduceMotion()
+    val p = remember { Animatable(if (still) 1f else 0f) }
+    LaunchedEffect(Unit) { if (!still) p.animateTo(1f, tween(600, 150, CubicBezierEasing(0.23f, 1f, 0.32f, 1f))) }
+    Canvas(Modifier.fillMaxSize()) {
+        val st = 36.dp.toPx(); val o = Offset(24.dp.toPx(), 24.dp.toPx()); val box = Size(size.width - 2 * o.x, size.height - 2 * o.y)
+        val swept = 360f * p.value
+        if (n == 0) { drawArc(acc, -90f, swept, false, o, box, style = Stroke(st, cap = StrokeCap.Round)); return@Canvas }
+        drawArc(track, 0f, 360f, false, o, box, style = Stroke(st))
+        val seg = 360f / n
+        for (k in 0 until n) {
+            val from = k * seg + 8f
+            val sweep = (swept - from).coerceIn(0f, seg - 16f)
+            if (sweep > 0f) drawArc(acc, -90f + from, sweep, false, o, box, style = Stroke(st, cap = StrokeCap.Round))
+        }
+    }
+}
+
+/** 시안 그림 parked(120 격자): 주차선 안에 세운 차를 위에서 본 모습 + 끝남 표시. */
+@Composable
+private fun ParkedPic(s: Dp, acc: Color) = Canvas(Modifier.size(s)) {
+    scale(size.width / 120f, pivot = Offset.Zero) {
+        for (x in listOf(18f, 102f)) drawLine(Color(0xFF4A5059), Offset(x, 14f), Offset(x, 106f), 4f, StrokeCap.Round, PathEffect.dashPathEffect(floatArrayOf(12f, 10f)))
+        drawRoundRect(DTx, Offset(36f, 18f), Size(48f, 84f), CornerRadius(16f), style = Stroke(3.5f))
+        val line = Stroke(3f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        drawPath(PathParser().parsePathString("M44 46c10-6 22-6 32 0l-4 12c-8-3-16-3-24 0z").toPath(), DTx, style = line)
+        drawPath(PathParser().parsePathString("M47 84c8 3 18 3 26 0").toPath(), DTx, style = line)
+        drawCircle(acc, 20f, Offset(90f, 92f))
+        drawPath(PathParser().parsePathString("M81 92l7 7l12-13").toPath(), Ink, style = Stroke(4f, cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 }
 
@@ -806,6 +922,17 @@ internal fun driveNow(r: String): DriveNow {
         if (rest) recentCallsSpeech(cards) else if (urgent.none { it.kind == "call" }) "급한 전화는 없어요" else recentCallsSpeech(urgent).replaceFirst("최근 전화", "급한 전화"))
 }
 
+@Composable
+private fun RoomBadge(r: String) {
+    val rest = r == "DRIVE_REST"
+    Row(Modifier.height(68.dp).clip(RoundedCornerShape(34.dp)).background(if (rest) Color(0xFF0F3A33) else Color(0xFF3A1D10)).padding(horizontal = 30.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        val tc = if (rest) Color(0xFF7FE3CB) else Color(0xFFFFB48C)
+        when (r) { "DRIVE_REST" -> R.drawable.ic_room_rest; "DRIVE_WORK" -> R.drawable.ic_room_work; else -> null }?.let { Icon(painterResource(it), null, Modifier.size(32.dp), tint = tc) }
+        Text(when (r) { "DRIVE_REST" -> "쉼 방"; "DRIVE_WORK" -> "업무 방"; else -> "방 판정 전" }, color = tc, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+    }
+}
+
 // ── 2B 운전 화면 '다크 링': 업무 방 = 주황 열린 링, 쉼 방 = 청록 닫힌 링. 조작은 듣기 1개(+휴게소 S2) ──
 @Composable
 private fun Drive(r: String) {
@@ -814,12 +941,7 @@ private fun Drive(r: String) {
     Row(Modifier.fillMaxSize().padding(horizontal = 64.dp, vertical = 60.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.width(776.dp)) { Ring(rest, d.ready, acc, d.title, d.sub) }
         Column(Modifier.weight(1f).fillMaxHeight().padding(vertical = 20.dp)) {
-            Row(Modifier.height(68.dp).clip(RoundedCornerShape(34.dp)).background(if (rest) Color(0xFF0F3A33) else Color(0xFF3A1D10)).padding(horizontal = 30.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                val tc = if (rest) Color(0xFF7FE3CB) else Color(0xFFFFB48C)
-                when (r) { "DRIVE_REST" -> R.drawable.ic_room_rest; "DRIVE_WORK" -> R.drawable.ic_room_work; else -> null }?.let { Icon(painterResource(it), null, Modifier.size(32.dp), tint = tc) }
-                Text(when (r) { "DRIVE_REST" -> "쉼 방"; "DRIVE_WORK" -> "업무 방"; else -> "방 판정 전" }, color = tc, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
-            }
+            RoomBadge(r)
             Text("${d.n}", Modifier.padding(top = 56.dp), color = acc, fontSize = 200.sp, lineHeight = 170.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-10).sp)
             // H7: 쉼 방의 업무 건은 다음 첫 업무 운전에 '어제 넘긴 건'으로 말하고 P 화면 맨 앞에 묶는다
             Text(if (rest) "다음 출근길에 알려 드릴 업무" else "급한 건", Modifier.padding(top = 16.dp), color = DTx, fontSize = 38.sp, fontWeight = FontWeight.Bold)
