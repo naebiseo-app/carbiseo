@@ -139,6 +139,7 @@ class DriveTest {
 
     @Test fun 휴식_문장은_누르라고_하지_않는다() {
         assertFalse(REST_SPEECH.contains("누르"))
+        assertEquals("오래 운전하셨어요, 쉬어 가실래요?", REST_SPEECH)
         assertFalse(roomSpeech(Room.DRIVE_REST)!!.contains("퇴근")) // 토요일 운전도 DRIVE_REST
     }
 
@@ -166,8 +167,8 @@ class DriveTest {
         assertFalse(fatigued(Room.PARK, 300))
         assertFalse(fatigued(Room.DRIVE_WORK, null))
         assertFalse("누르" in fatigueSpeech(Gear.DRIVE)) // H10: 주행 중엔 버튼이 안 보인다
-        assertTrue(fatigueSpeech(Gear.DRIVE).endsWith("다음 휴게소에서 쉬어 가세요."))
-        assertTrue("휴게소 버튼" in fatigueSpeech(Gear.PARK))
+        assertEquals("두 시간째 운전 중이에요, 다음 휴게소에서 쉬어 가세요.", fatigueSpeech(Gear.DRIVE))
+        assertEquals("두 시간째 운전 중이에요, 쉬어 가시려면 휴게소 버튼을 누르세요.", fatigueSpeech(Gear.PARK))
     }
 
     @Test fun 최근_목적지에서_집_찾기() {
@@ -226,7 +227,7 @@ class DriveTest {
         for (said in listOf("문자 보내줘", "심심한데 얘기하자", "음", null)) assertEquals(null, fatigueGate(carIntent(said), true)) // 잡담(UNKNOWN)은 졸음 방지용으로 통과
         assertEquals(null, fatigueGate(carIntent("급해요"), true)); assertEquals(null, fatigueGate(carIntent("화장실 어디야"), true))
         for (said in listOf("아까 전화 뭐 왔어", "다음 일정 알려줘", "음")) assertEquals(null, fatigueGate(carIntent(said), false))
-        assertTrue(FATIGUE_BLOCK_SPEECH.contains("화장실") && FATIGUE_BLOCK_SPEECH.contains("급해"))
+        assertEquals("업무는 쉬고 나서 하고, 급하면 '화장실'이나 '급해'라고 말씀하세요.", FATIGUE_BLOCK_SPEECH)
         assertTrue(fatigued(Room.DRIVE_WORK, 120)); assertFalse(fatigued(Room.DRIVE_WORK, 119)); assertFalse(fatigued(Room.PARK, 300))
     }
 
@@ -242,6 +243,7 @@ class DriveTest {
         assertFalse(restDue(0, t + REST_SNOOZE_MS - 1, th, t + REST_SNOOZE_MS))
         assertTrue(restDue(0, t + REST_SNOOZE_MS, th, t + REST_SNOOZE_MS))
         assertFalse(REST_ASK.contains("누르")); assertTrue(REST_ASK.endsWith("?"))
+        assertEquals("오래 운전하셨어요, 가까운 휴게소를 경유지로 넣을까요?", REST_ASK)
     }
 
     @Test fun 지각_예측은_목적지가_그_일정_장소_1km_안일때만() {
@@ -393,6 +395,7 @@ class DriveTest {
         assertEquals(CarIntent.NEXT_EVENT, carIntent("예약 일정 알려줘"))
         assertEquals("식당 예약 / 내용: 7시 2명 확정", reserveResultTask("식당", "7시 2명 확정"))
         assertEquals("전화를 걸지 못했어요. 할 일에 남겨 뒀어요", RESERVE_FAIL_SPEECH)
+        assertEquals("오늘 예약 전화는 다 썼어요, 직접 전화해 주세요.", RESERVE_LIMIT_SPEECH)
         fun row(status: String, summary: String = "", parking: String = "") = InboxItem(7, "판교 한정식", summary, false, 0L, "", kind = "reserve", status = status, parking = parking)
         assertEquals(null, reserveResultSpeech("판교 한정식", row("calling"))) // 통화 중이면 아직 말하지 않는다
         assertEquals("두 명 7시 예약됐어요. 주차도 가능하대요.", reserveResultSpeech("판교 한정식", row("ok", "두 명 7시 예약됐어요. 주차도 가능하대요.", "가능"))) // 요약에 주차가 있으면 두 번 말하지 않는다

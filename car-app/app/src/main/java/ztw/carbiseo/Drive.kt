@@ -34,10 +34,10 @@ class SeatEdge {
 
 const val REST_DEFAULT_MIN = 120
 // H10: 음성으로 '누르라'고 지시하지 않는다. 버튼은 화면에 그대로 둔다.
-const val REST_SPEECH = "오래 운전하셨어요. 쉬어 가실래요? 전화는 제가 받아 둘게요."
+const val REST_SPEECH = "오래 운전하셨어요, 쉬어 가실래요?"
 
 // 음성 승인용: 끝이 질문이라 대답을 바로 받는다. 못 듣는 때(경고·통화 중)엔 위의 REST_SPEECH만.
-const val REST_ASK = "오래 운전하셨어요. 전화는 제가 받아 둘게요. 가까운 휴게소를 경유지로 넣을까요?"
+const val REST_ASK = "오래 운전하셨어요, 가까운 휴게소를 경유지로 넣을까요?"
 const val REST_SNOOZE_MS = 30 * 60_000L
 
 /** S2: 이번 운전(PARK에서 나온 뒤) 연속 주행이 설정 분 이상(+ '아니' 대답 뒤 30분은 쉰다). startMs = null이면 정차 중. */
@@ -239,6 +239,7 @@ fun reserveSpeech(name: String, hhmm: String) = "${name}에 ${hhmm}쯤 도착해
 const val RESERVE_NO_DEST_SPEECH = "목적지를 먼저 잡아 주세요"
 const val RESERVE_KEEP_SPEECH = "인원을 못 알아들었어요. 할 일에 남겨 뒀어요"
 const val RESERVE_FAIL_SPEECH = "전화를 걸지 못했어요. 할 일에 남겨 뒀어요"
+const val RESERVE_LIMIT_SPEECH = "오늘 예약 전화는 다 썼어요, 직접 전화해 주세요."
 fun reserveCallSpeech(name: String) = "${name}에 전화해 볼게요"
 
 /** 서버가 알려 준 예약 전화 결과(inbox kind=reserve 행) 한 문장. calling이면 null(아직 통화 중). ok면 요약 + 주차 가능 여부(meta.parking), 그 밖(need_manual 등)은 요약(거절·무응답 사유), 없으면 직접 확인. */
@@ -299,12 +300,12 @@ fun greenSoon(left: Int, gear: Gear, speedKmh: Float?, busy: Boolean): Boolean =
 /** C② 피로 모드: 트립 주행시간이 기준 이상이면 전화 알림은 전부 보관(음성 없음). */
 const val FATIGUE_MIN = 120
 // H10: D에선 시스템이 앱 화면을 가려 버튼이 안 보인다 → 주행 중엔 누르라고 하지 않는다. 버튼 안내는 P에서만.
-fun fatigueSpeech(gear: Gear): String = "두 시간째 운전 중이에요. 전화는 제가 다 받아 둘게요. " +
-    if (gear == Gear.PARK) "쉬어 가시려면 휴게소 버튼을 누르세요." else "다음 휴게소에서 쉬어 가세요."
+fun fatigueSpeech(gear: Gear): String =
+    if (gear == Gear.PARK) "두 시간째 운전 중이에요, 쉬어 가시려면 휴게소 버튼을 누르세요." else "두 시간째 운전 중이에요, 다음 휴게소에서 쉬어 가세요."
 fun fatigued(room: Room?, tripMin: Int?): Boolean = room != null && room != Room.PARK && (tripMin ?: 0) >= FATIGUE_MIN
 
 /** S1 피로 중 [말하기]: 급해·화장실(Q3)과 잡담(UNKNOWN, 졸음 방지)은 통과, 전화·일정 같은 업무 말은 실행하지 않고 이 한 문장으로 거절. */
-const val FATIGUE_BLOCK_SPEECH = "두 시간 넘게 운전하셨어요. 업무는 쉬고 나서 할게요. 급하면 '화장실'이나 '급해'라고 말씀하세요."
+const val FATIGUE_BLOCK_SPEECH = "업무는 쉬고 나서 하고, 급하면 '화장실'이나 '급해'라고 말씀하세요."
 fun fatigueGate(intent: CarIntent, fatigued: Boolean): String? = if (fatigued && intent != CarIntent.URGENT && intent != CarIntent.UNKNOWN) FATIGUE_BLOCK_SPEECH else null
 
 const val TELLTALE_SPEECH = "계기판에 빨간 경고등이 켜졌어요. 안전한 곳에 세운 뒤 확인해 주세요"

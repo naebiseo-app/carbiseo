@@ -310,9 +310,9 @@ class RoomService : Service() {
     private fun callReserve(n: String, t: String, party: Int) {
         val dest = machine.signals.destination
         net.execute {
-            val id = dest?.let { Server.reserve(n, t, party, it.lat, it.lng) }; Log.i("ROOM", "reserve $n party=$party -> ${id ?: "FAIL"}")
+            val (id, code) = dest?.let { Server.reserve(n, t, party, it.lat, it.lng) } ?: (null to ""); Log.i("ROOM", "reserve $n party=$party -> ${id ?: "FAIL $code"}")
             ui.post {
-                if (id == null) { addLocalTask(reserveTask(n, t)); say(RESERVE_FAIL_SPEECH); return@post }
+                if (id == null) { addLocalTask(reserveTask(n, t)); say(if (code == "daily_limit") RESERVE_LIMIT_SPEECH else RESERVE_FAIL_SPEECH); return@post }
                 if (id > 0) reserveWait[id] = n to SystemClock.elapsedRealtime()
                 say(reserveCallSpeech(n))
             }

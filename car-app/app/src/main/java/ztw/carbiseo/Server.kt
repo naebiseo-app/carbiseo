@@ -111,10 +111,11 @@ object Server {
         } finally { c.disconnect() }
     }.getOrNull()
 
-    /** AI 예약 전화 요청. 성공하면 서버 inbox 행 id(kind=reserve, 결과는 이 행이 calling에서 바뀐다), 실패·네트워크 오류면 null. */
-    fun reserve(place: String, arrive: String, party: Int, lat: Double, lng: Double): Long? =
-        postJson("/car/reserve", JSONObject().put("place", place).put("arrive", arrive).put("party", party).put("lat", lat).put("lng", lng))
-            ?.takeIf { it.optBoolean("ok") }?.optLong("id", 0L)
+    /** AI 예약 전화 요청. 결과 = (서버 inbox 행 id, 실패 code). 성공이면 id(kind=reserve, 결과는 이 행이 calling에서 바뀐다), 실패·네트워크 오류면 id null(code: no_number·call_failed·daily_limit, 네트워크 오류는 빈 문자열). */
+    fun reserve(place: String, arrive: String, party: Int, lat: Double, lng: Double): Pair<Long?, String> {
+        val j = postJson("/car/reserve", JSONObject().put("place", place).put("arrive", arrive).put("party", party).put("lat", lat).put("lng", lng))
+        return (if (j?.optBoolean("ok") == true) j.optLong("id", 0L) else null) to (j?.str("code") ?: "")
+    }
 
     fun fetchSchedule(): List<Event>? = runCatching {
         val c = open("/car/schedule", "GET")
