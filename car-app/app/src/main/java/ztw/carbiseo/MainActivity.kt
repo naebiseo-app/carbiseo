@@ -29,4 +29,6 @@ class MainActivity : ComponentActivity() {
         startForegroundService(Intent(this, RoomService::class.java))
         setContent { App() }
     }
+    override fun onResume() { super.onResume(); RoomService.appFront = true }
+    override fun onPause() { RoomService.appFront = false; super.onPause() }
 }

@@ -36,6 +36,8 @@ import java.util.concurrent.Executors
 /** 방 판정 본체. 내비가 앞에 와도 Activity와 무관하게 돈다. 화면은 companion의 room/sig를 읽는다(같은 프로세스). */
 class RoomService : Service() {
     private val ui = Handler(Looper.getMainLooper())
+    private lateinit var strip: DriveStrip
+    private var canOverlay = false // 폴링마다 다시 읽는다(메인 스레드에서만)
     private lateinit var machine: RoomStateMachine
     private lateinit var adapters: CarAdapters
     private val receivers = mutableListOf<BroadcastReceiver>()
@@ -109,6 +111,7 @@ class RoomService : Service() {
     private val poller = object : Runnable {
         override fun run() {
             if (!alive) return
+            canOverlay = android.provider.Settings.canDrawOverlays(this@RoomService)
             val t0 = SystemClock.elapsedRealtime()
             val slow = pollN++ % SLOW_EVERY == 0 // 일정·착신 설정은 거의 안 바뀌니 30초에 한 번(카드는 매번)
             val rw = reserveWait.keys.minOrNull() // 예약 전화 결과를 기다리는 중이면 그 행부터 다시 읽는다(서버가 행을 제자리에서 바꿔서 since 폴링엔 안 보인다)
@@ -423,6 +426,7 @@ class RoomService : Service() {
             if (passenger) { hold.clear(); notifQueue.clear() } // 동승자 모드면 보류분도 버린다
             tickReplay()
             syncWake()
+            strip.sync(stripVisible(screenOverride ?: room, appFront, canOverlay))
             // 폰 알림: 미루기 조건(경고·깜빡이·후진·큰 조향·통화·피로)이 다 풀리고 대화 중이 아니면 쌓인 것을 묶어서 한 번
             // 대답 없이 남은 묻기(P의 바)도 새 알림이 오면 닫고, 못 읽어 준 알림과 합쳐 다시 묻는다(같은 알림은 한 번만)
             if (!q && (talk.step == NotifTalk.Step.NONE || talk.waiting && !listening) && pending == Ask.NONE && notifQueue.isNotEmpty() && machine.room != null && !passenger && !fatigued(machine.room, tripMin())) {
@@ -541,6 +545,7 @@ class RoomService : Service() {
         speaker = Speaker(applicationContext).also { it.onBusy = ::syncWake; it.start() }
         voice = Voice(applicationContext, ::heard).also { it.start() }
         answer = { if (it == "답장하기") { if (!listening) listenNow() } else voice.inject(it) } // '답장하기'는 대답이 아니라 다시 듣기
+        strip = DriveStrip(this)
         ui.post(ticker)
         ui.post(poller)
         if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) registerDebugRoute()
@@ -716,7 +721,7 @@ class RoomService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        gleo = null; alive = false; ui.removeCallbacks(ticker); ui.removeCallbacks(poller); wake?.stop(); wake = null; net.shutdown(); chatNet.shutdown(); pollNet.shutdown(); speaker.stop(); voice.stop(); adapters.stop(); receivers.forEach { unregisterReceiver(it) }; super.onDestroy()
+        gleo = null; alive = false; ui.removeCallbacks(ticker); ui.removeCallbacks(poller); strip.sync(false); wake?.stop(); wake = null; net.shutdown(); chatNet.shutdown(); pollNet.shutdown(); speaker.stop(); voice.stop(); adapters.stop(); receivers.forEach { unregisterReceiver(it) }; super.onDestroy()
     }
 
     companion object {
@@ -734,6 +739,7 @@ class RoomService : Service() {
         var etaMin by mutableStateOf<Int?>(null); private set // 목적지까지 남은 분(내비). null = 목적지 없음
         var destName by mutableStateOf<String?>(null); private set
         var ux by mutableStateOf(UxLimits()) // CarAdapters가 규제 바뀔 때마다 넣는다
+        var appFront by mutableStateOf(false) // 앱 창이 앞에 있나(MainActivity가 넣는다). 내비 위 띠를 숨긴다
         var screenOverride by mutableStateOf<String?>(null); private set // 디버그 SCREEN 브로드캐스트(화면 확인용)
         private const val NAVI_PKG = "ai.umos.maps.android.navigation.app" // Pleos 내비 앱(26 실측)
         var restOffer by mutableStateOf(false); private set // S2: 화면에 휴게소 버튼

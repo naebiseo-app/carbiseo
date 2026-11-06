@@ -123,10 +123,10 @@ import java.time.format.DateTimeFormatter
 private val ParkBg = Color(0xFFF3EEE4); private val ParkInk = Color(0xFF2B2620); private val ParkBody = Color(0xFF5E554A)
 private val ParkAcc = Color(0xFFC2410C); private val ParkNote = Color(0xFFFFFDF8) // Brand: 흰 글자 대비 5.2:1
 // 확정 시안(1B·2B·5A) 토큰. 창 1700x1210dp(밀도 160) = 시안 px 1:1
-private val Ink = Color(0xFF14161A); private val Brand = Color(0xFFC2410C); private val BrandHi = Color(0xFFFF7A33)
+internal val Ink = Color(0xFF14161A); private val Brand = Color(0xFFC2410C); private val BrandHi = Color(0xFFFF7A33)
 private val RestC = Color(0xFF1F6B5E); private val RestHi = Color(0xFF4FD1B5); private val Urgent = Color(0xFFB42318)
 private val DBg = Color(0xFF111316); private val DS1 = Color(0xFF1A1D22); private val DS2 = Color(0xFF23272E); private val DLine = Color(0xFF2E333B)
-private val DTx = Color(0xFFF2F3F5); private val DMute = Color(0xFFA6ACB4); private val DOut = Color(0xFF3B414A); private val DriveBg = Color(0xFF0D0F12)
+internal val DTx = Color(0xFFF2F3F5); internal val DMute = Color(0xFFA6ACB4); private val DOut = Color(0xFF3B414A); internal val DriveBg = Color(0xFF0D0F12)
 private val Paper = Color(0xFFEEEFF1); private val Mute = Color(0xFF5B616A); private val Line = Color(0xFFDFE1E5)
 private val SheetBg = DS2; private val SheetInk = DTx
 private val Tall = Modifier.heightIn(min = 64.dp)
@@ -266,7 +266,7 @@ private fun reduceMotion(): Boolean {
 }
 
 @Composable
-private fun Modifier.press(onClick: () -> Unit): Modifier {
+internal fun Modifier.press(onClick: () -> Unit): Modifier {
     val src = remember { MutableInteractionSource() }
     val down by src.collectIsPressedAsState()
     val k by animateFloatAsState(if (down && !reduceMotion()) 0.97f else 1f, tween(120), label = "press")
@@ -292,7 +292,7 @@ private fun Round(icon: ImageVector, desc: String, bg: Color = DS1, onClick: () 
 
 /** 시안의 마이크 선 아이콘(24 격자). 아이콘 묶음에 마이크가 없어 직접 그린다. */
 @Composable
-private fun MicIcon(c: Color, s: Dp) = Canvas(Modifier.size(s)) {
+internal fun MicIcon(c: Color, s: Dp) = Canvas(Modifier.size(s)) {
     val u = size.width / 24f; val st = Stroke(2.1f * u, cap = StrokeCap.Round)
     drawRoundRect(c, Offset(9 * u, 3 * u), Size(6 * u, 11 * u), CornerRadius(3 * u), style = st)
     drawArc(c, 0f, 180f, false, Offset(5.5f * u, 4.5f * u), Size(13 * u, 13 * u), style = st)
@@ -303,7 +303,7 @@ private fun dial(ctx: Context, n: String) {
     runCatching { ctx.startActivity(Intent(Intent.ACTION_DIAL, android.net.Uri.parse("tel:$n")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         .onFailure { toast(ctx, "전화를 걸 수 있는 연결된 폰이 없어요") }
 }
-private fun talk(ctx: Context) { ctx.startService(Intent(ctx, RoomService::class.java).setAction(RoomService.ACTION_TALK)) }
+internal fun talk(ctx: Context) { ctx.startService(Intent(ctx, RoomService::class.java).setAction(RoomService.ACTION_TALK)) }
 private fun time(ms: Long) = hhmm.format(Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()))
 /** 다음 일정 시각: 오늘이 아니면 "내일"·"요일"을 붙인다(밤에 잡힌 일정이 "00:00"만 보이던 문제). */
 private fun dayTime(ms: Long): String {
@@ -782,7 +782,7 @@ private fun rememberPermAsk(onDone: () -> Unit): (List<String>) -> Unit {
 }
 private fun missingPerms(ctx: Context) = missingPermissions(android.os.Build.VERSION.SDK_INT) { ctx.checkSelfPermission(it) == android.content.pm.PackageManager.PERMISSION_GRANTED }
 
-private fun speak(ctx: Context, t: String) { ctx.startService(Intent(ctx, RoomService::class.java).setAction(RoomService.ACTION_SPEAK).putExtra("t", t)) }
+internal fun speak(ctx: Context, t: String) { ctx.startService(Intent(ctx, RoomService::class.java).setAction(RoomService.ACTION_SPEAK).putExtra("t", t)) }
 
 /** 링 안 비서 상태: (두 줄 제목, 한 줄 설명, 준비됨). 실제 상태(서버·착신·응대 모드·방)에서만 고른다. */
 private fun ringState(rest: Boolean, offline: Boolean, forwardOk: Boolean, mode: String, recent: InboxItem?): Triple<String, String, Boolean> = when {
@@ -793,19 +793,26 @@ private fun ringState(rest: Boolean, offline: Boolean, forwardOk: Boolean, mode:
     else -> Triple("전화\n대신 받는 중", recent?.let { "방금 ${head(it).first}" } ?: "용건을 받아 정리해요", true)
 }
 
+/** 주행 화면과 내비 위 띠가 같이 읽는 값. hear = [듣기] 버튼이 읽을 문장, at = 도착 시각(목적지 없으면 null). */
+internal class DriveNow(val rest: Boolean, val acc: Color, val n: Int, val title: String, val sub: String, val ready: Boolean, val at: String?, val hear: String)
+internal fun driveNow(r: String): DriveNow {
+    val rest = r == "DRIVE_REST"
+    val cards = RoomService.cards()
+    val urgent = cards.filter { it.urgent && it.id !in RoomService.seen }
+    val recent = cards.firstOrNull { it.kind == "call" && System.currentTimeMillis() - it.createdAt < 10 * 60_000 }
+    val (title, sub, ready) = ringState(rest, RoomService.offline, RoomService.forwardOk, RoomService.mode, recent)
+    return DriveNow(rest, if (rest) RestHi else BrandHi, if (rest) todo(cards, RoomService.seen) else urgent.size, title, sub, ready,
+        RoomService.etaMin?.let { java.time.LocalTime.now(RoomService.clock).plusMinutes(it.toLong()).format(hhmm) },
+        if (rest) recentCallsSpeech(cards) else if (urgent.none { it.kind == "call" }) "급한 전화는 없어요" else recentCallsSpeech(urgent).replaceFirst("최근 전화", "급한 전화"))
+}
+
 // ── 2B 운전 화면 '다크 링': 업무 방 = 주황 열린 링, 쉼 방 = 청록 닫힌 링. 조작은 듣기 1개(+휴게소 S2) ──
 @Composable
 private fun Drive(r: String) {
     val ctx = LocalContext.current
-    val rest = r == "DRIVE_REST"
-    val acc = if (rest) RestHi else BrandHi
-    val cards = RoomService.cards()
-    val urgent = cards.filter { it.urgent && it.id !in RoomService.seen }
-    val n = if (rest) todo(cards, RoomService.seen) else urgent.size
-    val recent = cards.firstOrNull { it.kind == "call" && System.currentTimeMillis() - it.createdAt < 10 * 60_000 }
-    val (title, sub, ready) = ringState(rest, RoomService.offline, RoomService.forwardOk, RoomService.mode, recent)
+    val d = driveNow(r); val rest = d.rest; val acc = d.acc
     Row(Modifier.fillMaxSize().padding(horizontal = 64.dp, vertical = 60.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.width(776.dp)) { Ring(rest, ready, acc, title, sub) }
+        Box(Modifier.width(776.dp)) { Ring(rest, d.ready, acc, d.title, d.sub) }
         Column(Modifier.weight(1f).fillMaxHeight().padding(vertical = 20.dp)) {
             Row(Modifier.height(68.dp).clip(RoundedCornerShape(34.dp)).background(if (rest) Color(0xFF0F3A33) else Color(0xFF3A1D10)).padding(horizontal = 30.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -813,22 +820,20 @@ private fun Drive(r: String) {
                 when (r) { "DRIVE_REST" -> R.drawable.ic_room_rest; "DRIVE_WORK" -> R.drawable.ic_room_work; else -> null }?.let { Icon(painterResource(it), null, Modifier.size(32.dp), tint = tc) }
                 Text(when (r) { "DRIVE_REST" -> "쉼 방"; "DRIVE_WORK" -> "업무 방"; else -> "방 판정 전" }, color = tc, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
             }
-            Text("$n", Modifier.padding(top = 56.dp), color = acc, fontSize = 200.sp, lineHeight = 170.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-10).sp)
+            Text("${d.n}", Modifier.padding(top = 56.dp), color = acc, fontSize = 200.sp, lineHeight = 170.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-10).sp)
             // H7: 쉼 방의 업무 건은 다음 첫 업무 운전에 '어제 넘긴 건'으로 말하고 P 화면 맨 앞에 묶는다
             Text(if (rest) "다음 출근길에 알려 드릴 업무" else "급한 건", Modifier.padding(top = 16.dp), color = DTx, fontSize = 38.sp, fontWeight = FontWeight.Bold)
-            RoomService.etaMin?.let { m ->
+            d.at?.let { t ->
                 HorizontalDivider(Modifier.padding(top = 44.dp), thickness = 2.dp, color = Color(0xFF2A2F36))
                 Row(Modifier.padding(top = 30.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                    Text(java.time.LocalTime.now(RoomService.clock).plusMinutes(m.toLong()).format(hhmm), color = DTx, fontSize = 84.sp, lineHeight = 90.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(t, color = DTx, fontSize = 84.sp, lineHeight = 90.sp, fontWeight = FontWeight.ExtraBold)
                     Text("${RoomService.destName ?: "목적지"} 도착", Modifier.padding(bottom = 14.dp), color = DMute, fontSize = 30.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             Spacer(Modifier.weight(1f))
             RestButton(acc)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Row(Modifier.weight(1f).height(104.dp).clip(RoundedCornerShape(52.dp)).background(Color(0xFF1C2026)).press {
-                speak(ctx, if (rest) recentCallsSpeech(cards) else if (urgent.none { it.kind == "call" }) "급한 전화는 없어요" else recentCallsSpeech(urgent).replaceFirst("최근 전화", "급한 전화"))
-            }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)) {
+            Row(Modifier.weight(1f).height(104.dp).clip(RoundedCornerShape(52.dp)).background(Color(0xFF1C2026)).press { speak(ctx, d.hear) }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)) {
                 Icon(Icons.Filled.PlayArrow, null, Modifier.size(40.dp), tint = DTx)
                 Text(if (rest) "들려줘" else "급한 건 듣기", color = DTx, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
             }
@@ -867,7 +872,7 @@ private fun Ring(rest: Boolean, ready: Boolean, acc: Color, title: String, sub: 
 
 /** 초승달(아이콘 묶음에 없음): 원에서 원을 뺀 모양. 사용자 배경 사진 위에서도 비치게 차집합으로. */
 @Composable
-private fun MoonIcon(c: Color, s: Dp) = Canvas(Modifier.size(s)) {
+internal fun MoonIcon(c: Color, s: Dp) = Canvas(Modifier.size(s)) {
     val u = size.width / 24f
     val disc = { cx: Float, cy: Float, r: Float -> Path().apply { addOval(Rect(Offset(cx * u, cy * u), r * u)) } }
     drawPath(Path.combine(PathOperation.Difference, disc(11f, 13f, 8.5f), disc(15.5f, 8.5f, 7.5f)), c)
@@ -920,6 +925,13 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("동승자 모드 (업무 음성 끔)", Modifier.weight(1f), color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
             PassengerToggle(light = true)
+        }
+        val canOverlay = remember(RoomService.appFront) { android.provider.Settings.canDrawOverlays(ctx) } // 권한 화면에서 돌아오면 다시 읽는다
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("내비 위 상태 띠", Modifier.weight(1f), color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            TextButton({
+                if (!canOverlay) runCatching { ctx.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.onFailure { toast(ctx, "설정 앱에서 내비서 권한을 켜 주세요") }
+            }, Tall) { Text(if (canOverlay) "켜짐" else "꺼짐 — 켜기", color = if (canOverlay) ParkAcc else ParkInk, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
         }
         // 이름 호출: 켜 두면 시동이 켜진 동안 마이크로 이름을 기다린다. 이름 전 음성은 기기 안에서 바로 버린다.
         val wakeOn = RoomService.wakeOn
