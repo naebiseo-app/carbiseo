@@ -51,6 +51,18 @@ fun googleLabels(s: GoogleState?): Pair<String, String> = when {
     else -> "연결됨 · 앞으로 7일 일정을 가져와요" to "연결 끊기"
 }
 
+/** 서버 GET /phone/parked 응답 본문 -> Parked. {"parked":null}·깨진 본문·좌표 없음은 null, 잘못된 할 일 항목은 버린다. */
+fun parseParked(text: String): Parked? = runCatching {
+    val p = JSONObject(text).optJSONObject("parked") ?: return@runCatching null
+    if (!p.has("lat") || !p.has("lng")) return@runCatching null
+    val a = p.optJSONArray("tasks")
+    val tasks = (0 until (a?.length() ?: 0)).mapNotNull { i ->
+        val t = a!!.optJSONObject(i) ?: return@mapNotNull null
+        if (!t.has("id") || t.optString("title").isBlank()) null else ParkedTask(t.getLong("id"), t.getString("title"), if (t.isNull("number")) null else t.optString("number").ifBlank { null })
+    }
+    Parked(p.getDouble("lat"), p.getDouble("lng"), if (p.isNull("address")) "" else p.optString("address"), if (p.isNull("memo")) "" else p.optString("memo"), p.optLong("at"), tasks)
+}.getOrNull()
+
 /** 서버 호출(블로킹, 백그라운드에서만). 토큰은 차 앱과 같은 CAR_TOKEN. */
 object Relay {
     private fun open(path: String, method: String) = (URL(BuildConfig.SERVER_URL + path).openConnection() as HttpURLConnection).apply {
@@ -108,4 +120,18 @@ object Relay {
             (0 until a.length()).map { a.getJSONObject(it) }.map { it.optString("key") to it.optString("text") }
         } finally { c.disconnect() }
     }.getOrDefault(emptyList())
+
+    /** 차가 올린 하차 정보. 없거나 실패면 null. */
+    fun parked(): Parked? = runCatching {
+        val c = open("/phone/parked", "GET")
+        try { if (c.responseCode !in 200..299) null else parseParked(c.inputStream.bufferedReader().readText()) } finally { c.disconnect() }
+    }.getOrNull()
+
+    /** 하차 카드의 할 일을 폰에서 끝냄(서버가 차에 전달하고, 서버 행이면 완료 처리). */
+    fun parkedDone(id: Long): Boolean = runCatching {
+        val c = open("/phone/parked/done", "POST")
+        c.doOutput = true; c.setRequestProperty("Content-Type", "application/json")
+        c.outputStream.use { it.write(JSONObject().put("id", id).toString().toByteArray()) }
+        (c.responseCode in 200..299).also { c.disconnect() }
+    }.getOrDefault(false)
 }

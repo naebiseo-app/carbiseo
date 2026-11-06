@@ -48,4 +48,18 @@ class RelayTest {
         assertEquals("다시 연결", googleLabels(GoogleState(true, true)).second)
         assertEquals(true, googleLabels(GoogleState(true, true)).first.startsWith("다시 연결 필요"))
     }
+
+    @Test fun 하차_정보_응답을_읽는다() {
+        val j = """{"parked":{"lat":37.4,"lng":127.1,"address":"가명로 1","memo":"B2 3열","at":1700000000000,"tasks":[
+            {"id":5,"title":"김민수님께 전화하기","number":"010-0000-0000"},{"id":-3,"title":"약국","number":null},{"id":7,"title":" "},{"title":"id 없음"},"깨짐"]}}"""
+        assertEquals(Parked(37.4, 127.1, "가명로 1", "B2 3열", 1700000000000, listOf(ParkedTask(5, "김민수님께 전화하기", "010-0000-0000"), ParkedTask(-3, "약국", null))), parseParked(j))
+        assertEquals(Parked(1.0, 2.0, "", "", 0, emptyList()), parseParked("""{"parked":{"lat":1,"lng":2,"address":null}}"""))
+    }
+
+    @Test fun 하차_정보가_없거나_깨지면_null() {
+        assertNull(parseParked("""{"parked":null}"""))
+        assertNull(parseParked("""{"parked":{"lng":2}}"""))
+        assertNull(parseParked("not json"))
+        assertNull(parseParked(""))
+    }
 }

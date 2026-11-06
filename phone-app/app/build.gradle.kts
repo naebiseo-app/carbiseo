@@ -20,4 +20,5 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("com.google.android.gms:play-services-auth:22.0.0") // 구글 캘린더 권한(서버용 인증 코드)
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303") // 단위 시험에서 org.json 쓰기(안드로이드 stub은 시험 JVM에서 동작 안 함)
 }

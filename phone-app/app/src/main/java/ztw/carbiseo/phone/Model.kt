@@ -84,3 +84,7 @@ val CARRIERS = linkedMapOf(
     "KT" to "https://www.kt.com",
     "LG U+" to "https://www.lguplus.com",
 )
+
+/** 차가 올린 하차 정보(서버 GET /phone/parked). address는 서버가 못 찾으면 "". number는 서버가 그때그때 붙인 발신 번호(없으면 null, 저장하지 않는다). */
+data class ParkedTask(val id: Long, val title: String, val number: String?)
+data class Parked(val lat: Double, val lng: Double, val address: String, val memo: String, val at: Long, val tasks: List<ParkedTask>)
