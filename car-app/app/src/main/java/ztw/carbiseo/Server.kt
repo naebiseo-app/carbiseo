@@ -117,6 +117,15 @@ object Server {
         return (if (j?.optBoolean("ok") == true) j.optLong("id", 0L) else null) to (j?.str("code") ?: "")
     }
 
+    /** 근처 가까운 순 최대 15곳(서버가 카카오 카테고리 검색). 못 찾았거나 실패하면 빈 목록. 좌표는 이 호출에만 쓴다. */
+    fun nearby(code: String, lat: Double, lng: Double): List<NearPlace> = runCatching {
+        val c = open("/car/nearby?category=$code&lat=$lat&lng=$lng", "GET")
+        try {
+            val a = JSONObject((if (c.responseCode in 200..299) c.inputStream else c.errorStream).bufferedReader().readText()).optJSONArray("places") ?: return@runCatching emptyList()
+            List(a.length()) { a.getJSONObject(it) }.map { NearPlace(it.getString("name"), it.getDouble("lat"), it.getDouble("lng"), it.getInt("distance")) }
+        } finally { c.disconnect() }
+    }.getOrDefault(emptyList())
+
     fun fetchSchedule(): List<Event>? = runCatching {
         val c = open("/car/schedule", "GET")
         try {
@@ -131,3 +140,5 @@ object Server {
 
 // JSON null을 "null" 글자가 아니라 빈 문자열로
 private fun JSONObject.str(k: String) = if (isNull(k)) "" else optString(k)
+
+data class NearPlace(val name: String, val lat: Double, val lng: Double, val distance: Int)

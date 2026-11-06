@@ -86,7 +86,7 @@ class RoomService : Service() {
     private val notifFresh = mutableSetOf<Long>()
     private val notifSaid = mutableSetOf<Long>()
     // 음성으로 묻고 대답을 기다리는 질문(알림 묻기는 talk가 따로). 대답은 heard()가 받는다.
-    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, INTENT }
+    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, INTENT, NEAR_FIND, NEAR_GO }
     private class PendingSend(val label: String, val number: String, val body: String, val task: String) // 보낼 문자(label·number·body)와 못 보냈을 때 남길 할 일 본문
     private var pending = Ask.NONE
     private val chatHistory = mutableListOf<Pair<String, String>>() // 말동무 대화 맥락(메모리만, 저장·로그 없음). 메인 스레드에서만
@@ -192,6 +192,9 @@ class RoomService : Service() {
     }
 
     /** 묻고 대답 듣기. 지금 말해도 되는 때(경고·통화·다른 대화 중 아님)에만 쓴다. */
+    private var nearKind: NearKind? = null // 근처 찾기 제안 중인 종류
+    private var nearHit: NearPlace? = null // 찾아서 "들를까요?" 하고 묻는 가게
+    private var reservePlace: LatLng? = null // 근처 찾기 뒤 예약 흐름이면 그 가게 좌표(callReserve가 destination 대신 쓰고 비운다)
     private fun canAsk() = !quiet && replayRun == null && pending == Ask.NONE && talk.step == NotifTalk.Step.NONE && !listening
     private var lastAsk = ""
     private val reask = Reask()
@@ -205,20 +208,23 @@ class RoomService : Service() {
         if (urgentNeed(said) && machine.room.let { it != null && it != Room.PARK }) { talk.cancel(); askStep = talk.step; return addRestStop(true, true) }
         when (p) {
             // Q1 조용한 비서: 못 알아들으면 한 번만 다시 묻고, 그다음은 화면 2택(unsure). 번호를 알면 초안을 읽어 주고 "이대로 보낼까요?"(SEND). 모르면 지금처럼 카드만.
-            Ask.LATE, Ask.CALLBACK, Ask.SEND, Ask.REST -> when (voiceCmd(said)) {
+            Ask.LATE, Ask.CALLBACK, Ask.SEND, Ask.REST, Ask.NEAR_FIND, Ask.NEAR_GO -> when (voiceCmd(said)) {
                 Cmd.Yes -> answerYn(p, true)
                 Cmd.No, Cmd.Later -> answerYn(p, false) // '나중에'는 이 질문들엔 '아니'
-                else -> if (p == Ask.REST) unsure(p, "들르기" to { answerYn(p, true) }, "괜찮아요" to { answerYn(p, false) }, { answerYn(p, false) })
-                    else unsure(p, "보내기" to { answerYn(p, true) }, "그만두기" to { answerYn(p, false) }, { answerYn(p, false) })
+                else -> when (p) {
+                    Ask.REST, Ask.NEAR_GO -> unsure(p, "들르기" to { answerYn(p, true) }, "괜찮아요" to { answerYn(p, false) }, { answerYn(p, false) })
+                    Ask.NEAR_FIND -> unsure(p, "찾기" to { answerYn(p, true) }, "괜찮아요" to { answerYn(p, false) }, { answerYn(p, false) })
+                    else -> unsure(p, "보내기" to { answerYn(p, true) }, "그만두기" to { answerYn(p, false) }, { answerYn(p, false) })
+                }
             }
             // 예약 인원: 인원을 읽으면 그것이 승인(바로 전화), '아니·나중에'는 아무 일도 안 한다. 두 번 못 알아들으면 전화 없이 할 일 카드로(화면 2택 없음).
             Ask.RESERVE -> reserve?.let { (n, t) ->
                 val c = voiceCmd(said); val party = partyOf(said)
                 when {
-                    c == Cmd.No || c == Cmd.Later -> {}
+                    c == Cmd.No || c == Cmd.Later -> reservePlace = null
                     party != null -> callReserve(n, t, party)
                     reask.again() -> { pending = p; speaker.speak(REASK_SPEECH, ::listenNow) }
-                    else -> { addLocalTask(reserveTask(n, t)); say(RESERVE_KEEP_SPEECH) }
+                    else -> { reservePlace = null; addLocalTask(reserveTask(n, t)); say(RESERVE_KEEP_SPEECH) }
                 }
             }
             // F5: [말하기] 뒤 한 마디. 못 알아들으면 "다시 말씀해 주세요" 한 번만, 그다음은 화면 2택(주행 중엔 그냥 끝).
@@ -246,6 +252,7 @@ class RoomService : Service() {
             CarIntent.RECENT_CALLS -> say(recentCallsSpeech(cards()))
             CarIntent.NEXT_EVENT -> say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis())))
             CarIntent.RESERVE -> reserveIntent(said)
+            CarIntent.NEARBY -> nearWish(said)?.let { nearKind = it; askVoice(nearAskSpeech(it), Ask.NEAR_FIND) }
             CarIntent.UNKNOWN -> {}
         }
     }
@@ -254,7 +261,7 @@ class RoomService : Service() {
     private fun reserveIntent(said: String?) {
         val dn = forcedDest ?: adapters.destName; val e = adapters.etaMin
         if (dn == null || e == null) return say(RESERVE_NO_DEST_SPEECH)
-        val t = arriveAt(clock.millis(), e, clock.zone); reserve = dn to t
+        val t = arriveAt(clock.millis(), e, clock.zone); reserve = dn to t; reservePlace = null
         partyOf(said)?.let { callReserve(dn, t, it) } ?: askVoice(reserveSpeech(dn, t), Ask.RESERVE)
     }
 
@@ -283,8 +290,30 @@ class RoomService : Service() {
             Ask.CALLBACK -> callback?.let { (i, m) -> if (y) sendOrCard(PendingSend(i.fromLabel, i.fromNumber, m, callbackTask(i, m)), CALLBACK_DONE_SPEECH, false) }
             Ask.SEND -> sending?.let { s -> if (y) doSend(s) else { addLocalTask(s.task); say(SEND_KEEP_SPEECH) } }
             Ask.REST -> if (y) addRestStop(true) else { restSnoozeUntil = clock.millis() + REST_SNOOZE_MS; restOnce.reset(); restOffer = false }
+            Ask.NEAR_FIND -> if (y) nearFind()
+            Ask.NEAR_GO -> if (y) nearGo()
             else -> {}
         }
+    }
+
+    /** 근처 찾기 "응": 차 현재 좌표를 서버로 1회 보내 앞쪽 가장 가까운 1곳을 받아 "들를까요?"로 묻는다. */
+    private fun nearFind() {
+        val kind = nearKind ?: return
+        val loc = machine.signals.location ?: return say(NEAR_NO_LOC_SPEECH)
+        val dest = machine.signals.destination
+        net.execute {
+            val hit = pickNear(Server.nearby(kind.code, loc.lat, loc.lng), loc, dest)
+            ui.post { if (hit == null) say(NEAR_NONE_SPEECH) else if (canAsk()) { nearHit = hit; askVoice(nearFoundSpeech(hit.name, hit.distance), Ask.NEAR_GO) } }
+        }
+    }
+
+    /** 근처 찾기 "들를게": 경유지(목적지 없으면 경로)로 넣고, 식당·카페는 이어서 예약을 묻는다. 도착 시각은 시속 30킬로(분당 500m)로 올림. */
+    private fun nearGo() {
+        val kind = nearKind ?: return; val h = nearHit ?: return; val n = adapters.navi ?: return
+        if (machine.signals.destination != null) n.addWaypoint(RequestWaypointInfo(h.lat, h.lng, h.name, WaypointIndex.FIRST, "", "", "", "")) else route(LatLng(h.lat, h.lng), h.name)
+        if (kind != NearKind.FOOD && kind != NearKind.CAFE) return say(NEAR_ADDED_SPEECH)
+        val t = arriveAt(clock.millis(), maxOf(1, Math.ceil(h.distance / 500.0).toInt()), clock.zone)
+        reserve = h.name to t; reservePlace = LatLng(h.lat, h.lng); askVoice(reserveSpeech(h.name, t), Ask.RESERVE)
     }
 
     /** Q1: 못 알아들었다. 첫 번째는 다시 묻고 듣기, 두 번째는 화면 2택을 띄우고 음성 대기를 끝낸다. 화면을 못 쓰는 주행 중이면 onDrive(보통 '아니'로 닫기). */
@@ -308,7 +337,7 @@ class RoomService : Service() {
 
     /** O4: 서버가 AI로 가게에 예약 전화를 건다(번호 조회·휴대폰/유선 구분 모두 서버). 못 걸면 예약 문자 초안을 할 일 카드로 남긴다. 결과는 폴링이 가져와 한 번 읽는다(onReserveRows). */
     private fun callReserve(n: String, t: String, party: Int) {
-        val dest = machine.signals.destination
+        val dest = reservePlace ?: machine.signals.destination; reservePlace = null
         net.execute {
             val (id, code) = dest?.let { Server.reserve(n, t, party, it.lat, it.lng) } ?: (null to ""); Log.i("ROOM", "reserve $n party=$party -> ${id ?: "FAIL $code"}")
             ui.post {
@@ -469,7 +498,7 @@ class RoomService : Service() {
             // O4: 식당·카페류 목적지로 출발하면 한 번 "몇 분으로 예약할까요?"(업무·쉼 방 상관없이)
             val dn = forcedDest ?: adapters.destName
             if (machine.room.let { it != null && it != Room.PARK } && !passenger && e != null && reservable(dn) && canAsk() &&
-                reserveOnce.fire(true)) arriveAt(clock.millis(), e, clock.zone).let { t -> reserve = dn!! to t; askVoice(reserveSpeech(dn, t), Ask.RESERVE) }
+                reserveOnce.fire(true)) arriveAt(clock.millis(), e, clock.zone).let { t -> reserve = dn!! to t; reservePlace = null; askVoice(reserveSpeech(dn, t), Ask.RESERVE) }
             if (homeOnce.fire(homeSoon(machine.room, machine.signals.destination, machine.settings, e))) {
                 if (!passenger) say(HOME_SOON_SPEECH)
                 notifyFamily(e)
@@ -517,7 +546,7 @@ class RoomService : Service() {
             if (to == Room.PARK) {
                 parkedAt = now; restOffer = false; hold.clear(); parkRemind.reset(); chatHistory.clear()
                 // 정차 요약: 이번 실행에 와서 아직 안 알리고 안 본 알림(쉼 방 비즐겨찾기·피로·동승자 등으로 미룬 것)
-                notifQueue.clear(); talk.cancel(); listening = false; pending = Ask.NONE
+                notifQueue.clear(); talk.cancel(); listening = false; pending = Ask.NONE; reservePlace = null
                 val left = inbox.filter { it.id in notifFresh && it.id !in notifSaid && it.id !in seen && !isAd(it) }.sortedBy { it.id }
                 if (left.isNotEmpty() && !passenger) offerNotifs(left)
             }

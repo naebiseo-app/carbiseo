@@ -50,12 +50,33 @@ fun urgentNeed(said: String?): Boolean {
     return "답장" !in n && ("급해" in n || "화장실" in n)
 }
 
-/** F5 차 음성 입구: [말하기]로 한 마디 듣고 키워드로만 가른다(LLM 없음). 급해·화장실(Q3) > 아까 전화 > 예약(인원은 partyOf로 따로 읽는다) > 일정. */
-enum class CarIntent { RECENT_CALLS, URGENT, NEXT_EVENT, RESERVE, UNKNOWN }
+/** 근처 찾기 제안: 배고파·커피·기름. code는 서버 /car/nearby의 카카오 category_group_code. */
+enum class NearKind(val code: String, val label: String) { FOOD("FD6", "식당"), CAFE("CE7", "카페"), GAS("OL7", "주유소"), CHARGE("CS2", "충전소") }
+private val NEAR_FOOD = Regex("배고|밥먹(자|고싶|을|으러)|밥집|근처식당|식당찾|맛집|먹을데|먹을곳")
+private val NEAR_CAFE = Regex("커피(마시|한잔|먹고|사)|근처카페|카페찾|카페가")
+private val NEAR_GAS = Regex("기름(없|떨어|넣|부족)|주유")
+private val NEAR_CHARGE = Regex("충전(소|하|해야)|배터리(없|부족|떨어)")
+/** "배고파"·"커피 마시고 싶다"·"기름 떨어졌어" -> 찾아 줄 종류. 답장 문장 속 말은 제외(urgentNeed와 같은 이유). */
+fun nearWish(said: String?): NearKind? {
+    val n = said.orEmpty().replace(Regex("""\s"""), "")
+    return if ("답장" in n) null else when { NEAR_FOOD.containsMatchIn(n) -> NearKind.FOOD; NEAR_CAFE.containsMatchIn(n) -> NearKind.CAFE; NEAR_GAS.containsMatchIn(n) -> NearKind.GAS; NEAR_CHARGE.containsMatchIn(n) -> NearKind.CHARGE; else -> null }
+}
+/** 검색 결과(가까운 순) 중 안내할 1곳: 목적지가 있으면 앞쪽(지금보다 목적지에 가까운 곳)만, 지나온 곳은 고르지 않는다(nearestRestStop과 같은 방식). 목적지·현재 위치를 모르면 가장 가까운 곳. */
+fun pickNear(places: List<NearPlace>, loc: LatLng?, dest: LatLng?): NearPlace? =
+    if (loc == null || dest == null) places.minByOrNull { it.distance }
+    else places.filter { distanceM(LatLng(it.lat, it.lng), dest) < distanceM(loc, dest) }.minByOrNull { it.distance }
+fun nearAskSpeech(k: NearKind) = "근처 ${k.label} 찾아드릴까요?"
+fun nearFoundSpeech(name: String, meters: Int) = "$name, ${if (meters < 1000) "${meters}미터" else "${((meters + 50) / 100) / 10.0}킬로미터"}예요, 들를까요?"
+const val NEAR_NONE_SPEECH = "근처에서 찾지 못했어요"
+const val NEAR_NO_LOC_SPEECH = "지금 위치를 알 수 없어요"
+const val NEAR_ADDED_SPEECH = "경로에 넣었어요"
+
+/** F5 차 음성 입구: [말하기]로 한 마디 듣고 키워드로만 가른다(LLM 없음). 급해·화장실(Q3) > 아까 전화 > 예약(인원은 partyOf로 따로 읽는다) > 일정 > 근처 찾기. */
+enum class CarIntent { RECENT_CALLS, URGENT, NEXT_EVENT, RESERVE, NEARBY, UNKNOWN }
 private val RECENT_CALL_WORDS = Regex("아까전화|전화뭐|누구전화")
 fun carIntent(said: String?): CarIntent {
     val n = said.orEmpty().replace(Regex("""\s"""), "")
-    return when { urgentNeed(said) -> CarIntent.URGENT; RECENT_CALL_WORDS.containsMatchIn(n) -> CarIntent.RECENT_CALLS; "일정" in n -> CarIntent.NEXT_EVENT; "예약" in n -> CarIntent.RESERVE; else -> CarIntent.UNKNOWN }
+    return when { urgentNeed(said) -> CarIntent.URGENT; RECENT_CALL_WORDS.containsMatchIn(n) -> CarIntent.RECENT_CALLS; "일정" in n -> CarIntent.NEXT_EVENT; "예약" in n -> CarIntent.RESERVE; nearWish(said) != null -> CarIntent.NEARBY; else -> CarIntent.UNKNOWN }
 }
 /** Q1 조용한 비서: 한 질문에서 못 알아들었을 때 다시 묻는 건 1번뿐. again()이 true면 한 번 더 묻고, false면 화면 2택으로 넘긴다. 새 질문마다 reset. */
 class Reask {
@@ -306,7 +327,7 @@ fun fatigued(room: Room?, tripMin: Int?): Boolean = room != null && room != Room
 
 /** S1 피로 중 [말하기]: 급해·화장실(Q3)과 잡담(UNKNOWN, 졸음 방지)은 통과, 전화·일정 같은 업무 말은 실행하지 않고 이 한 문장으로 거절. */
 const val FATIGUE_BLOCK_SPEECH = "업무는 쉬고 나서 하고, 급하면 '화장실'이나 '급해'라고 말씀하세요."
-fun fatigueGate(intent: CarIntent, fatigued: Boolean): String? = if (fatigued && intent != CarIntent.URGENT && intent != CarIntent.UNKNOWN) FATIGUE_BLOCK_SPEECH else null
+fun fatigueGate(intent: CarIntent, fatigued: Boolean): String? = if (fatigued && intent != CarIntent.URGENT && intent != CarIntent.NEARBY && intent != CarIntent.UNKNOWN) FATIGUE_BLOCK_SPEECH else null
 
 const val TELLTALE_SPEECH = "계기판에 빨간 경고등이 켜졌어요. 안전한 곳에 세운 뒤 확인해 주세요"
 

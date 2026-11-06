@@ -231,6 +231,35 @@ class DriveTest {
         assertTrue(fatigued(Room.DRIVE_WORK, 120)); assertFalse(fatigued(Room.DRIVE_WORK, 119)); assertFalse(fatigued(Room.PARK, 300))
     }
 
+    @Test fun 근처_찾기_말은_종류별로_가른다() {
+        for (t in listOf("배고파", "밥 먹자", "근처 식당 찾아줘", "맛집 가고 싶어")) assertEquals(t, NearKind.FOOD, nearWish(t))
+        for (t in listOf("커피 마시고 싶다", "근처 카페 찾아줘", "카페 가자")) assertEquals(t, NearKind.CAFE, nearWish(t))
+        for (t in listOf("기름 떨어졌어", "주유소 어디야", "기름 없어")) assertEquals(t, NearKind.GAS, nearWish(t))
+        for (t in listOf("충전소 찾아줘", "충전해야 해", "배터리 부족해")) assertEquals(t, NearKind.CHARGE, nearWish(t))
+        for (t in listOf("밥 먹었어?", "날씨 어때", "", "답장 배고파서 늦는다고 해줘", "답장 충전해야 해서 늦는다고 해줘")) assertEquals(t, null, nearWish(t))
+        assertEquals(null, nearWish(null))
+        assertEquals(listOf("FD6", "CE7", "OL7", "CS2"), NearKind.values().map { it.code })
+        assertEquals(CarIntent.NEARBY, carIntent("배고파")); assertEquals(CarIntent.RESERVE, carIntent("두 명 예약해 줘")); assertEquals(CarIntent.NEXT_EVENT, carIntent("오늘 일정"))
+        assertEquals("근처 식당 찾아드릴까요?", nearAskSpeech(NearKind.FOOD)); assertEquals("근처 카페 찾아드릴까요?", nearAskSpeech(NearKind.CAFE)); assertEquals("근처 주유소 찾아드릴까요?", nearAskSpeech(NearKind.GAS))
+        assertEquals(null, fatigueGate(CarIntent.NEARBY, true))
+    }
+
+    @Test fun 근처_찾은_가게_문장은_미터와_킬로미터로_읽는다() {
+        assertEquals("가명 식당, 800미터예요, 들를까요?", nearFoundSpeech("가명 식당", 800))
+        assertEquals("가명 식당, 999미터예요, 들를까요?", nearFoundSpeech("가명 식당", 999))
+        assertEquals("가명 식당, 3.2킬로미터예요, 들를까요?", nearFoundSpeech("가명 식당", 3200))
+        assertEquals("가명 식당, 1.0킬로미터예요, 들를까요?", nearFoundSpeech("가명 식당", 1000))
+    }
+
+    @Test fun 근처_고르기는_지나온_곳을_빼고_가장_가까운_앞쪽() {
+        val loc = LatLng(37.0, 127.0); val dest = LatLng(37.1, 127.0) // 목적지는 북쪽
+        val behind = NearPlace("뒤쪽", 36.999, 127.0, 100); val front = NearPlace("앞쪽", 37.01, 127.0, 1100); val far = NearPlace("먼 앞쪽", 37.03, 127.0, 3300)
+        assertEquals(front, pickNear(listOf(behind, far, front), loc, dest)) // 가까운 순서가 아니어도 거리로 고른다
+        assertEquals(null, pickNear(listOf(behind), loc, dest))
+        assertEquals(behind, pickNear(listOf(far, behind, front), loc, null)) // 목적지를 모르면 가장 가까운 곳
+        assertEquals(null, pickNear(emptyList(), loc, null))
+    }
+
     @Test fun 피로_중에도_못_알아들은_말_UNKNOWN은_막지_않는다() {
         assertEquals(null, fatigueGate(CarIntent.UNKNOWN, true))
         assertEquals(FATIGUE_BLOCK_SPEECH, fatigueGate(CarIntent.RECENT_CALLS, true)); assertEquals(FATIGUE_BLOCK_SPEECH, fatigueGate(CarIntent.NEXT_EVENT, true))
