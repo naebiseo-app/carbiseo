@@ -117,9 +117,19 @@ object Server {
         return (if (j?.optBoolean("ok") == true) j.optLong("id", 0L) else null) to (j?.str("code") ?: "")
     }
 
-    /** 주차 기록(하차 카드의 차 쪽 데이터): 위치·메모·안 끝난 할 일 제목. 2xx면 true. */
-    fun postParked(lat: Double, lng: Double, memo: String, tasks: List<String>): Boolean =
-        post("/car/parked", JSONObject().put("lat", lat).put("lng", lng).put("memo", memo).put("tasks", org.json.JSONArray(tasks)))
+    /** 주차 기록(하차 카드의 차 쪽 데이터): 위치·메모·안 끝난 할 일(wire id, 제목). 결과 = (성공 여부, 서버가 찾은 주소 — 없으면 null). */
+    fun postParked(lat: Double, lng: Double, memo: String, tasks: List<Pair<Long, String>>): Pair<Boolean, String?> {
+        val j = postJson("/car/parked", JSONObject().put("lat", lat).put("lng", lng).put("memo", memo).put("tasks", org.json.JSONArray(tasks.map { (id, t) -> JSONObject().put("id", id).put("title", t) })))
+        return (j?.optBoolean("ok") == true) to j?.str("address")?.ifEmpty { null }
+    }
+    /** 폰에서 끝낸 할 일 wire id들. 실패 null. */
+    fun fetchParkedDone(): List<Long>? = runCatching {
+        val c = open("/car/parked", "GET")
+        try {
+            if (c.responseCode !in 200..299) return@runCatching null
+            JSONObject(c.inputStream.bufferedReader().readText()).getJSONArray("done").let { a -> List(a.length()) { a.getLong(it) } }
+        } finally { c.disconnect() }
+    }.getOrNull()
     fun clearParked(): Boolean = post("/car/parked", JSONObject().put("clear", true))
 
     /** 근처 가까운 순 최대 15곳(서버가 카카오 카테고리 검색). 못 찾았거나 실패하면 빈 목록. 좌표는 이 호출에만 쓴다. */

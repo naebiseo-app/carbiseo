@@ -523,4 +523,33 @@ class DriveTest {
         assertEquals(null, worstTraffic(listOf("UNKNOWN")))
         assertEquals(null, worstTraffic(emptyList()))
     }
+
+    @Test fun 하차_카드_남은_일() {
+        val z = java.time.ZoneId.of("Asia/Seoul")
+        fun at(h: Int, m: Int) = java.time.LocalDateTime.of(2026, 11, 7, h, m).atZone(z).toInstant().toEpochMilli()
+        val call = InboxItem(5, "김민수", "약속 확인", false, at(14, 12), "", kind = "call")
+        val urgent = InboxItem(9, "", "급건", true, at(0, 5), "", kind = "call")
+        val task = InboxItem(7, "내비서", "이지은 약속 010-0000-0000 / 내용: 내일 2시에 봬요", false, at(10, 20), "", kind = "task")
+        val local = InboxItem(LOCAL_ID_BASE + 3, "내비서", "약국 / 내용: 들르기", false, at(13, 0), "", kind = "task")
+        val noise = listOf(InboxItem(1, "x", "y", false, 0, "", kind = "sent"), InboxItem(2, "x", "y", false, 0, "", kind = "notif"), InboxItem(3, "x", "y", false, 0, "", kind = "hint"))
+        val l = parkTasks(noise + listOf(call, task, local, urgent), z)
+        assertEquals(listOf(9L, LOCAL_ID_BASE + 3, 7L, 5L).sortedBy { if (it == 9L) 0 else 1 }.let { listOf(9L) + listOf(local.id, 7L, 5L) }, l.map { it.id }) // 급한 카드 먼저, 나머지 최신 id 순
+        assertEquals(ParkTask(5, "김민수님께 전화하기", "오후 2:12 부재중", "call"), l.last())
+        assertEquals(ParkTask(9, "모르는 번호에 전화하기", "오전 12:05 급한 전화", "call"), l.first())
+        assertEquals(ParkTask(7, "이지은 약속", "오전 10:20 통화에서 할 일", "task"), l.first { it.id == 7L })
+        assertEquals("내비서가 남김", l.first { it.id == local.id }.sub.substringAfter(" ").substringAfter(" "))
+        assertEquals(8, parkTasks((1L..20L).map { InboxItem(it, "a", "b", false, 0, "", kind = "task") }, z).size)
+        assertEquals(emptyList<ParkTask>(), parkTasks(noise, z))
+    }
+
+    @Test fun 하차_카드_표시_조건과_id() {
+        val t = listOf(ParkTask(1, "a", "b", "task"))
+        assertTrue(parkCardNow(Room.DRIVE_WORK, true, emptyList()))
+        assertTrue(parkCardNow(Room.DRIVE_REST, false, t))
+        assertFalse(parkCardNow(null, true, t)) // 앱 시작 직후 첫 PARK
+        assertFalse(parkCardNow(Room.PARK, true, t))
+        assertFalse(parkCardNow(Room.DRIVE_WORK, false, emptyList())) // 위치도 남은 일도 없음
+        assertEquals(-3L, parkWireId(LOCAL_ID_BASE + 3)); assertEquals(7L, parkWireId(7))
+        assertEquals(LOCAL_ID_BASE + 3, parkLocalId(-3)); assertEquals(7L, parkLocalId(7))
+    }
 }

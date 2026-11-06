@@ -91,7 +91,7 @@ class RoomService : Service() {
     private val notifFresh = mutableSetOf<Long>()
     private val notifSaid = mutableSetOf<Long>()
     // 음성으로 묻고 대답을 기다리는 질문(알림 묻기는 talk가 따로). 대답은 heard()가 받는다.
-    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, INTENT, NEAR_FIND, NEAR_GO, PARK_CALL }
+    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, INTENT, NEAR_FIND, NEAR_GO, PARK_CALL, PARK_MEMO }
     private class PendingSend(val label: String, val number: String, val body: String, val task: String) // 보낼 문자(label·number·body)와 못 보냈을 때 남길 할 일 본문
     private var pending = Ask.NONE
     private val chatHistory = mutableListOf<Pair<String, String>>() // 말동무 대화 맥락(메모리만, 저장·로그 없음). 메인 스레드에서만
@@ -120,10 +120,12 @@ class RoomService : Service() {
             canOverlay = android.provider.Settings.canDrawOverlays(this@RoomService)
             val t0 = SystemClock.elapsedRealtime()
             val slow = pollN++ % SLOW_EVERY == 0 // 일정·착신 설정은 거의 안 바뀌니 30초에 한 번(카드는 매번)
+            val inPark = machine.room == Room.PARK // 하차 카드의 할 일을 폰에서 끝냈는지는 세운 동안만 본다
             val rw = reserveWait.keys.minOrNull() // 예약 전화 결과를 기다리는 중이면 그 행부터 다시 읽는다(서버가 행을 제자리에서 바꿔서 since 폴링엔 안 보인다)
             pollNet.execute {
                 try {
                     rw?.let { w -> Server.fetchInbox(w - 1)?.let { (rows, _) -> ui.post { onReserveRows(rows) } } }
+                    if (inPark) Server.fetchParkedDone()?.let { ids -> ui.post { onParkDone(ids) } }
                     val r = Server.fetchInbox(since)
                     ui.post {
                         offline = r == null; r?.let { (items, minId) -> inbox = pruneGone(inbox, minId); onInbox(items) } // 끝나는 대로 다시 시도한다
@@ -138,6 +140,13 @@ class RoomService : Service() {
                 }
             }
         }
+    }
+
+    /** 폰에서 끝낸 일(wire id): 서버 행은 [완료]와 같은 cardDone 처리, 차에서 만든 카드는 dropLocal. 열린 하차 카드에서도 뺀다. */
+    private fun onParkDone(wire: List<Long>) {
+        val ids = wire.map(::parkLocalId).toSet()
+        for (id in ids) if (id < LOCAL_ID_BASE) { if (id !in cardDone) markCardDone(this, id) } else if (inbox.any { it.id == id }) dropLocal(this, id)
+        parkCard = parkCard?.let { c -> if (c.tasks.any { it.id in ids }) c.copy(tasks = c.tasks.filter { it.id !in ids }) else c }
     }
 
     private fun onInbox(fetched: List<InboxItem>) {
@@ -242,6 +251,11 @@ class RoomService : Service() {
                     if (said.isNullOrBlank()) unk() else chatOr(said, unk)
                 }
             }
+            // 하차 카드 [고치기]: 답한 문장을 40자로 잘라 그대로 메모로. 못 들으면 한 번만 다시 묻고 그다음은 접는다
+            Ask.PARK_MEMO -> when {
+                !said.isNullOrBlank() -> saveParkMemo(said.trim().take(40))
+                reask.again() -> { pending = p; speaker.speak(REASK_SPEECH, ::listenNow) }
+            }
             Ask.NONE -> {
                 // 알림 묻기(제안·보낼까요)도 같은 규칙: 못 알아들으면 한 번만 다시 묻고, 그다음은 P의 화면 버튼(읽어줘/나중에·보내/취소)·주행 중엔 카드로
                 val st = talk.step
@@ -259,18 +273,24 @@ class RoomService : Service() {
             CarIntent.RECENT_CALLS -> say(recentCallsSpeech(cards()))
             CarIntent.NEXT_EVENT -> say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis())))
             CarIntent.RESERVE -> reserveIntent(said)
-            CarIntent.PARK_MEMO -> parkMemo(said)?.let { parkMemoText = it; machine.signals.location?.let { l -> postParked(l); say(PARK_MEMO_SPEECH) } ?: say(NEAR_NO_LOC_SPEECH) }
+            CarIntent.PARK_MEMO -> parkMemo(said)?.let(::saveParkMemo)
             CarIntent.PARKING -> parkingIntent()
             CarIntent.NEARBY -> nearWish(said)?.let { nearKind = it; askVoice(nearAskSpeech(it), Ask.NEAR_FIND) }
             CarIntent.UNKNOWN -> {}
         }
     }
 
-    /** 주차 기록을 서버에 한 번: 위치·메모·아직 안 끝난 할 일 카드 제목 최대 3개(번호는 뺀다). */
+    /** 주차 메모 저장: 열려 있는 하차 카드에도 바로 반영하고 서버에 다시 올린다. */
+    private fun saveParkMemo(memo: String) {
+        parkMemoText = memo; parkCard = parkCard?.copy(memo = memo)
+        machine.signals.location?.let { l -> postParked(l); say(PARK_MEMO_SPEECH) } ?: say(NEAR_NO_LOC_SPEECH)
+    }
+
+    /** 주차 기록을 서버에 한 번: 위치·메모·아직 안 끝난 할 일/회신 카드 최대 8건. 서버가 찾은 주소가 오면 열린 하차 카드의 장소를 갱신한다. */
     private fun postParked(l: LatLng) {
-        val tasks = cards().filter { it.kind == "task" }.take(3).map { cardText(it).substringBefore(" — ").substringBefore(" · ") }
+        val tasks = parkTasks(cards(), clock.zone).map { parkWireId(it.id) to it.title }
         val memo = parkMemoText.orEmpty()
-        net.execute { Log.i("ROOM", "parked -> ${Server.postParked(l.lat, l.lng, memo, tasks)}") }
+        net.execute { val (ok, addr) = Server.postParked(l.lat, l.lng, memo, tasks); Log.i("ROOM", "parked -> $ok"); if (addr != null) ui.post { parkCard = parkCard?.copy(place = addr) } }
     }
 
     /** [말하기] "두 명 예약해 줘": 목적지가 있으면 인원이 말에 있을 때 되묻지 않고 바로 전화, 없으면 인원을 묻는다. */
@@ -429,6 +449,13 @@ class RoomService : Service() {
         if (listening || pending != Ask.NONE || talk.step != NotifTalk.Step.NONE) return
         if (voice.path == "none") return speaker.speak(NO_VOICE_SPEECH)
         askVoice(TALK_PROMPT, Ask.INTENT)
+    }
+
+    /** 하차 카드 [고치기]: "어디에 세우셨어요?" 뒤 한 마디를 주차 메모로. */
+    private fun editMemo() {
+        if (listening || pending != Ask.NONE || talk.step != NotifTalk.Step.NONE) return
+        if (voice.path == "none") return speaker.speak(NO_VOICE_SPEECH)
+        askVoice(PARK_MEMO_ASK, Ask.PARK_MEMO)
     }
 
     /** 음성 인식이 없고(path none) 주행 중이면 대답을 못 받으니 '나중에'(카드로 보관). */
@@ -597,6 +624,7 @@ class RoomService : Service() {
             ui.post { arriveSaid += ab; restMin = r; workEndHour = we; inbox = (lt.filter { t -> inbox.none { it.id == t.id } } + inbox).sortedByDescending { it.id }; seen = sn + seen; notifDone = nd + notifDone; cardDone = cd + cardDone; snoozed = sz + snoozed; deferred = df + deferred; forwardOk = forwardOk || fw; setupDone = sd; mode = md; briefDay = bd }
         }
         gleo = { ci -> ui.post { if (alive) runIntent(ci) } }
+        memoEdit = { ui.post { if (alive) editMemo() } }
         latch = AlertLatch(Clock.systemDefaultZone())
         machine = RoomStateMachine(clock) // settings = 기본 상수. 설정 화면이 machine.settings를 덮어쓴다.
         machine.onChange = { from, to ->
@@ -608,11 +636,13 @@ class RoomService : Service() {
                 // 정차 요약: 이번 실행에 와서 아직 안 알리고 안 본 알림(쉼 방 비즐겨찾기·피로·동승자 등으로 미룬 것)
                 notifQueue.clear(); talk.cancel(); listening = false; pending = Ask.NONE; reservePlace = null
                 machine.signals.location?.let(::postParked) // 짧은 정차에도 위치는 갱신
+                val pt = parkTasks(cards(), clock.zone); val pn = adapters.arrivedName
+                parkCard = if (parkCardNow(from, machine.signals.location != null || pn != null, pt)) ParkCard(parkMemoText.orEmpty(), pn, now, pt) else null
                 val left = inbox.filter { it.id in notifFresh && it.id !in notifSaid && it.id !in seen && !isAd(it) }.sortedBy { it.id }
                 if (left.isNotEmpty() && !passenger) offerNotifs(left)
             }
             else {
-                val parked = parkedAt?.let { now - it }; parkedAt = null
+                val parked = parkedAt?.let { now - it }; parkedAt = null; parkCard = null
                 replay = replay?.copy(hint = null) // 출발하면 도움 카드는 내리고(운전 중엔 귓속말만), 다음 도움부터 TTS
                 if (from == Room.PARK && talk.step != NotifTalk.Step.NONE) { talk.cancel(); askStep = talk.step; listening = false } // P에서 남겨 둔 바는 출발하면 닫는다(카드는 남음)
                 // M4: 2분 미만 P는 같은 운전 — 휴식·피로·집 문턱 1회 안내와 운전 시작 시각을 유지
@@ -823,10 +853,16 @@ class RoomService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        gleo = null; alive = false; ui.removeCallbacks(ticker); ui.removeCallbacks(poller); strip.sync(false); wake?.stop(); wake = null; net.shutdown(); chatNet.shutdown(); pollNet.shutdown(); speaker.stop(); voice.stop(); adapters.stop(); receivers.forEach { unregisterReceiver(it) }; super.onDestroy()
+        gleo = null; memoEdit = null; alive = false; ui.removeCallbacks(ticker); ui.removeCallbacks(poller); strip.sync(false); wake?.stop(); wake = null; net.shutdown(); chatNet.shutdown(); pollNet.shutdown(); speaker.stop(); voice.stop(); adapters.stop(); receivers.forEach { unregisterReceiver(it) }; super.onDestroy()
     }
 
     companion object {
+        @Volatile private var memoEdit: (() -> Unit)? = null // 서비스가 살아 있을 때만 있다
+        /** 하차 카드: 화면이 [확인]을 누르면 카드를 내린다. */
+        fun ackParkCard() { parkCard = null }
+        /** 하차 카드: [고치기] -> "어디에 세우셨어요?" 음성 질문. */
+        fun editParkMemo() { memoEdit?.invoke() }
+        var parkCard by mutableStateOf<ParkCard?>(null); private set // PARK로 바뀔 때만 만들고 다음 주행 방 진입 때 비운다. 화면(Compose)이 읽는다
         @Volatile var gleo: ((CarIntent) -> Unit)? = null // GleoReceiver가 부른다. 서비스가 살아 있을 때만 있다
         private const val CH = "room"
         private const val HEARTBEAT_MS = 5 * 60_000L

@@ -99,6 +99,29 @@ fun parkMemo(said: String?): String? {
 }
 const val PARK_MEMO_SPEECH = "주차 위치를 적어 뒀어요"
 
+/** 하차 카드의 남은 일 한 줄. kind = task(할 일)|call(회신할 전화). sub = 시각 + 출처. */
+data class ParkTask(val id: Long, val title: String, val sub: String, val kind: String)
+data class ParkCard(val memo: String, val place: String?, val savedAt: Long, val tasks: List<ParkTask>)
+
+private fun parkClock(ms: Long, zone: java.time.ZoneId): String = java.time.Instant.ofEpochMilli(ms).atZone(zone).let { "${if (it.hour < 12) "오전" else "오후"} ${if (it.hour % 12 == 0) 12 else it.hour % 12}:${"%02d".format(it.minute)}" }
+
+/** 하차 카드의 남은 일: 할 일·회신할 전화만, 주차 화면 순서(parkOrder)로 최대 8건. */
+fun parkTasks(cards: List<InboxItem>, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): List<ParkTask> =
+    parkOrder(cards.filter { it.kind == "task" || it.kind == "call" }).take(8).map { i ->
+        val t = parkClock(i.createdAt, zone)
+        if (i.kind == "call") ParkTask(i.id, "${if (i.fromLabel.isBlank()) "모르는 번호에" else "${i.fromLabel}님께"} 전화하기", "$t ${if (i.urgent) "급한 전화" else "부재중"}", "call")
+        else ParkTask(i.id, cardText(i).substringBefore(" — ").substringBefore(" · ").ifBlank { "할 일" }, "$t ${if (i.id >= LOCAL_ID_BASE) "내비서가 남김" else "통화에서 할 일"}", "task")
+    }
+
+/** 서버·폰에 보내는 할 일 id: 차 안에서 만든 카드(LOCAL_ID_BASE 이상)는 JSON 정밀도를 넘으니 음수로 줄인다. 서버는 양수 id만 inbox 행으로 본다. */
+fun parkWireId(id: Long): Long = if (id >= LOCAL_ID_BASE) LOCAL_ID_BASE - id else id
+fun parkLocalId(wire: Long): Long = if (wire < 0) LOCAL_ID_BASE - wire else wire
+
+/** 하차 카드를 새로 띄울 때: 주행 방에서 PARK로 바뀐 때만(앱 시작 직후 첫 PARK는 from이 null), 위치도 남은 일도 없으면 안 띄운다. */
+fun parkCardNow(from: Room?, hasPlace: Boolean, tasks: List<ParkTask>): Boolean = from != null && from != Room.PARK && (hasPlace || tasks.isNotEmpty())
+
+const val PARK_MEMO_ASK = "어디에 세우셨어요?"
+
 /** "주차 자리 있어?": 주차 메모(층·구역이 든 말)가 아닌 주차 문의. 답장 문장 속 말은 제외. */
 private val PARK_ASK = Regex("주차(자리|장|할곳|할데|할만|공간|돼|되나|되니|되는|가능|할수)")
 fun parkingWish(said: String?): Boolean {
@@ -328,7 +351,6 @@ fun partyOf(said: String?): Int? {
     return counted ?: PARTY_BARE.matchEntire(n)?.groupValues?.get(1)?.let { w -> w.toIntOrNull() ?: if (w == "열") 10 else PARTY_UNITS.indexOf(w) + 1 }?.takeIf { it in 1..20 }
 }
 
-/** O4: 전화를 못 걸었거나 인원을 못 읽었을 때 남기는 예약 문자 초안 = 할 일 카드 본문(taskDraft 형식, 번호는 정차 후 입력). */
 /** 하차: 기어 P + 운전석 문 위치값이 0보다 큼(열림). 값을 모르면 false. ponytail: 열림 > 0은 문서 미확인(에뮬 실측으로 조정) */
 fun gotOff(gear: Gear, driverDoorPos: Int?): Boolean = gear == Gear.PARK && (driverDoorPos ?: 0) > 0
 /** 앞유리 와이퍼가 켜져 있으면 비로 본다(WiperState 이름 "ON"). */
@@ -336,6 +358,7 @@ fun rainByWiper(wiperState: String?): Boolean = wiperState == "ON"
 /** 내비 정체 단계(TrafficCongestionType 이름) 중 가장 심한 것. 모르면 null. */
 private val TRAFFIC_ORDER = listOf("FAST", "MODERATE", "SLOW", "HEAVY")
 fun worstTraffic(types: List<String>): String? = types.filter { it in TRAFFIC_ORDER }.maxByOrNull { TRAFFIC_ORDER.indexOf(it) }
+/** O4: 전화를 못 걸었거나 인원을 못 읽었을 때 남기는 예약 문자 초안 = 할 일 카드 본문(taskDraft 형식, 번호는 정차 후 입력). */
 /** 예약 전화 결과 카드. 할 일로 남겨 정차 때 다시 볼 수 있게 한다. */
 fun reserveResultTask(name: String, result: String, parking: Boolean = false) = "$name ${if (parking) "주차 문의" else "예약"} / 내용: $result"
 fun reserveTask(name: String, hhmm: String) = "$name 예약 / 내용: 안녕하세요, ${hhmm}쯤 도착 예정인데 자리(주차) 가능할까요?"

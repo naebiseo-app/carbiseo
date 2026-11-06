@@ -65,6 +65,7 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
     var cameraOverspeed = false; private set
     var cautionZone = false; private set
     var etaMin: Int? = null; private set // 목적지까지 남은 분. null = 목적지 없음.
+    var arrivedName: String? = null; private set // 내비가 알린 도착 목적지 이름. 하차 카드의 장소 대체값. 다음 경로 시작(onRouteStarted)에 비운다
     var destName: String? = null; private set // 목적지 이름(내비 DestinationInfo.name). 비었거나 목적지 없음 = null
     // C: Pleos Vehicle SDK 값(메인 스레드에서만 씀). null = 모름/권한 없음.
     var turnOn = false; private set
@@ -261,8 +262,8 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
             override fun onRouteCancelled() { Log.i(TAG, "onRouteCancelled"); ui.post { etaMin = null; destName = null }; set { copy(destination = null) } }
             override fun onRouteEnded() { ui.post { etaMin = null; destName = null }; set { copy(destination = null) } }
             override fun onDestinationChanged() { n.getDestinationInfo() }
-            override fun onRouteStarted(i: RouteStartInfo) { set { copy(arrived = false) } }
-            override fun onDestinationArrived(i: DestinationArrivedInfo) { Log.i(TAG, "arrived name=${i.name}"); set { copy(arrived = true) } }
+            override fun onRouteStarted(i: RouteStartInfo) { ui.post { arrivedName = null } }
+            override fun onDestinationArrived(i: DestinationArrivedInfo) { Log.i(TAG, "arrived name=${i.name}"); ui.post { arrivedName = i.name?.takeIf { it.isNotBlank() } } }
             // trafficStatus는 enum이 아니라 요약+구간 목록 객체(실물). 단계는 구간 중 가장 심한 것.
             override fun onRouteStateInfo(i: RouteStateInfo) {
                 runCatching {
