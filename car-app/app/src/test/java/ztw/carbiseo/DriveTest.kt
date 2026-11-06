@@ -400,7 +400,8 @@ class DriveTest {
         assertEquals("두 명 7시 예약됐어요. 주차는 안 돼요.", reserveResultSpeech("판교 한정식", row("ok", "두 명 7시 예약됐어요", "불가")))
         assertEquals("두 명 7시 예약됐어요.", reserveResultSpeech("판교 한정식", row("ok", "두 명 7시 예약됐어요", "모름")))
         assertEquals("판교 한정식 예약을 마쳤어요.", reserveResultSpeech("판교 한정식", row("ok")))
-        assertEquals("판교 한정식 예약은 직접 확인이 필요해요", reserveResultSpeech("판교 한정식", row("need_manual", "무시되는 요약", "가능")))
+        assertEquals("판교 한정식 예약은 직접 확인이 필요해요", reserveResultSpeech("판교 한정식", row("need_manual")))
+        assertEquals("자리가 없대요.", reserveResultSpeech("판교 한정식", row("need_manual", "자리가 없대요.", "가능")))
     }
 
     @Test fun 출근_브리핑은_오늘_남은_일정만() {

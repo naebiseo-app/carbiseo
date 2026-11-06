@@ -241,11 +241,11 @@ const val RESERVE_KEEP_SPEECH = "인원을 못 알아들었어요. 할 일에 �
 const val RESERVE_FAIL_SPEECH = "전화를 걸지 못했어요. 할 일에 남겨 뒀어요"
 fun reserveCallSpeech(name: String) = "${name}에 전화해 볼게요"
 
-/** 서버가 알려 준 예약 전화 결과(inbox kind=reserve 행) 한 문장. calling이면 null(아직 통화 중). ok면 요약 + 주차 가능 여부(meta.parking), 그 밖(need_manual 등)은 직접 확인. */
+/** 서버가 알려 준 예약 전화 결과(inbox kind=reserve 행) 한 문장. calling이면 null(아직 통화 중). ok면 요약 + 주차 가능 여부(meta.parking), 그 밖(need_manual 등)은 요약(거절·무응답 사유), 없으면 직접 확인. */
 fun reserveResultSpeech(place: String, i: InboxItem): String? = when (i.status) {
     "", "calling" -> null
     "ok" -> sentences(i.summary.ifBlank { "${place} 예약을 마쳤어요" }, when { "주차" in i.summary -> null; i.parking == "가능" -> "주차 가능해요"; i.parking == "불가" -> "주차는 안 돼요"; else -> null })
-    else -> "${place} 예약은 직접 확인이 필요해요"
+    else -> i.summary.ifBlank { "${place} 예약은 직접 확인이 필요해요" }
 }
 
 private val PARTY_UNITS = listOf("한", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉")
