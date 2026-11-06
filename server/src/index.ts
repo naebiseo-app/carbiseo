@@ -93,6 +93,9 @@ async function saveCallCard(db: D1Database, c: Card, extra: object = {}, from = 
   if (ringId) await db.prepare("DELETE FROM inbox WHERE id=?").bind(ringId).run();
 }
 
+// 도구 결과도 AI가 읽는다: 호출 직후 AI가 통화를 끊은 일이 있어(11-06 실통화) 끊지 말라고 돌려준다
+const AFTER_REPORT = "기록했습니다. 통화를 끊지 말고 상대가 끊을 때까지 기다립니다. 상대가 말하면 이어서 답합니다.";
+
 // MCP report_call: AI가 끝맺음 뒤에 요약을 보낸다 → 끊는 순간 카드. 결과 "ok" 또는 오류 문구.
 export async function reportCall(env: Env, a: Record<string, unknown>): Promise<string> {
   const id = String(a.call_id ?? "");
@@ -142,7 +145,7 @@ async function mcp(req: Request, env: Env): Promise<Response> {
     const hdr = req.headers.get("x-clawops-call-id") ?? "";
     const args = { ...(p.arguments ?? {}), ...(CALL_ID.test(hdr) ? { call_id: hdr } : {}) };
     const text = p.name === "report_call" ? await reportCall(env, args) : "unknown tool";
-    return ok({ content: [{ type: "text", text }], isError: text !== "ok" });
+    return ok({ content: [{ type: "text", text: text === "ok" ? AFTER_REPORT : text }], isError: text !== "ok" });
   }
   return json({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
 }

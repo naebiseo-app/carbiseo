@@ -132,6 +132,8 @@ test("손님 대본: 이름만 말해도 용건은 반드시 묻고, 도구 호�
   assert.match(s, /무슨 일인지 듣기 전에는 \[4\]·\[5\]로 가지 않고/);
   assert.match(s, /뭐 하시는지, 언제 도착하시는지 물으면 이 대본의 안내에 적힌 만큼만/);
   assert.match(s, /위치와 목적지 이름은 말하지 않습니다/);
+  assert.match(s, /상대가 말을 끊으면 바로 멈추고.*먼저 끊지 않고/);
+  assert.match(reportLine("CA0"), /호출한 뒤에도 통화를 끊지 않습니다/);
   assert.match(reportLine("CA0"), /끝맺음 문장을 말한 다음에 report_call 도구를 말없이/);
 });
 

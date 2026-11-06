@@ -59,7 +59,8 @@ test("report_call → 카드 1장, 뒤에 온 summary.completed는 건너뜀", a
   const env = mkEnv();
   await ring(env, GUEST);
   const r = await report(env, { call_id: CID, caller: "한빛물산 김민수", purpose: "견적", urgent: false, callback_by: "", summary: "한빛물산 김민수, 견적 회신 급히 요청" });
-  assert.deepEqual(r.result, { content: [{ type: "text", text: "ok" }], isError: false });
+  assert.equal(r.result.isError, false);
+  assert.match(r.result.content[0].text, /통화를 끊지 말고/);
   await report(env, { call_id: CID, summary: "다시" }); // 두 번 불러도 1장
   const raw = new URLSearchParams({ CallId: CID, From: GUEST, Direction: "inbound", Event: "summary.completed", SummaryJson: JSON.stringify({ coreSummary: "나중 요약" }) }).toString();
   const mac = await crypto.subtle.sign("HMAC", await crypto.subtle.importKey("raw", new TextEncoder().encode("k"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]),
@@ -86,7 +87,7 @@ test("report_call: X-ClawOps-Call-Id 헤더가 있으면 AI가 적은 call_id보
 test("report_call: 주인 통화는 카드 없이 ok(스위치 켜면 손님처럼)", async () => {
   const env = mkEnv();
   await ring(env, OWNER);
-  assert.equal((await report(env, { call_id: CID, summary: "x" })).result.content[0].text, "ok");
+  assert.match((await report(env, { call_id: CID, summary: "x" })).result.content[0].text, /기록했습니다/);
   assert.equal(cards(env).length, 0);
   env.DB.db.prepare("INSERT INTO kv(key,value,updated_at) VALUES('owner_as_guest','true',0)").run();
   await report(env, { call_id: CID, summary: "x" });
