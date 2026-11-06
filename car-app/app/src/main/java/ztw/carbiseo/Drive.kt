@@ -101,13 +101,25 @@ const val PARK_MEMO_SPEECH = "주차 위치를 적어 뒀어요"
 
 /** 하차 카드의 남은 일 한 줄. kind = task(할 일)|call(회신할 전화). sub = 시각 + 출처. */
 data class ParkTask(val id: Long, val title: String, val sub: String, val kind: String)
-data class ParkCard(val memo: String, val place: String?, val savedAt: Long, val tasks: List<ParkTask>)
+/** total = 8건으로 자르기 전 전체 남은 일 수. hasLocation = 차가 위치를 알았나(주소만 없을 수 있다). work = 직전 주행 방이 업무 방이었나. */
+data class ParkCard(val memo: String, val place: String?, val savedAt: Long, val tasks: List<ParkTask>, val total: Int = tasks.size, val hasLocation: Boolean = false, val work: Boolean = true) {
+    /** 폰에서 끝낸 일을 뺀다. 목록에서 뺀 만큼 total도 줄인다(목록 밖 일은 모르니 그대로). */
+    fun without(ids: Set<Long>): ParkCard = tasks.filter { it.id !in ids }.let { left -> if (left.size == tasks.size) this else copy(tasks = left, total = maxOf(left.size, total - (tasks.size - left.size))) }
+}
+
+/** 장소 줄: 주소가 있으면 주소, 위치만 있으면 그렇게, 위치도 없으면 못 받았다고. */
+fun parkPlaceText(place: String?, hasLocation: Boolean): String = place ?: if (hasLocation) "주소 없이 위치만 저장했어요" else "위치를 받지 못했어요"
 
 private fun parkClock(ms: Long, zone: java.time.ZoneId): String = java.time.Instant.ofEpochMilli(ms).atZone(zone).let { "${if (it.hour < 12) "오전" else "오후"} ${if (it.hour % 12 == 0) 12 else it.hour % 12}:${"%02d".format(it.minute)}" }
 
+private fun parkable(cards: List<InboxItem>) = cards.filter { it.kind == "task" || it.kind == "call" }
+
+/** 하차 카드의 남은 일 전체 건수(8건으로 자르기 전). */
+fun parkTotal(cards: List<InboxItem>): Int = parkable(cards).size
+
 /** 하차 카드의 남은 일: 할 일·회신할 전화만, 주차 화면 순서(parkOrder)로 최대 8건. */
 fun parkTasks(cards: List<InboxItem>, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): List<ParkTask> =
-    parkOrder(cards.filter { it.kind == "task" || it.kind == "call" }).take(8).map { i ->
+    parkOrder(parkable(cards)).take(8).map { i ->
         val t = parkClock(i.createdAt, zone)
         if (i.kind == "call") ParkTask(i.id, "${if (i.fromLabel.isBlank()) "모르는 번호에" else "${i.fromLabel}님께"} 전화하기", "$t ${if (i.urgent) "급한 전화" else "부재중"}", "call")
         else ParkTask(i.id, cardText(i).substringBefore(" — ").substringBefore(" · ").ifBlank { "할 일" }, "$t ${if (i.id >= LOCAL_ID_BASE) "내비서가 남김" else "통화에서 할 일"}", "task")

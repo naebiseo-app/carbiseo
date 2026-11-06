@@ -58,10 +58,18 @@ fun parseParked(text: String): Parked? = runCatching {
     val a = p.optJSONArray("tasks")
     val tasks = (0 until (a?.length() ?: 0)).mapNotNull { i ->
         val t = a!!.optJSONObject(i) ?: return@mapNotNull null
-        if (!t.has("id") || t.optString("title").isBlank()) null else ParkedTask(t.getLong("id"), t.getString("title"), if (t.isNull("number")) null else t.optString("number").ifBlank { null })
+        if (!t.has("id") || t.optString("title").isBlank()) null else ParkedTask(t.getLong("id"), t.getString("title"), if (t.isNull("number")) null else t.optString("number").ifBlank { null }, if (t.isNull("sub")) null else t.optString("sub").ifBlank { null })
     }
-    Parked(p.getDouble("lat"), p.getDouble("lng"), if (p.isNull("address")) "" else p.optString("address"), if (p.isNull("memo")) "" else p.optString("memo"), p.optLong("at"), tasks)
+    Parked(p.getDouble("lat"), p.getDouble("lng"), if (p.isNull("address")) "" else p.optString("address"), if (p.isNull("memo")) "" else p.optString("memo"), p.optLong("at"), tasks, maxOf(tasks.size, p.optInt("total")))
 }.getOrNull()
+
+/** 응답 본문 -> 읽기 결과. {"parked":null}만 '없음'. parked 키가 없거나 읽을 수 없으면(포털 안내문 등 200 응답 포함) 실패라 저장본을 지우지 않는다. */
+fun parseParkedRead(text: String): ParkedRead = runCatching {
+    val o = JSONObject(text)
+    if (!o.has("parked")) ParkedRead.Failed
+    else if (o.isNull("parked")) ParkedRead.None
+    else parseParked(text)?.let { ParkedRead.Found(it, text) } ?: ParkedRead.Failed
+}.getOrDefault(ParkedRead.Failed)
 
 /** 서버 호출(블로킹, 백그라운드에서만). 토큰은 차 앱과 같은 CAR_TOKEN. */
 object Relay {
@@ -121,11 +129,11 @@ object Relay {
         } finally { c.disconnect() }
     }.getOrDefault(emptyList())
 
-    /** 차가 올린 하차 정보. 없거나 실패면 null. */
-    fun parked(): Parked? = runCatching {
+    /** 차가 올린 하차 정보. 없음(None)과 실패(Failed)를 구분한다. */
+    fun parked(): ParkedRead = runCatching {
         val c = open("/phone/parked", "GET")
-        try { if (c.responseCode !in 200..299) null else parseParked(c.inputStream.bufferedReader().readText()) } finally { c.disconnect() }
-    }.getOrNull()
+        try { if (c.responseCode !in 200..299) ParkedRead.Failed else parseParkedRead(c.inputStream.bufferedReader().readText()) } finally { c.disconnect() }
+    }.getOrDefault(ParkedRead.Failed)
 
     /** 하차 카드의 할 일을 폰에서 끝냄(서버가 차에 전달하고, 서버 행이면 완료 처리). */
     fun parkedDone(id: Long): Boolean = runCatching {

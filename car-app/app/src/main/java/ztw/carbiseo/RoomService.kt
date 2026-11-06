@@ -147,7 +147,7 @@ class RoomService : Service() {
     private fun onParkDone(wire: List<Long>) {
         val ids = wire.map(::parkLocalId).toSet()
         for (id in ids) if (id < LOCAL_ID_BASE) { if (id !in cardDone) markCardDone(this, id) } else if (inbox.any { it.id == id }) dropLocal(this, id)
-        parkCard = parkCard?.let { c -> if (c.tasks.any { it.id in ids }) c.copy(tasks = c.tasks.filter { it.id !in ids }) else c }
+        parkCard = parkCard?.without(ids)
     }
 
     private fun onInbox(fetched: List<InboxItem>) {
@@ -290,9 +290,9 @@ class RoomService : Service() {
 
     /** 주차 기록을 서버에 한 번: 위치·메모·아직 안 끝난 할 일/회신 카드 최대 8건. 서버가 찾은 주소가 오면 열린 하차 카드의 장소를 갱신한다. */
     private fun postParked(l: LatLng) {
-        val tasks = parkTasks(cards(), clock.zone).map { parkWireId(it.id) to it.title }
-        val memo = parkMemoText.orEmpty()
-        net.execute { val (ok, addr) = Server.postParked(l.lat, l.lng, memo, tasks); Log.i("ROOM", "parked -> $ok"); if (addr != null) ui.post { parkCard = parkCard?.copy(place = addr) } }
+        val tasks = parkTasks(cards(), clock.zone).map { it.copy(id = parkWireId(it.id)) }
+        val total = parkTotal(cards()); val memo = parkMemoText.orEmpty()
+        net.execute { val (ok, addr) = Server.postParked(l.lat, l.lng, memo, tasks, total); Log.i("ROOM", "parked -> $ok"); if (addr != null) ui.post { parkCard = parkCard?.copy(place = addr) } }
     }
 
     /** [말하기] "두 명 예약해 줘": 목적지가 있으면 인원이 말에 있을 때 되묻지 않고 바로 전화, 없으면 인원을 묻는다. */
@@ -644,7 +644,7 @@ class RoomService : Service() {
                 notifQueue.clear(); talk.cancel(); listening = false; pending = Ask.NONE; reservePlace = null
                 machine.signals.location?.let(::postParked) // 짧은 정차에도 위치는 갱신
                 val pt = parkTasks(cards(), clock.zone); val pn = adapters.arrivedName
-                parkCard = if (parkCardNow(from, machine.signals.location != null || pn != null, pt)) ParkCard(parkMemoText.orEmpty(), pn, now, pt) else null
+                parkCard = if (parkCardNow(from, machine.signals.location != null || pn != null, pt)) ParkCard(parkMemoText.orEmpty(), pn, now, pt, parkTotal(cards()), machine.signals.location != null, from == Room.DRIVE_WORK) else null
                 val left = inbox.filter { it.id in notifFresh && it.id !in notifSaid && it.id !in seen && !isAd(it) }.sortedBy { it.id }
                 if (left.isNotEmpty() && !passenger) offerNotifs(left)
             }

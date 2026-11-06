@@ -48,7 +48,7 @@ test("저장·덮어쓰기·clear, 주소는 카카오 좌표→주소", async (
   assert.equal(await get(env), null);
   assert.deepEqual(await (await post(env, { lat: 37.4, lng: "127.1", memo: "B2 3열", tasks: [{ id: -1, title: "약국" }] })).json(), { ok: true, address: "가명로 1" });
   const p = await get(env);
-  assert.deepEqual([p.lat, p.lng, p.address, p.memo, p.tasks], [37.4, 127.1, "가명로 1", "B2 3열", [{ id: -1, title: "약국", number: null }]]);
+  assert.deepEqual([p.lat, p.lng, p.address, p.memo, p.tasks], [37.4, 127.1, "가명로 1", "B2 3열", [{ id: -1, title: "약국", sub: "", number: null }]]);
   assert.ok(Number.isFinite(p.at));
   await post(env, { lat: 35, lng: 129 });
   const q = await get(env);
@@ -68,6 +68,21 @@ test("좌표 잘못됨 400(저장 안 함), memo 40자·tasks 8개·80자로 자
   assert.equal(p.memo.length, 40);
   assert.equal(p.tasks.length, 8);
   assert.deepEqual([p.tasks[0].title.length, p.tasks[1].id], [80, 3]);
+});
+
+test("total: 자르기 전 건수를 저장하고 폰에서 끝낸 만큼 빼며, sub는 60자로 자른다", async () => {
+  const env = mkEnv();
+  const ts = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((id) => ({ id, title: "t" + id, sub: id === 1 ? "나".repeat(70) : "오전 10:20 통화에서 할 일" }));
+  await post(env, { lat: 1, lng: 2, tasks: ts, total: 12 });
+  let p = await get(env);
+  assert.deepEqual([p.tasks.length, p.total, p.tasks[0].sub.length, p.tasks[1].sub], [8, 12, 60, "오전 10:20 통화에서 할 일"]);
+  await doneCall(env, 3); await doneCall(env, 3); await doneCall(env, 999); // 중복·목록 밖 id는 한 번만/세지 않음
+  p = await get(env);
+  assert.deepEqual([p.tasks.length, p.total], [7, 11]);
+  await post(env, { lat: 1, lng: 2, tasks: ts.slice(0, 2) }); // total 없음 → 건수 그대로, 이미 끝낸 3은 목록에 없으니 안 뺀다
+  assert.equal((await get(env)).total, 2);
+  await post(env, { lat: 1, lng: 2, tasks: ts.slice(0, 3), total: 1 }); // total이 목록보다 작으면 목록 건수로
+  assert.equal((await get(env)).total, 2); // 3은 끝낸 일이라 빠짐
 });
 
 test("주소 조회 실패해도 저장은 한다(빈 주소), 키 없어도 마찬가지", async () => {

@@ -561,7 +561,25 @@ class DriveTest {
         assertEquals(ParkTask(7, "이지은 약속", "오전 10:20 통화에서 할 일", "task"), l.first { it.id == 7L })
         assertEquals("내비서가 남김", l.first { it.id == local.id }.sub.substringAfter(" ").substringAfter(" "))
         assertEquals(8, parkTasks((1L..20L).map { InboxItem(it, "a", "b", false, 0, "", kind = "task") }, z).size)
+        assertEquals(20, parkTotal((1L..20L).map { InboxItem(it, "a", "b", false, 0, "", kind = "task") } + noise)) // 자르기 전 건수, 잡음 제외
         assertEquals(emptyList<ParkTask>(), parkTasks(noise, z))
+    }
+
+    @Test fun 하차_카드_폰에서_끝낸_일은_total도_줄인다() {
+        val ts = (1L..8L).map { ParkTask(it, "t$it", "s", "task") }
+        val c = ParkCard("B2", null, 0, ts, 12, true, false)
+        val d = c.without(setOf(3L, 4L, 99L)) // 목록에 없는 id는 세지 않는다
+        assertEquals(listOf(1L, 2L, 5L, 6L, 7L, 8L), d.tasks.map { it.id })
+        assertEquals(10, d.total)
+        assertEquals(c, c.without(setOf(99L)))
+        assertEquals(0, ParkCard("", null, 0, ts.take(2), 2).without(setOf(1L, 2L)).total)
+        assertEquals(8, ParkCard("", null, 0, ts).total) // total 기본 = 목록 건수
+    }
+
+    @Test fun 하차_카드_장소_문구() {
+        assertEquals("가명로 1", parkPlaceText("가명로 1", true))
+        assertEquals("주소 없이 위치만 저장했어요", parkPlaceText(null, true))
+        assertEquals("위치를 받지 못했어요", parkPlaceText(null, false))
     }
 
     @Test fun 하차_카드_표시_조건과_id() {

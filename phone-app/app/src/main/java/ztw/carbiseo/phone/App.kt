@@ -122,11 +122,17 @@ class MainActivity : ComponentActivity() {
     private var parkedHide by mutableStateOf(emptySet<Long>()) // 틱을 누른 일. 서버 응답 전 읽기가 되살리지 못하게 parked와 따로 둔다
     private var parkedMsg by mutableStateOf("")
 
-    /** 디버그 빌드만: am start --es parked_json '<json>' 이면 서버 대신 그 값을 그린다(화면 확인용). */
+    /** 서버 응답 원문 저장본(오프라인·지하 주차장에서도 위치를 보이려고). 앞서 저장본으로 먼저 그리고, 서버가 답하면 판정(parkedNext)대로 바꾼다. */
     private fun readParked() {
         parkedMsg = ""
-        val fake = if (BuildConfig.DEBUG) intent.getStringExtra("parked_json")?.let(::parseParked) else null
-        net.execute { val p = fake ?: Relay.parked(); runOnUiThread { parked = p } }
+        if (parked == null) prefs.getString("parked", null)?.let(::parseParked)?.let { parked = it }
+        val fake = if (BuildConfig.DEBUG) intent.getStringExtra("parked_json")?.let(::parseParked) else null // 디버그 빌드만: am start --es parked_json '<json>' 이면 서버 대신 그 값을 그린다(화면 확인용)
+        if (fake != null) { parked = fake; return }
+        net.execute {
+            val n = parkedNext(Relay.parked(), prefs.getString("parked", null))
+            if (n.clear) prefs.edit().remove("parked").apply() else n.write?.let { prefs.edit().putString("parked", it).apply() }
+            runOnUiThread { parked = n.show }
+        }
     }
 
     private fun finishParked(id: Long) {
@@ -398,7 +404,7 @@ class MainActivity : ComponentActivity() {
 
     /** 2a 위치 먼저: 주차 위치 카드(차 화면 링과 같은 조각 링) + 남은 일. 치수는 시안 그대로. */
     @Composable private fun ParkedCard(p: Parked, z: ZoneId) {
-        val tasks = p.tasks.filter { it.id !in parkedHide }
+        val (tasks, total) = parkedLeft(p, parkedHide)
         Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
             Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("주차 위치", Modifier.alignByBaseline().semantics { heading() }, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
@@ -407,7 +413,7 @@ class MainActivity : ComponentActivity() {
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(S1).padding(18.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(Modifier.size(196.dp), contentAlignment = Alignment.Center) {
-                    SegRing(tasks.size)
+                    SegRing(minOf(total, 8))
                     Text(p.memo.ifBlank { "메모 없음" }, Modifier.width(150.dp), color = if (p.memo.isBlank()) Mute else Tx, fontSize = 27.sp, lineHeight = 32.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.01).em,
                         textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis, style = LocalTextStyle.current.copy(lineBreak = LineBreak.Heading))
                 }
@@ -424,14 +430,14 @@ class MainActivity : ComponentActivity() {
                     Text("지도 열기", color = OnBrand, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
                 }
             }
-            if (tasks.isEmpty()) Column(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (total == 0) Column(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ParkedPic()
                 Text("남은 일이 없어요", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
                 Text("주차 위치만 남겨 둘게요", color = Mute, fontSize = 13.sp)
             } else {
                 Row(Modifier.padding(top = 20.dp, bottom = 6.dp).semantics(mergeDescendants = true) { heading() }, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("남은 일", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
-                    Text("${tasks.size}", color = Brand, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("$total", color = Brand, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
                 }
                 if (parkedMsg.isNotEmpty()) Text(parkedMsg, color = WarmSub, fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp))
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(S1).padding(start = 4.dp, end = 12.dp)) {
@@ -441,7 +447,10 @@ class MainActivity : ComponentActivity() {
                             Box(Modifier.size(44.dp).clip(CircleShape).clickable(role = Role.Button) { finishParked(t.id) }.semantics { contentDescription = "${t.title} 끝냈어요" }, contentAlignment = Alignment.Center) {
                                 Box(Modifier.size(26.dp).border(2.dp, Color(0xFF4A5059), CircleShape))
                             }
-                            Text(t.title, Modifier.weight(1f), fontSize = 15.5.sp, lineHeight = 21.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Column(Modifier.weight(1f)) {
+                                Text(t.title, fontSize = 15.5.sp, lineHeight = 21.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                t.sub?.let { Text(it, color = Mute, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                            }
                             t.number?.let { n ->
                                 Box(Modifier.size(44.dp).clip(CircleShape).background(S2).clickable(role = Role.Button) { open(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$n"))) }, contentAlignment = Alignment.Center) {
                                     Icon(Ic.phone, "${t.title} 전화 걸기", Modifier.size(20.dp))
@@ -449,6 +458,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
+                    if (total > tasks.size) Text("외 ${total - tasks.size}건", Modifier.padding(start = 54.dp, top = 4.dp, bottom = 14.dp), color = Mute, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

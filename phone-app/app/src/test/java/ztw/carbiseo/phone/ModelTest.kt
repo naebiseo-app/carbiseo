@@ -49,4 +49,24 @@ class ModelTest {
         assertEquals("어제", dayLabel(t(1, 1) - 86_400_000, now, z))
         assertEquals("음성 답장 보냄" to "카카오톡 · 팀 단톡방에게", line(Event(0, Kind.REPLIED, "카카오톡", "팀 단톡방")))
     }
+
+    private val saved = """{"parked":{"lat":1,"lng":2,"memo":"B2","tasks":[{"id":5,"title":"a","number":"010-0000-0000"}]}}"""
+    private val live = Parked(3.0, 4.0, "", "", 0, emptyList())
+
+    @Test fun 하차_정보_읽은_뒤_처리() {
+        assertEquals(ParkedNext(live, "raw", false), parkedNext(ParkedRead.Found(live, "raw"), saved)) // 성공+있음 = 그리고 저장
+        assertEquals(ParkedNext(null, null, true), parkedNext(ParkedRead.None, saved)) // 성공+없음 = 지우고 숨김
+        assertEquals(ParkedNext(parseParked(saved), null, false), parkedNext(ParkedRead.Failed, saved)) // 실패 = 저장본 그대로
+        assertEquals("B2", parkedNext(ParkedRead.Failed, saved).show!!.memo)
+        assertEquals(ParkedNext(null, null, false), parkedNext(ParkedRead.Failed, null)) // 저장본 없음
+        assertEquals(ParkedNext(null, null, false), parkedNext(ParkedRead.Failed, "깨짐"))
+    }
+
+    @Test fun 하차_정보_숨긴_일은_total도_줄인다() {
+        val p = Parked(1.0, 2.0, "", "", 0, listOf(ParkedTask(1, "a", null), ParkedTask(2, "b", null), ParkedTask(3, "c", null)), 7)
+        assertEquals(p.tasks to 7, parkedLeft(p, emptySet()))
+        assertEquals(p.tasks.drop(1) to 6, parkedLeft(p, setOf(1L, 99L))) // 목록에 없는 id는 세지 않는다
+        assertEquals(emptyList<ParkedTask>() to 4, parkedLeft(p, setOf(1L, 2L, 3L)))
+        assertEquals(emptyList<ParkedTask>() to 0, parkedLeft(Parked(1.0, 2.0, "", "", 0, p.tasks), setOf(1L, 2L, 3L)))
+    }
 }

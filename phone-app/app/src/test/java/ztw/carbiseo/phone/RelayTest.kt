@@ -2,6 +2,7 @@ package ztw.carbiseo.phone
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RelayTest {
@@ -61,5 +62,21 @@ class RelayTest {
         assertNull(parseParked("""{"parked":{"lng":2}}"""))
         assertNull(parseParked("not json"))
         assertNull(parseParked(""))
+    }
+
+    @Test fun 하차_정보의_보조_줄과_전체_건수() {
+        val j = """{"parked":{"lat":1,"lng":2,"total":12,"tasks":[{"id":5,"title":"김민수님께 전화하기","sub":"오후 2:12 부재중","number":null},{"id":6,"title":"약국","sub":""}]}}"""
+        assertEquals(Parked(1.0, 2.0, "", "", 0, listOf(ParkedTask(5, "김민수님께 전화하기", null, "오후 2:12 부재중"), ParkedTask(6, "약국", null, null)), 12), parseParked(j))
+        assertEquals(2, parseParked("""{"parked":{"lat":1,"lng":2,"total":0,"tasks":[{"id":5,"title":"a"},{"id":6,"title":"b"}]}}""")!!.total) // total이 목록보다 작으면 목록 건수
+    }
+
+    @Test fun 응답_읽기는_없음과_실패를_가른다() {
+        val ok = """{"parked":{"lat":1,"lng":2,"tasks":[]}}"""
+        assertEquals(ParkedRead.Found(Parked(1.0, 2.0, "", "", 0, emptyList()), ok), parseParkedRead(ok))
+        assertEquals(ParkedRead.None, parseParkedRead("""{"parked":null}"""))
+        assertEquals(ParkedRead.Failed, parseParkedRead("<html>로그인</html>")) // 200 안내문
+        assertEquals(ParkedRead.Failed, parseParkedRead("""{"error":"x"}"""))
+        assertEquals(ParkedRead.Failed, parseParkedRead("""{"parked":{"lng":2}}"""))
+        assertTrue(parseParkedRead("") is ParkedRead.Failed)
     }
 }

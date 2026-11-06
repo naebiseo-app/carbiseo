@@ -85,6 +85,27 @@ val CARRIERS = linkedMapOf(
     "LG U+" to "https://www.lguplus.com",
 )
 
-/** 차가 올린 하차 정보(서버 GET /phone/parked). address는 서버가 못 찾으면 "". number는 서버가 그때그때 붙인 발신 번호(없으면 null, 저장하지 않는다). */
-data class ParkedTask(val id: Long, val title: String, val number: String?)
-data class Parked(val lat: Double, val lng: Double, val address: String, val memo: String, val at: Long, val tasks: List<ParkedTask>)
+/** 차가 올린 하차 정보(서버 GET /phone/parked). address는 서버가 못 찾으면 "". number는 서버가 그때그때 붙인 발신 번호(없으면 null; 서버 kv엔 없고, 폰은 오프라인용 저장본에 응답 원문째 남는다). sub = 제목 아래 보조 줄(시각·출처, 없으면 null). total = 자르기 전 전체 남은 일 수. */
+data class ParkedTask(val id: Long, val title: String, val number: String?, val sub: String? = null)
+data class Parked(val lat: Double, val lng: Double, val address: String, val memo: String, val at: Long, val tasks: List<ParkedTask>, val total: Int = tasks.size)
+
+/** 서버 읽기 결과. Failed = 인터넷 없음·서버 오류·읽을 수 없는 응답(없음과 다르다). */
+sealed interface ParkedRead {
+    data class Found(val parked: Parked, val raw: String) : ParkedRead
+    data object None : ParkedRead
+    data object Failed : ParkedRead
+}
+
+/** 읽은 뒤 할 일: 화면에 둘 값, prefs에 쓸 원문(null이면 안 씀), prefs를 지울지. */
+data class ParkedNext(val show: Parked?, val write: String?, val clear: Boolean)
+
+/** 성공+있음 = 그리고 저장, 성공+없음 = 지우고 숨김, 실패 = 저장본이 있으면 그대로(지하 주차장에서도 위치를 찾게). */
+fun parkedNext(r: ParkedRead, saved: String?): ParkedNext = when (r) {
+    is ParkedRead.Found -> ParkedNext(r.parked, r.raw, false)
+    ParkedRead.None -> ParkedNext(null, null, true)
+    ParkedRead.Failed -> ParkedNext(saved?.let(::parseParked), null, false)
+}
+
+/** 틱으로 숨긴 일을 뺀 목록과 남은 전체 건수(숨긴 만큼 total도 줄인다). */
+fun parkedLeft(p: Parked, hide: Set<Long>): Pair<List<ParkedTask>, Int> =
+    p.tasks.filter { it.id !in hide }.let { left -> left to maxOf(left.size, p.total - (p.tasks.size - left.size)) }

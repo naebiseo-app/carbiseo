@@ -76,6 +76,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -387,20 +388,23 @@ private fun lineIcon(d: String) = ImageVector.Builder(defaultWidth = 24.dp, defa
 private val PinIcon = lineIcon("M9 11a3 3 0 1 0 6 0a3 3 0 0 0-6 0M17.657 16.657l-4.243 4.243a2 2 0 0 1-2.827 0l-4.244-4.243a8 8 0 1 1 11.314 0z")
 private val CallIcon = lineIcon("M5 4h4l2 5l-2.5 1.5a11 11 0 0 0 5 5l1.5-2.5l5 2v4a2 2 0 0 1-2 2a16 16 0 0 1-15-15a2 2 0 0 1 2-2")
 private val FileIcon = lineIcon("M14 3v4a1 1 0 0 0 1 1h4M17 21h-10a2 2 0 0 1-2-2v-14a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z")
+private val SendIcon = lineIcon("M10 14l11-11M21 3l-6.5 18a.55 .55 0 0 1-1 0l-3.5-7l-7-3.5a.55 .55 0 0 1 0-1l18-6.5")
 private val CheckIcon = lineIcon("M5 12l5 5l10-10")
+
+/** 하차 카드 할 일 아이콘: 보내기·문자·메일이 든 일은 보내기, 전화는 전화, 나머지는 서류. */
+private fun taskIcon(t: ParkTask) = if (listOf("보내", "문자", "메일").any { it in t.title }) SendIcon else if (t.kind == "call") CallIcon else FileIcon
 
 private fun ampm(ms: Long) = Instant.ofEpochMilli(ms).atZone(RoomService.clock.zone).let { "${if (it.hour < 12) "오전" else "오후"} ${if (it.hour % 12 == 0) 12 else it.hour % 12}:${"%02d".format(it.minute)}" }
 
 @Composable
 private fun ParkCardScreen(c: ParkCard) {
-    // ParkCard에 방이 없어 저장 시각으로 가른다. ponytail: 이른 아침 집 목적지 쉼·사무실 목적지 업무는 못 가린다. 정확히 하려면 카드 만들 때 주행 방을 담기
-    val rest = offDuty(Instant.ofEpochMilli(c.savedAt).atZone(RoomService.clock.zone).toLocalDateTime(), RoomSettings(workEnd = workEndTime(RoomService.workEndHour)))
+    val rest = !c.work
     val acc = if (rest) RestHi else BrandHi
-    val n = c.tasks.size
+    val n = c.total
     Row(Modifier.fillMaxSize().background(DBg).padding(horizontal = 64.dp, vertical = 60.dp)) { // 사용자 배경 사진 위에서도 읽히게 불투명
         Column(Modifier.width(776.dp).fillMaxHeight().padding(end = 72.dp), Arrangement.spacedBy(36.dp, Alignment.CenterVertically), Alignment.CenterHorizontally) {
             Box(Modifier.size(640.dp), Alignment.Center) {
-                SegRing(n, acc, if (rest) Color(0xFF16302B) else Color(0xFF2A1A12))
+                SegRing(minOf(n, 8), acc, if (rest) Color(0xFF16302B) else Color(0xFF2A1A12))
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
                     Icon(PinIcon, null, Modifier.size(72.dp), tint = acc)
                     Text(c.memo.ifBlank { "메모 없음" }, Modifier.width(460.dp), color = if (c.memo.isBlank()) DMute else DTx, fontSize = 84.sp, lineHeight = 94.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.02).em,
@@ -409,7 +413,7 @@ private fun ParkCardScreen(c: ParkCard) {
                 }
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(c.place ?: "위치를 받지 못했어요", color = DTx, fontSize = 36.sp, lineHeight = 47.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(parkPlaceText(c.place, c.hasLocation), color = DTx, fontSize = 36.sp, lineHeight = 47.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("다음 출발 때 지워져요", color = DMute, fontSize = 30.sp, lineHeight = 45.sp)
             }
         }
@@ -424,15 +428,20 @@ private fun ParkCardScreen(c: ParkCard) {
                     Text("$n", Modifier.alignByBaseline(), color = acc, fontSize = 200.sp, lineHeight = 170.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-10).sp, overflow = TextOverflow.Visible, style = TextStyle(lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both)))
                     Text("남은 일", Modifier.alignByBaseline(), color = DTx, fontSize = 48.sp, fontWeight = FontWeight.Bold)
                 }
-                Column(Modifier.padding(top = 52.dp).weight(1f), Arrangement.spacedBy(44.dp)) {
-                    for (t in c.tasks.take(if (n > 4) 4 else n)) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(26.dp)) {
-                        Box(Modifier.size(80.dp).clip(CircleShape).background(DS2), Alignment.Center) { Icon(if (t.kind == "call") CallIcon else FileIcon, null, Modifier.size(36.dp), tint = DTx) }
-                        Column(Modifier.weight(1f)) {
-                            Text(t.title, color = DTx, fontSize = 46.sp, lineHeight = 57.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(t.sub, color = DMute, fontSize = 30.sp, lineHeight = 39.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                BoxWithConstraints(Modifier.padding(top = 52.dp).weight(1f)) {
+                    val shown = c.tasks.take(4); val more = n - shown.size
+                    // 외 N건이 있으면 버튼 위 24dp를 남기도록 행 간격을 줄인다(행 96dp·외 N건 39dp 기준, 44dp 넘게는 안 벌린다)
+                    val gap = if (more > 0 && shown.isNotEmpty()) ((maxHeight - 24.dp - 96.dp * shown.size - 39.dp) / shown.size).coerceIn(8.dp, 44.dp) else 44.dp
+                    Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+                        for (t in shown) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(26.dp)) {
+                            Box(Modifier.size(80.dp).clip(CircleShape).background(DS2), Alignment.Center) { Icon(taskIcon(t), null, Modifier.size(36.dp), tint = DTx) }
+                            Column(Modifier.weight(1f)) {
+                                Text(t.title, color = DTx, fontSize = 46.sp, lineHeight = 57.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(t.sub, color = DMute, fontSize = 30.sp, lineHeight = 39.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
                         }
+                        if (more > 0) Text("외 ${more}건", Modifier.padding(start = 106.dp), color = DMute, fontSize = 30.sp, lineHeight = 39.sp, fontWeight = FontWeight.Bold)
                     }
-                    if (n > 4) Text("외 ${n - 4}건", Modifier.padding(start = 106.dp), color = DMute, fontSize = 30.sp, lineHeight = 39.sp, fontWeight = FontWeight.Bold)
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {

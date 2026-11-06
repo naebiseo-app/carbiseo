@@ -117,9 +117,9 @@ object Server {
         return (if (j?.optBoolean("ok") == true) j.optLong("id", 0L) else null) to (j?.str("code") ?: "")
     }
 
-    /** 주차 기록(하차 카드의 차 쪽 데이터): 위치·메모·안 끝난 할 일(wire id, 제목). 결과 = (성공 여부, 서버가 찾은 주소 — 없으면 null). */
-    fun postParked(lat: Double, lng: Double, memo: String, tasks: List<Pair<Long, String>>): Pair<Boolean, String?> {
-        val j = postJson("/car/parked", JSONObject().put("lat", lat).put("lng", lng).put("memo", memo).put("tasks", org.json.JSONArray(tasks.map { (id, t) -> JSONObject().put("id", id).put("title", t) })))
+    /** 주차 기록(하차 카드의 차 쪽 데이터): 위치·메모·안 끝난 할 일(wire id, 제목, 보조 줄)과 자르기 전 전체 건수. 결과 = (성공 여부, 서버가 찾은 주소 — 없으면 null). */
+    fun postParked(lat: Double, lng: Double, memo: String, tasks: List<ParkTask>, total: Int): Pair<Boolean, String?> {
+        val j = postJson("/car/parked", JSONObject().put("lat", lat).put("lng", lng).put("memo", memo).put("total", total).put("tasks", org.json.JSONArray(tasks.map { JSONObject().put("id", it.id).put("title", it.title).put("sub", it.sub) })))
         return (j?.optBoolean("ok") == true) to j?.str("address")?.ifEmpty { null }
     }
     /** 폰에서 끝낸 할 일 wire id들. 실패 null. */

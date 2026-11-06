@@ -358,12 +358,12 @@ export async function placePhone(key: string | undefined, name: string, lat: str
   } catch { return none("upstream"); }
 }
 
-type ParkTaskRow = { id: number; title: string };
-/** 하차 카드 할 일: {id,title} 객체만, 최대 8개, 제목 80자. 잘못된 항목은 버린다. */
+type ParkTaskRow = { id: number; title: string; sub: string };
+/** 하차 카드 할 일: {id,title,sub?} 객체만, 최대 8개, 제목 80자·보조 줄 60자. 잘못된 항목은 버린다. */
 export function parkTasks(v: unknown): ParkTaskRow[] {
   return (Array.isArray(v) ? v : []).flatMap((t): ParkTaskRow[] => {
-    const id = (t as ParkTaskRow)?.id, title = (t as ParkTaskRow)?.title;
-    return typeof id === "number" && Number.isInteger(id) && typeof title === "string" && title.trim() !== "" ? [{ id, title: title.slice(0, 80) }] : [];
+    const id = (t as ParkTaskRow)?.id, title = (t as ParkTaskRow)?.title, sub = (t as ParkTaskRow)?.sub;
+    return typeof id === "number" && Number.isInteger(id) && typeof title === "string" && title.trim() !== "" ? [{ id, title: title.slice(0, 80), sub: typeof sub === "string" ? sub.slice(0, 60) : "" }] : [];
   }).slice(0, 8);
 }
 
@@ -672,9 +672,10 @@ export default {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return json({ ok: false }, 400);
       const memo = typeof b.memo === "string" ? b.memo.slice(0, 40) : "";
       const tasks = parkTasks(b.tasks);
+      const total = typeof b.total === "number" && Number.isInteger(b.total) ? Math.min(Math.max(b.total, tasks.length), 999) : tasks.length; // 8건으로 자르기 전 전체 건수
       const address = await coordAddress(env.KAKAO_REST_KEY, lat, lng);
       const done = ((await kvGet(env.DB, "parked")) as { done?: number[] } | null)?.done ?? []; // 같은 주차 중 재전송에도 폰에서 끝낸 일을 잃지 않는다
-      await kvPut(env.DB, "parked", { lat, lng, address, memo, tasks, at: now(), done });
+      await kvPut(env.DB, "parked", { lat, lng, address, memo, tasks, total, at: now(), done });
       return json({ ok: true, address: address || null });
     }
 
@@ -687,16 +688,17 @@ export default {
     // 폰이 하차 정보를 가져간다(/phone/replies와 같은 인증). 번호는 inbox에서 그때그때 찾고 kv에는 남기지 않는다
     if (m === "GET" && pathname === "/phone/parked") {
       if (!authed) return json({ error: "unauthorized" }, 401);
-      const p = (await kvGet(env.DB, "parked")) as { tasks?: unknown; done?: number[] } | null;
+      const p = (await kvGet(env.DB, "parked")) as { tasks?: unknown; total?: number; done?: number[] } | null;
       if (!p) return json({ parked: null });
-      const tasks = [];
-      for (const t of parkTasks(p.tasks)) {
+      const tasks = [], all = parkTasks(p.tasks);
+      for (const t of all) {
         if (p.done?.includes(t.id)) continue;
         const r = t.id > 0 ? await env.DB.prepare("SELECT from_number FROM inbox WHERE id=?").bind(t.id).first<{ from_number: string | null }>() : null;
         tasks.push({ ...t, number: r?.from_number || null });
       }
       const { done: _, ...rest } = p;
-      return json({ parked: { ...rest, tasks } });
+      const total = Math.max(tasks.length, (typeof p.total === "number" ? p.total : all.length) - (all.length - tasks.length)); // 폰에서 끝낸 건수만큼 뺀다
+      return json({ parked: { ...rest, tasks, total } });
     }
 
     // 폰에서 할 일을 끝냄: kv done에 추가하고, 서버 행이면 차 [완료] 버튼과 같은 처리(status=done)
