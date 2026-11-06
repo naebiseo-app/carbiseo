@@ -167,17 +167,31 @@ async function reserveResult(env: Env, id: string) {
 }
 
 // 손님 통화 카드는 끊은 뒤 받아쓰기로 만든다. 통화 중 도구 호출은 답을 7초 늦추고 말을 두 번 하게 했다(11-06 실통화), summary.completed는 안 온다(12통 전부 not_requested)
+// 요약이 저장된 통화(수신·예약 전화)는 녹음을 지운다. keep_recordings(촬영 기간)가 켜져 있으면 남긴다. 실패해도 요약은 이미 저장됨
 async function transcriptCard(env: Env, raw: string) {
+  const id = new URLSearchParams(raw).get("CallId") ?? "";
+  if (!(await transcriptWork(env, raw)) || (await kvGet(env.DB, "keep_recordings"))) return;
+  try {
+    const r = await fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/recordings/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}` } });
+    console.log("recording delete", id, r.status);
+  } catch (e) { console.log("recording delete error", String(e)); }
+}
+
+// 요약을 저장했으면 true(이미 처리된 재전송·무관한 이벤트는 false)
+async function transcriptWork(env: Env, raw: string): Promise<boolean> {
   const f = new URLSearchParams(raw), id = f.get("CallId") ?? "", from = f.get("From") ?? "";
-  if (f.get("Event") !== "transcript.completed" || !env.CLAWOPS_API_KEY) return;
-  if (f.get("Direction") === "outbound" && (await env.DB.prepare("SELECT 1 FROM inbox WHERE kind='reserve' AND call_id=? AND status='calling'").bind(id).first())) return reserveResult(env, id);
-  if (f.get("Direction") !== "inbound") return;
+  if (f.get("Event") !== "transcript.completed" || !env.CLAWOPS_API_KEY) return false;
+  if (f.get("Direction") === "outbound" && (await env.DB.prepare("SELECT 1 FROM inbox WHERE kind='reserve' AND call_id=? AND status='calling'").bind(id).first())) {
+    await reserveResult(env, id);
+    return true;
+  }
+  if (f.get("Direction") !== "inbound") return false;
   const owner = sameNumber(from, env.OWNER_NUMBER) && !(await kvGet(env.DB, "owner_as_guest"));
   const had = owner ? "SELECT 1 FROM inbox WHERE kind IN ('task','sent') AND call_id=?" : "SELECT 1 FROM inbox WHERE kind='call' AND call_id=? AND status<>'ringing'";
-  if (await env.DB.prepare(had).bind(id).first()) return;
+  if (await env.DB.prepare(had).bind(id).first()) return false;
   const { said, dialog } = await loadDialog(env, id);
   if (owner) { // 주인 통화 → 되읽고 확인한 문자는 바로 발송, 시킨 일마다 할 일 카드. 요약 실패면 주인 말 그대로 1장(자동 발송 없음)
-    if (!said) return;
+    if (!said) return false;
     const memo = await summarizeCall(env.ANTHROPIC_API_KEY, TASK_SYSTEM, dialog);
     const cc = await kvGet(env.DB, "car_context");
     const sends = Array.isArray(memo?.sends) ? memo.sends : [];
@@ -193,13 +207,14 @@ async function transcriptCard(env: Env, raw: string) {
     for (const t of tasks)
       await env.DB.prepare("INSERT INTO inbox(kind,status,room,call_id,from_label,summary,created_at) VALUES('task','open',?,?,'주인',?,?)")
         .bind(parseRoom(cc?.room) ?? null, id, guardText("summary", String(t)), now()).run();
-    return;
+    return true;
   }
   const memo = said ? await summarizeCall(env.ANTHROPIC_API_KEY, SUMMARY_SYSTEM, dialog) : null;
   const summary = memo?.summary || (said ? `상대 말: ${said}` : "말씀 없이 끊긴 전화예요");
   const cols = fromCols(from), who = String(memo?.caller ?? "").replace(/["'`{}]/g, "").slice(0, 40);
   await saveCallCard(env.DB, { call_id: id, ...cols, from_label: who || cols.from_label, summary, urgent: isUrgent(`${summary} ${said}`) ? 1 : 0 },
     { via: "transcript", caller: who, callback_by: String(memo?.callback_by ?? "").slice(0, 50) }, from);
+  return true;
 }
 
 // 최소 MCP streamable HTTP(JSON-RPC 2.0, 단일 JSON 응답). 배치·SSE·세션은 안 씀
@@ -744,6 +759,12 @@ export default {
         const on = String((await req.formData()).get("on")) === "1";
         await env.DB.prepare("INSERT OR REPLACE INTO kv(key,value,updated_at) VALUES('owner_as_guest',?,?)").bind(JSON.stringify(on), now()).run();
         return html(on ? "주인 번호를 손님으로 취급합니다(켜짐)" : "주인 번호는 주인 모드입니다(꺼짐)");
+      }
+      // 촬영 기간: 요약이 끝난 통화 녹음을 지우지 않고 남긴다(기본 꺼짐 = 자동 삭제)
+      if (m === "POST" && pathname === "/admin/keep-recordings") {
+        const on = String((await req.formData()).get("on")) === "1";
+        await env.DB.prepare("INSERT OR REPLACE INTO kv(key,value,updated_at) VALUES('keep_recordings',?,?)").bind(JSON.stringify(on), now()).run();
+        return html(on ? "통화 녹음을 남깁니다(켜짐)" : "요약이 끝난 통화 녹음은 지웁니다(꺼짐)");
       }
       // 녹화용 시연 시각: at=2026-11-02T10:30(KST) → 손님 대본의 평일·저녁·주말 판단만 그 시각으로. at=none 해제
       if (m === "POST" && pathname === "/admin/demo-clock") {

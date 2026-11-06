@@ -249,3 +249,39 @@ test("차 폴링(/car/inbox)이 reserve 행을 그대로 내려 준다", async (
     assert.deepEqual([r.status, r.from_label, r.summary, JSON.parse(r.meta)], ["calling", "가명 식당", "18:30 4명 예약 전화 중", { party: 4, arrive: "18:30" }]);
   } finally { f.restore(); }
 });
+
+const dels = (st: ReturnType<typeof fake>) => st.calls.filter((c) => c.method === "DELETE");
+
+test("요약 뒤 녹음 삭제: 예약 결과·수신 카드 모두 DELETE, keep_recordings면 안 지움, 삭제 실패해도 요약 저장", async () => {
+  const f = fake({ memo: { status: "ok", summary: "예약이 확정됐어요.", parking: "가능" } });
+  try {
+    const env = mkEnv();
+    await place(env);
+    await hook(env, CID, "outbound");
+    assert.equal(dels(f).length, 1);
+    assert.equal(dels(f)[0].url, `https://api.claw-ops.com/v1/accounts/b/recordings/${CID}`);
+    await hook(env, CID, "outbound"); // 재전송은 다시 지우지 않는다
+    assert.equal(dels(f).length, 1);
+    await hook(env, "CA1111111111111111111111111111111111", "inbound", "01055556789");
+    assert.equal(dels(f).length, 2);
+    assert.match(dels(f)[1].url, /\/recordings\/CA1111111111111111111111111111111111$/);
+  } finally { f.restore(); }
+  const g = fake({ memo: { status: "ok", summary: "예약이 확정됐어요.", parking: "가능" } });
+  try {
+    const env = mkEnv();
+    env.DB.db.prepare("INSERT INTO kv(key,value,updated_at) VALUES('keep_recordings','true',0)").run();
+    await place(env);
+    await hook(env, CID, "outbound");
+    assert.equal(rows(env)[0].status, "ok");
+    assert.equal(dels(g).length, 0);
+  } finally { g.restore(); }
+  const h = fake({ memo: { status: "ok", summary: "예약이 확정됐어요.", parking: "가능" } });
+  const inner = globalThis.fetch;
+  globalThis.fetch = (async (u: string, init: any = {}) => { if (init.method === "DELETE") throw new Error("boom"); return inner(u, init); }) as unknown as typeof fetch;
+  try {
+    const env = mkEnv();
+    await place(env);
+    await hook(env, CID, "outbound");
+    assert.deepEqual([rows(env)[0].status, rows(env)[0].summary], ["ok", "예약이 확정됐어요."]);
+  } finally { h.restore(); }
+});

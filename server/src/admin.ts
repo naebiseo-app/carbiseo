@@ -169,6 +169,7 @@ form{background:#FFFDF8;padding:16px;border-radius:14px;margin:16px 0}.m{font-we
 <form><h2>데모 메일함</h2><p>차에서 보낸 메일입니다(실제로는 발송되지 않고 여기에만 저장).</p>${mailsHtml(mails)}</form>
 <form method="post" action="/admin/reset-schedule"><h2>데모 일정 초기화</h2><p>오늘 일정 3건(지금부터 1·3·5시간 뒤)으로 덮어씁니다.</p><button>초기화</button></form>
 <form method="post" action="/admin/owner-as-guest"><h2>녹화용: 주인 번호를 손님으로</h2><p>켜면 주인 번호로 건 전화도 일반 발신자처럼 AI가 응대합니다. 녹화 뒤 꼭 끄세요.</p><button name="on" value="1">켜기</button><button name="on" value="0">끄기</button></form>
+<form method="post" action="/admin/keep-recordings"><h2>촬영 기간: 통화 녹음 남기기</h2><p>기본은 요약이 끝나면 녹음을 자동 삭제합니다. 켜면 지우지 않습니다. 촬영 뒤 끄세요.</p><button name="on" value="1">켜기</button><button name="on" value="0">끄기</button></form>
 <form method="post" action="/admin/reset-inbox"><h2>부재중 카드 비우기</h2><p>녹화 전에 inbox를 모두 지웁니다.</p><button>비우기</button></form>
 <form method="post" action="/admin/replay"><h2>재현 통화 시작</h2><p>거래처 통화를 재현합니다. 차가 상대 대사를 읽고(운전자 대사는 자막만), 정차 중엔 화면 아래 도움 카드, 운전 중엔 귓속말 한 줄. 약 1분, 끝나면 통화 정리 카드가 남습니다.</p><button>재현 통화 시작</button></form>`;
 }

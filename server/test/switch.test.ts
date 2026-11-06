@@ -74,3 +74,13 @@ test("/admin/demo-clock: 시연 시각만큼 offset 저장, none이면 0", async
   await admin(env, "/admin/demo-clock", { at: "none" });
   assert.equal(env.DB.kv.demo_offset, "0");
 });
+
+test("/admin/keep-recordings: on=1이면 true, 0이면 false 저장, 비밀번호 틀리면 401", async () => {
+  const env = mkEnv();
+  assert.equal((await admin(env, "/admin/keep-recordings", { on: "1" }, "no")).status, 401);
+  assert.equal(env.DB.kv.keep_recordings, undefined);
+  assert.equal((await admin(env, "/admin/keep-recordings", { on: "1" })).status, 200);
+  assert.equal(env.DB.kv.keep_recordings, "true");
+  await admin(env, "/admin/keep-recordings", { on: "0" });
+  assert.equal(env.DB.kv.keep_recordings, "false");
+});
