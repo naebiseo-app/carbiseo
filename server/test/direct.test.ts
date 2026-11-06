@@ -100,7 +100,7 @@ test("카드: transcript.completed·summary.completed 모두 목록 번호면 ur
 test("ment_text: 저장·따옴표 괄호 제거·ment 대본 반영·빈 값이면 기본 문구·잘못된 값 400", async () => {
   const env = mkEnv();
   await settings(env, { mode: "ment" });
-  assert.ok((await ring(env, OTHER)).Instruction.includes("'지금 운전 중이라 전화를 받을 수 없습니다. 정차하시면 연락드리겠습니다.'라고만"));
+  assert.ok((await ring(env, OTHER)).Instruction.includes("'지금 운전 중이라 전화를 받을 수 없습니다. 정차하시면 연락드리겠습니다. 이 통화는 녹음됩니다.'라고만"));
   const r = (await (await settings(env, { ment_text: " 지금 회의 중이에요. '곧' (연락) 드릴게요! " })).json()) as any;
   assert.equal(r.settings.ment_text, "지금 회의 중이에요. 곧 연락 드릴게요!");
   const ins = (await ring(env, OTHER)).Instruction;
