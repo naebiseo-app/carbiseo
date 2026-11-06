@@ -1,4 +1,4 @@
-import { CALL_ID, carChip, callerNumber, cleanMent, cleanName, field, freshCtx, hhmm, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, isDirect, sameNumber, type Mode, type Recent } from "./script.ts";
+import { CALL_ID, carChip, callerNumber, cleanMent, cleanName, field, freshCtx, hhmm, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, isDirect, reserveScript, sameNumber, type Mode, type Recent } from "./script.ts";
 import { adminPage, basicOk, demoSchedule, encodeReplay, parseFakeCall, replayScript, type MailRow, type ReplyRow } from "./admin.ts";
 import { FALLBACK, guardText, isBlocked } from "./guard.ts";
 import { parseNotify, parseReply, TAKE_REPLIES_SQL, type Notif } from "./notif.ts";
@@ -17,6 +17,7 @@ interface Env {
   SMS_RELAY_SECRET?: string;
   ANTHROPIC_API_KEY?: string; // 말동무 대화(/car/chat). 없으면 no_key 고정 문구
   KAKAO_REST_KEY?: string; // 카카오 로컬 키워드 검색(가게 번호). 없으면 place-phone은 no_key
+  O4_LIVE?: string; // "1"일 때만 예약 전화가 실제 가게 번호로 간다. 아니면 항상 OWNER_NUMBER
 }
 
 const json = (o: unknown, status = 200) =>
@@ -95,10 +96,12 @@ async function saveCallCard(db: D1Database, c: Card, extra: object = {}, from = 
 
 const SUMMARY_SYSTEM = "전화 받아쓰기를 운전자가 볼 메모로 정리합니다. 받아쓰기에 있는 내용만 쓰고, 상대가 말하지 않은 것은 없다고도 쓰지 않습니다. 연락 시각을 말했으면 summary에 반드시 넣습니다. '아, 네' 같은 맞장구는 이름이 아니고, 비서가 되읽어 상대가 고친 이름이 있으면 고친 이름을 씁니다. JSON 한 줄만 답합니다: {\"caller\":\"상대 이름·소속, 없으면 빈 문자열\",\"summary\":\"존댓말 한두 문장. 예: 김민수 님이 미팅 변경 건으로 전화하셨고 3시까지 연락을 부탁하셨어요. 자료도 보내 달라고 하셨어요.\",\"callback_by\":\"상대가 말한 연락 시각 표현 그대로(예: 3시까지), 없으면 빈 문자열\"}";
 
+const RESERVE_SYSTEM = "AI 비서가 식당·가게에 건 예약 문의 전화 받아쓰기를 운전자가 볼 결과로 정리합니다. 받아쓰기에 있는 내용만 쓰고 없는 내용은 지어내지 않습니다. status는 가게가 예약을 확정했다고 분명히 말했을 때만 ok이고, 안 된다·모르겠다·나중에·직접 연락 같은 말이거나 확정이 불분명하면 need_manual입니다. parking은 가게가 주차 가능이라고 하면 가능, 안 된다고 하면 불가, 말이 없거나 불분명하면 모름입니다. summary는 존댓말 한 문장이고 전화번호는 쓰지 않습니다. JSON 한 줄만 답합니다: {\"status\":\"ok|need_manual\",\"summary\":\"예: 18:30 4명 예약이 확정됐어요. 주차는 가능하대요.\",\"parking\":\"가능|불가|모름\"}";
+
 const TASK_SYSTEM = `주인이 비서에게 건 전화 받아쓰기에서 주인이 시킨 일만 뽑습니다. 받아쓰기에 있는 내용만 씁니다. JSON 한 줄만 답합니다: {"tasks":["일 한 건","일 한 건"],"sends":[{"to":"이지은","body":"3시에 도착합니다."}]}. sends에는 주인이 문자를 보내라고 했고, 비서가 받는 사람과 내용을 되읽었고, 그 뒤 주인이 취소하거나 고치지 않은 문자만 넣습니다(고쳤으면 고친 내용으로). sends에 넣은 문자는 tasks에 넣지 않습니다. 비서가 되읽기 전에 끊겼으면 sends에 넣지 않고 tasks에 '이지은에게 문자 / 내용: 3시에 도착합니다.'처럼 넣습니다. 메일과 그 밖의 일은 tasks에 넣습니다. 메일은 '메일: 받는사람 / 제목 / 내용', 그 밖의 일은 '내일 오전 박도윤 님께 견적서 보내기'처럼 짧게 씁니다. 일정이나 전화 내용을 묻기만 한 통화는 {"tasks":[]}로 답합니다.`;
 
 // 받아쓰기 → 메모. 실패는 null(호출한 쪽이 상대 말 그대로 쓴다)
-async function summarizeCall(key: string | undefined, system: string, dialog: string): Promise<{ caller?: string; summary?: string; callback_by?: string; tasks?: string[]; sends?: { to?: string; body?: string }[] } | null> {
+async function summarizeCall(key: string | undefined, system: string, dialog: string): Promise<{ caller?: string; summary?: string; callback_by?: string; tasks?: string[]; sends?: { to?: string; body?: string }[]; status?: string; parking?: string } | null> {
   if (!key) return null;
   try {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -140,18 +143,39 @@ async function sendText(env: Env, to: string, body: string, label: string, callI
   return r;
 }
 
+// 받아쓰기 조회 → 말한 것(상대 쪽)·번호 가린 대화. 첫 화자 = AI 소개. aiSays가 있으면 그 글이 들어 있는 첫 화자를 AI로(걸어 보낸 전화는 가게가 먼저 말할 수 있다)
+async function loadDialog(env: Env, id: string, aiSays?: string) {
+  const r = await fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls/${id}/transcript`, { headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}` } });
+  const segs = ((await r.json()) as { segments?: { speaker: string; text: string }[] }).segments ?? [];
+  const ai = (aiSays && segs.find((s) => s.text.includes(aiSays))?.speaker) || segs[0]?.speaker;
+  const said = segs.filter((s) => s.speaker !== ai).map((s) => s.text).join(" ");
+  const dialog = segs.map((s) => `${s.speaker === ai ? "비서" : "상대"}: ${s.text}`).join("\n").replace(/\d[\d -]{7,}\d/g, "[번호]"); // 전화번호는 외부 AI로 보내지 않는다
+  return { said, dialog };
+}
+
+// 예약 전화 결과: 받아쓰기 → RESERVE_SYSTEM 요약 → 같은 행 갱신. 'calling'일 때만 갱신하므로 웹훅이 두 번 와도 한 번만 바뀐다. 실패·대화 없음은 직접 확인
+async function reserveResult(env: Env, id: string) {
+  let memo: Awaited<ReturnType<typeof summarizeCall>> = null;
+  try {
+    const { said, dialog } = await loadDialog(env, id, "AI 비서");
+    memo = said ? await summarizeCall(env.ANTHROPIC_API_KEY, RESERVE_SYSTEM, dialog) : null;
+  } catch (e) { console.log("reserve transcript error", String(e)); }
+  const parking = ["가능", "불가", "모름"].includes(memo?.parking ?? "") ? memo!.parking! : "모름";
+  const summary = memo?.summary ? guardText("summary", String(memo.summary)) : "직접 확인이 필요해요";
+  await env.DB.prepare("UPDATE inbox SET status=?, summary=?, meta=json_set(COALESCE(meta,'{}'),'$.parking',?) WHERE kind='reserve' AND call_id=? AND status='calling'")
+    .bind(memo?.status === "ok" ? "ok" : "need_manual", summary, parking, id).run();
+}
+
 // 손님 통화 카드는 끊은 뒤 받아쓰기로 만든다. 통화 중 도구 호출은 답을 7초 늦추고 말을 두 번 하게 했다(11-06 실통화), summary.completed는 안 온다(12통 전부 not_requested)
 async function transcriptCard(env: Env, raw: string) {
   const f = new URLSearchParams(raw), id = f.get("CallId") ?? "", from = f.get("From") ?? "";
-  if (f.get("Event") !== "transcript.completed" || f.get("Direction") !== "inbound" || !env.CLAWOPS_API_KEY) return;
+  if (f.get("Event") !== "transcript.completed" || !env.CLAWOPS_API_KEY) return;
+  if (f.get("Direction") === "outbound" && (await env.DB.prepare("SELECT 1 FROM inbox WHERE kind='reserve' AND call_id=? AND status='calling'").bind(id).first())) return reserveResult(env, id);
+  if (f.get("Direction") !== "inbound") return;
   const owner = sameNumber(from, env.OWNER_NUMBER) && !(await kvGet(env.DB, "owner_as_guest"));
   const had = owner ? "SELECT 1 FROM inbox WHERE kind IN ('task','sent') AND call_id=?" : "SELECT 1 FROM inbox WHERE kind='call' AND call_id=? AND status<>'ringing'";
   if (await env.DB.prepare(had).bind(id).first()) return;
-  const r = await fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls/${id}/transcript`, { headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}` } });
-  const segs = ((await r.json()) as { segments?: { speaker: string; text: string }[] }).segments ?? [];
-  const ai = segs[0]?.speaker; // 첫 화자 = AI 소개
-  const said = segs.filter((s) => s.speaker !== ai).map((s) => s.text).join(" ");
-  const dialog = segs.map((s) => `${s.speaker === ai ? "비서" : "상대"}: ${s.text}`).join("\n").replace(/\d[\d -]{7,}\d/g, "[번호]"); // 전화번호는 외부 AI로 보내지 않는다
+  const { said, dialog } = await loadDialog(env, id);
   if (owner) { // 주인 통화 → 되읽고 확인한 문자는 바로 발송, 시킨 일마다 할 일 카드. 요약 실패면 주인 말 그대로 1장(자동 발송 없음)
     if (!said) return;
     const memo = await summarizeCall(env.ANTHROPIC_API_KEY, TASK_SYSTEM, dialog);
@@ -244,13 +268,22 @@ export async function relaySend(env: Pick<Env, "SMS_RELAY_URL" | "SMS_RELAY_SECR
 
 /** 받은 전화의 AI 통화가 끝났으면 그 CallId. */
 // 상태 통지 본문(폼 또는 JSON)에서 '끝난 통화'의 CallId. 키 대소문자 무시.
-export function statusDone(raw: string): string | null {
+const statusField = (raw: string, ...ks: string[]) => {
   let o: Record<string, unknown> = {};
   try { o = JSON.parse(raw); } catch { o = Object.fromEntries(new URLSearchParams(raw)); }
-  const get = (...ks: string[]) => { const hit = Object.entries(o ?? {}).find(([k]) => ks.includes(k.toLowerCase())); return hit ? String(hit[1]) : ""; };
-  const st = get("callstatus", "status", "event", "statuscallbackevent").toLowerCase();
-  const id = get("callid", "callsid", "call_id");
+  const hit = Object.entries(o ?? {}).find(([k]) => ks.includes(k.toLowerCase()));
+  return hit ? String(hit[1]) : "";
+};
+export function statusDone(raw: string): string | null {
+  const st = statusField(raw, "callstatus", "status", "event", "statuscallbackevent").toLowerCase();
+  const id = statusField(raw, "callid", "callsid", "call_id");
   return st.includes("completed") && /^CA[0-9a-f]{20,40}$/i.test(id) ? id : null;
+}
+
+// 걸어 보낸 전화가 연결 안 된 채 끝났을 때(무응답·통화중·실패·취소)의 CallId. ponytail: 실제 필드·값 이름 미확인이라 CallStatus·Status 두 키에서 Twilio식 값으로 찾는다. 실통화 웹훅 본문을 보고 맞추기
+export function statusFailed(raw: string): string | null {
+  const st = statusField(raw, "callstatus", "status").toLowerCase();
+  return /busy|no.?answer|fail|cancel/.test(st) ? statusField(raw, "callid", "callsid", "call_id") || null : null;
 }
 
 export function transcriptTarget(raw: string) {
@@ -474,6 +507,8 @@ export default {
       const raw = await req.text();
       const id = statusDone(raw);
       await saveInbox(env.DB, "event", "status", null, raw, { ct: req.headers.get("content-type") });
+      const failed = statusFailed(raw);
+      if (failed) await env.DB.prepare("UPDATE inbox SET status='need_manual', summary='전화를 받지 않았어요' WHERE kind='reserve' AND call_id=? AND status='calling'").bind(failed).run();
       if (id && env.CLAWOPS_API_KEY) {
         const r = await fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls/${id}/transcript`,
           { method: "POST", headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}` } });
@@ -525,6 +560,39 @@ export default {
       if ("error" in p) return json({ error: p.error }, 400);
       const r = await sendText(env, p.to, p.body, p.label, null);
       return json(r, r.ok ? 200 : 502);
+    }
+
+    // AI 예약 전화: 가게에 '몇 시 몇 명 예약·주차' 전달만. 결과는 통화 뒤 받아쓰기로 같은 행에(reserveResult)
+    if (m === "POST" && pathname === "/car/reserve") {
+      if (!authed) return json({ error: "unauthorized" }, 401);
+      const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+      const place = typeof b.place === "string" ? b.place.trim() : "";
+      const arrive = typeof b.arrive === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(b.arrive) ? b.arrive : "";
+      const party = b.party;
+      const geo = (v: unknown) => (v === undefined ? "" : typeof v === "number" || typeof v === "string" ? String(v) : null);
+      const lat = geo(b.lat), lng = geo(b.lng);
+      if (place.length < 1 || place.length > 40) return json({ error: "bad place" }, 400);
+      if (!arrive) return json({ error: "bad arrive" }, 400);
+      if (typeof party !== "number" || !Number.isInteger(party) || party < 1 || party > 20) return json({ error: "bad party" }, 400);
+      if (lat === null || lng === null || (lat !== "" && !Number.isFinite(Number(lat))) || (lng !== "" && !Number.isFinite(Number(lng)))) return json({ error: "bad lat/lng" }, 400);
+      // ponytail: 시연·심사 중 실제 가게로 전화가 가면 안 된다. O4_LIVE=1일 때만 실제 가게 번호, 그 외엔 항상 주인 번호로 건다
+      const to = (env.O4_LIVE === "1" ? (await placePhone(env.KAKAO_REST_KEY, place, lat, lng)).phone : env.OWNER_NUMBER)?.replace(/[\s-]/g, "");
+      if (!to) return json({ ok: false, code: "no_number" });
+      const owner = (await kvGet(env.DB, "settings"))?.owner_label;
+      let callId = "";
+      try {
+        const r = await fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ From: env.CLAWOPS_NUMBER, To: to, AgentId: "cmvszaa6y001i01s6lqi2dm3j", CallContext: { Instruction: reserveScript({ owner, place, arrive, party }), Variables: {} }, StatusCallback: `${new URL(req.url).origin}/clawops/status/${env.CALL_CONTEXT_SECRET}`, Timeout: 30 }),
+        });
+        const j = (await r.json().catch(() => ({}))) as { callId?: string; CallId?: string };
+        if (r.ok) callId = String(j.callId ?? j.CallId ?? "");
+      } catch (e) { console.log("reserve call error", String(e)); }
+      if (!callId) return json({ ok: false, code: "call_failed" });
+      const r = await env.DB.prepare("INSERT INTO inbox(kind,status,call_id,from_label,summary,created_at,meta) VALUES('reserve','calling',?,?,?,?,?)")
+        .bind(callId, place, `${arrive} ${party}명 예약 전화 중`, now(), JSON.stringify({ party, arrive })).run();
+      return json({ ok: true, id: r.meta.last_row_id });
     }
 
     // 데모 메일함(설계 O2): 실제 메일은 보내지 않고 inbox kind='sent'(channel=mail)에 저장
