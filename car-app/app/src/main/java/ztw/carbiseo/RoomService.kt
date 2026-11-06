@@ -316,12 +316,14 @@ class RoomService : Service() {
         }
     }
 
-    /** 예약 전화 결과: 기다리는 행이 calling이 아닌 상태로 처음 보이면 한 번만 읽고 기다림에서 뺀다. 10분 넘게 안 끝나면 기다림을 포기(사무실 카드 목록엔 남는다). */
+    /** 예약 전화 결과: 기다리는 행이 calling이 아닌 상태로 처음 보이면 한 번만 읽고 기다림에서 뺀다. 결과는 할 일 카드로 남기고, 10분 넘게 안 끝나면 확인 필요 카드를 남긴다. */
     private fun onReserveRows(rows: List<InboxItem>) {
         val now = SystemClock.elapsedRealtime()
-        reserveWait.values.removeAll { now - it.second > RESERVE_WAIT_MS }
+        reserveWait.filterValues { now - it.second > RESERVE_WAIT_MS }.forEach { (id, w) ->
+            reserveWait.remove(id); addLocalTask(reserveResultTask(w.first, "결과를 받지 못했어요. 직접 확인해 주세요"))
+        }
         for (i in rows) if (i.kind == "reserve") reserveWait[i.id]?.let { (place, _) ->
-            reserveResultSpeech(place, i)?.let { reserveWait.remove(i.id); say(it) }
+            reserveResultSpeech(place, i)?.let { reserveWait.remove(i.id); addLocalTask(reserveResultTask(place, i.summary.ifBlank { it })); say(it) }
         }
     }
 

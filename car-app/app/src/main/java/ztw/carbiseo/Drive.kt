@@ -55,7 +55,7 @@ enum class CarIntent { RECENT_CALLS, URGENT, NEXT_EVENT, RESERVE, UNKNOWN }
 private val RECENT_CALL_WORDS = Regex("아까전화|전화뭐|누구전화")
 fun carIntent(said: String?): CarIntent {
     val n = said.orEmpty().replace(Regex("""\s"""), "")
-    return when { urgentNeed(said) -> CarIntent.URGENT; RECENT_CALL_WORDS.containsMatchIn(n) -> CarIntent.RECENT_CALLS; "예약" in n -> CarIntent.RESERVE; "일정" in n -> CarIntent.NEXT_EVENT; else -> CarIntent.UNKNOWN }
+    return when { urgentNeed(said) -> CarIntent.URGENT; RECENT_CALL_WORDS.containsMatchIn(n) -> CarIntent.RECENT_CALLS; "일정" in n -> CarIntent.NEXT_EVENT; "예약" in n -> CarIntent.RESERVE; else -> CarIntent.UNKNOWN }
 }
 /** Q1 조용한 비서: 한 질문에서 못 알아들었을 때 다시 묻는 건 1번뿐. again()이 true면 한 번 더 묻고, false면 화면 2택으로 넘긴다. 새 질문마다 reset. */
 class Reask {
@@ -261,6 +261,8 @@ fun partyOf(said: String?): Int? {
 }
 
 /** O4: 전화를 못 걸었거나 인원을 못 읽었을 때 남기는 예약 문자 초안 = 할 일 카드 본문(taskDraft 형식, 번호는 정차 후 입력). */
+/** 예약 전화 결과 카드. 할 일로 남겨 정차 때 다시 볼 수 있게 한다. */
+fun reserveResultTask(name: String, result: String) = "$name 예약 / 내용: $result"
 fun reserveTask(name: String, hhmm: String) = "$name 예약 / 내용: 안녕하세요, ${hhmm}쯤 도착 예정인데 자리(주차) 가능할까요?"
 /** 유선 가게 전화(카드의 `가게전화: 번호`). 없으면 null. */
 fun shopPhone(text: String): String? = Regex("""가게전화\s*[:：]\s*([0-9-]+)""").find(text)?.groupValues?.get(1)

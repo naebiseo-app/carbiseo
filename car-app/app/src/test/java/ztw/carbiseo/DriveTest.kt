@@ -389,6 +389,8 @@ class DriveTest {
         assertEquals("판교 한정식에 04:20쯤 도착해요. 몇 분으로 예약할까요?", reserveSpeech("판교 한정식", "04:20"))
         assertEquals("판교 한정식에 전화해 볼게요", reserveCallSpeech("판교 한정식"))
         assertEquals("목적지를 먼저 잡아 주세요", RESERVE_NO_DEST_SPEECH)
+        assertEquals(CarIntent.NEXT_EVENT, carIntent("예약 일정 알려줘"))
+        assertEquals("식당 예약 / 내용: 7시 2명 확정", reserveResultTask("식당", "7시 2명 확정"))
         assertEquals("전화를 걸지 못했어요. 할 일에 남겨 뒀어요", RESERVE_FAIL_SPEECH)
         fun row(status: String, summary: String = "", parking: String = "") = InboxItem(7, "판교 한정식", summary, false, 0L, "", kind = "reserve", status = status, parking = parking)
         assertEquals(null, reserveResultSpeech("판교 한정식", row("calling"))) // 통화 중이면 아직 말하지 않는다
