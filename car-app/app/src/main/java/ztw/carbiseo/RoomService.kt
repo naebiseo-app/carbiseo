@@ -90,7 +90,7 @@ class RoomService : Service() {
     private val notifFresh = mutableSetOf<Long>()
     private val notifSaid = mutableSetOf<Long>()
     // 음성으로 묻고 대답을 기다리는 질문(알림 묻기는 talk가 따로). 대답은 heard()가 받는다.
-    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, INTENT, NEAR_FIND, NEAR_GO }
+    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, INTENT, NEAR_FIND, NEAR_GO, PARK_CALL }
     private class PendingSend(val label: String, val number: String, val body: String, val task: String) // 보낼 문자(label·number·body)와 못 보냈을 때 남길 할 일 본문
     private var pending = Ask.NONE
     private val chatHistory = mutableListOf<Pair<String, String>>() // 말동무 대화 맥락(메모리만, 저장·로그 없음). 메인 스레드에서만
@@ -212,11 +212,12 @@ class RoomService : Service() {
         if (urgentNeed(said) && machine.room.let { it != null && it != Room.PARK }) { talk.cancel(); askStep = talk.step; return addRestStop(true, true) }
         when (p) {
             // Q1 조용한 비서: 못 알아들으면 한 번만 다시 묻고, 그다음은 화면 2택(unsure). 번호를 알면 초안을 읽어 주고 "이대로 보낼까요?"(SEND). 모르면 지금처럼 카드만.
-            Ask.LATE, Ask.CALLBACK, Ask.SEND, Ask.REST, Ask.NEAR_FIND, Ask.NEAR_GO -> when (voiceCmd(said)) {
+            Ask.LATE, Ask.CALLBACK, Ask.SEND, Ask.REST, Ask.NEAR_FIND, Ask.NEAR_GO, Ask.PARK_CALL -> when (voiceCmd(said)) {
                 Cmd.Yes -> answerYn(p, true)
                 Cmd.No, Cmd.Later -> answerYn(p, false) // '나중에'는 이 질문들엔 '아니'
                 else -> when (p) {
                     Ask.REST, Ask.NEAR_GO -> unsure(p, "들르기" to { answerYn(p, true) }, "괜찮아요" to { answerYn(p, false) }, { answerYn(p, false) })
+                    Ask.PARK_CALL -> unsure(p, "물어보기" to { answerYn(p, true) }, "괜찮아요" to { answerYn(p, false) }, { answerYn(p, false) })
                     Ask.NEAR_FIND -> unsure(p, "찾기" to { answerYn(p, true) }, "괜찮아요" to { answerYn(p, false) }, { answerYn(p, false) })
                     else -> unsure(p, "보내기" to { answerYn(p, true) }, "그만두기" to { answerYn(p, false) }, { answerYn(p, false) })
                 }
@@ -257,6 +258,7 @@ class RoomService : Service() {
             CarIntent.NEXT_EVENT -> say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis())))
             CarIntent.RESERVE -> reserveIntent(said)
             CarIntent.PARK_MEMO -> parkMemo(said)?.let { parkMemoText = it; machine.signals.location?.let { l -> postParked(l); say(PARK_MEMO_SPEECH) } ?: say(NEAR_NO_LOC_SPEECH) }
+            CarIntent.PARKING -> parkingIntent()
             CarIntent.NEARBY -> nearWish(said)?.let { nearKind = it; askVoice(nearAskSpeech(it), Ask.NEAR_FIND) }
             CarIntent.UNKNOWN -> {}
         }
@@ -304,6 +306,7 @@ class RoomService : Service() {
             Ask.REST -> if (y) addRestStop(true) else { restSnoozeUntil = clock.millis() + REST_SNOOZE_MS; restOnce.reset(); restOffer = false }
             Ask.NEAR_FIND -> if (y) nearFind()
             Ask.NEAR_GO -> if (y) nearGo()
+            Ask.PARK_CALL -> if (y) parkCall()
             else -> {}
         }
     }
@@ -319,9 +322,42 @@ class RoomService : Service() {
         }
     }
 
-    /** 근처 찾기 "들를게": 경유지(목적지 없으면 경로)로 넣고, 식당·카페는 이어서 예약을 묻는다. 도착 시각은 시속 30킬로(분당 500m)로 올림. */
+    /** "주차 자리 있어?": 기준 좌표(목적지, 없으면 현재 위치)의 실시간 주차 자리를 한 문장으로. 빈자리 있으면 경유지로 넣을지(NEAR_GO), 없거나 못 구하면 가는 곳에 전화로 물어볼지(PARK_CALL). */
+    private fun parkingIntent() {
+        val base = machine.signals.destination ?: machine.signals.location ?: return say(NEAR_NO_LOC_SPEECH)
+        val callTo = parkCallTarget()
+        net.execute {
+            val lots = Server.fetchParking(base.lat, base.lng)
+            ui.post {
+                val hit = pickPark(lots); val text = parkingSpeech(lots, callTo != null)
+                if (hit != null) { if (canAsk()) { nearKind = null; nearHit = NearPlace(hit.name, hit.lat, hit.lng, hit.distM); askVoice(text, Ask.NEAR_GO) } }
+                else if (callTo != null) { if (canAsk()) askVoice(text, Ask.PARK_CALL) } else say(text)
+            }
+        }
+    }
+
+    /** 주차 문의 전화를 걸 수 있는 곳 = 지금 가는 곳(이름과 좌표를 둘 다 알 때). 번호는 서버가 찾고, 못 찾으면 no_number. */
+    private fun parkCallTarget(): Pair<String, LatLng>? {
+        val n = forcedDest ?: adapters.destName; val d = machine.signals.destination
+        return if (n != null && d != null) n to d else null
+    }
+
+    /** 주차 문의 "응": 서버가 AI로 가게에 전화한다. 결과는 예약 전화와 같은 폴링이 한 번 읽어 준다(onReserveRows). */
+    private fun parkCall() {
+        val (n, d) = parkCallTarget() ?: return say(PARK_NO_INFO_SPEECH)
+        net.execute {
+            val (id, code) = Server.reserveParking(n, d.lat, d.lng); Log.i("ROOM", "parking call -> ${id ?: "FAIL $code"}")
+            ui.post {
+                if (id == null) { say(when (code) { "no_number" -> PARK_NO_INFO_SPEECH; "daily_limit" -> RESERVE_LIMIT_SPEECH; else -> PARK_CALL_FAIL_SPEECH }); return@post }
+                if (id > 0) reserveWait[id] = n to SystemClock.elapsedRealtime()
+                say(reserveCallSpeech(n))
+            }
+        }
+    }
+
+    /** 근처 찾기 "들를게"(주차장은 nearKind가 null이라 경유지만 넣고 끝): 경유지(목적지 없으면 경로)로 넣고, 식당·카페는 이어서 예약을 묻는다. 도착 시각은 시속 30킬로(분당 500m)로 올림. */
     private fun nearGo() {
-        val kind = nearKind ?: return; val h = nearHit ?: return; val n = adapters.navi ?: return say(NEAR_NAVI_WAIT_SPEECH)
+        val kind = nearKind; val h = nearHit ?: return; val n = adapters.navi ?: return say(NEAR_NAVI_WAIT_SPEECH)
         if (machine.signals.destination != null) n.addWaypoint(RequestWaypointInfo(h.lat, h.lng, h.name, WaypointIndex.FIRST, "", "", "", "")) else route(LatLng(h.lat, h.lng), h.name)
         if (kind != NearKind.FOOD && kind != NearKind.CAFE) return say(NEAR_ADDED_SPEECH)
         val t = arriveAt(clock.millis(), maxOf(1, Math.ceil(h.distance / 500.0).toInt()), clock.zone)

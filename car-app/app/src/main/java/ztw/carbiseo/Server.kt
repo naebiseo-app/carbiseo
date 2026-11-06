@@ -131,6 +131,22 @@ object Server {
         } finally { c.disconnect() }
     }.getOrDefault(emptyList())
 
+    /** 좌표 근처 실시간 주차장(서버가 공공 API로, 가까운 순 최대 3곳). none·no_key·error·네트워크 실패는 모두 빈 목록. 좌표는 이 호출에만 쓴다. */
+    fun fetchParking(lat: Double, lng: Double): List<ParkLot> = runCatching {
+        val c = open("/car/parking?lat=$lat&lng=$lng", "GET")
+        c.readTimeout = 8000 // 서버가 전체 실시간 표를 받는 데 1초 안팎
+        try {
+            val a = JSONObject((if (c.responseCode in 200..299) c.inputStream else c.errorStream).bufferedReader().readText()).optJSONArray("items") ?: return@runCatching emptyList()
+            List(a.length()) { a.getJSONObject(it) }.map { ParkLot(it.getString("name"), it.getInt("available"), it.getInt("total"), it.getInt("dist_m"), it.getDouble("lat"), it.getDouble("lng")) }
+        } finally { c.disconnect() }
+    }.getOrDefault(emptyList())
+
+    /** 주차 문의 전화 요청(서버 /car/reserve purpose=parking). 결과는 reserve와 같은 (행 id, 실패 code). */
+    fun reserveParking(place: String, lat: Double, lng: Double): Pair<Long?, String> {
+        val j = postJson("/car/reserve", JSONObject().put("place", place).put("purpose", "parking").put("lat", lat).put("lng", lng))
+        return (if (j?.optBoolean("ok") == true) j.optLong("id", 0L) else null) to (j?.str("code") ?: "")
+    }
+
     fun fetchSchedule(): List<Event>? = runCatching {
         val c = open("/car/schedule", "GET")
         try {
@@ -147,3 +163,4 @@ object Server {
 private fun JSONObject.str(k: String) = if (isNull(k)) "" else optString(k)
 
 data class NearPlace(val name: String, val lat: Double, val lng: Double, val distance: Int)
+data class ParkLot(val name: String, val available: Int, val total: Int, val distM: Int, val lat: Double, val lng: Double)

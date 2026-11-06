@@ -488,4 +488,22 @@ class DriveTest {
         assertEquals(null, arriveBrief(e, here, 5, emptySet(), setOf(e.start), z)) // 지각 질문이 나간 일정
         assertEquals("곧 도착해요. 오후 2시 거래처 미팅이에요.", arriveBrief(e, here, 5, setOf(e.start + 1), setOf(e.start + 2), z)) // 다른 일정 기록은 상관없다
     }
+    @Test fun 주차_자리_문의는_주차_메모와_안_섞인다() {
+        for (t in listOf("주차 자리 있어?", "근처에 주차장 있어", "주차할 곳 찾아줘", "여기 주차 돼?", "주차 가능해?", "주차할 수 있어?", "근처 식당 주차 돼?")) assertEquals(t, CarIntent.PARKING, carIntent(t))
+        for (t in listOf("주차 지하 2층 C구역", "지하2층 B2구역에 주차했어", "3층에 주차했어", "주차는 A구역")) assertEquals(t, CarIntent.PARK_MEMO, carIntent(t))
+        for (t in listOf("주차 자리 있어?", "주차장 어디야")) assertEquals(t, null, parkMemo(t))
+        for (t in listOf("주차 지하 2층 C구역", "주차했어", "2층", "답장 주차 돼냐고 해줘", "")) assertFalse(t, parkingWish(t))
+        assertEquals(CarIntent.RESERVE, carIntent("주차 가능한 식당 예약해 줘")); assertEquals(CarIntent.UNKNOWN, carIntent("답장 주차 돼냐고 해줘")); assertEquals(CarIntent.NEARBY, carIntent("배고파"))
+        // 피로 모드: 예약·일정 같은 업무 말과 같이 한 문장 거절, 켜지지 않았으면 통과
+        assertEquals(FATIGUE_BLOCK_SPEECH, fatigueGate(CarIntent.PARKING, true)); assertEquals(null, fatigueGate(CarIntent.PARKING, false))
+    }
+
+    @Test fun 주차_결과는_한_문장으로_말한다() {
+        val a = ParkLot("가명 공영주차장", 12, 80, 450, 37.40, 127.11); val b = ParkLot("가명 주차장", 3, 30, 200, 37.41, 127.12); val full = ParkLot("가명 만차장", 0, 50, 100, 37.42, 127.13)
+        assertEquals(b, pickPark(listOf(a, b))); assertEquals(a, pickPark(listOf(full, a))); assertEquals(null, pickPark(listOf(full))); assertEquals(null, pickPark(emptyList()))
+        assertEquals("가명 주차장에 3자리 남았고 200미터예요, 경유지로 넣을까요?", parkingSpeech(listOf(a, b, full), true))
+        assertEquals("가명 공영주차장에 12자리 남았고 1.5킬로미터예요, 경유지로 넣을까요?", parkingSpeech(listOf(a.copy(distM = 1500)), false))
+        assertEquals("근처 주차장이 다 찼어요, 가게에 주차 자리 물어볼까요?", parkingSpeech(listOf(full), true)); assertEquals("근처 주차장이 다 찼어요", parkingSpeech(listOf(full), false))
+        assertEquals("가게에 주차 자리 물어볼까요?", parkingSpeech(emptyList(), true)); assertEquals("주차 정보를 찾지 못했어요", parkingSpeech(emptyList(), false))
+    }
 }
