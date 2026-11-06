@@ -302,10 +302,11 @@ fun nextEvent(events: List<Event>, nowMs: Long): Event? = events.filter { it.sta
 const val LATE_GRACE_MS = 2 * 60_000L
 const val LATE_DONE_SPEECH = "정차하시면 보내기 버튼을 눌러 주세요"
 fun lateSpeech(min: Int, rain: Boolean = false) = "${if (rain) "비가 와서 " else ""}다음 일정에 약 ${min}분 늦을 것 같아요. 늦는다고 문자 보낼까요?"
+const val TRAFFIC_SLACK_MS = 10 * 60_000L
 const val TRAFFIC_OFFER_SPEECH = "앞이 많이 막혀요. 다음 일정 상대에게 늦을 수 있다고 알릴까요?"
-/** 정체 먼저 말 걸기: 경로가 크게 막히고(HEAVY), 다음 일정에 상대 연락처가 있고, 그 일정 지각 질문을 아직 안 했고, 먼저 말 걸기 차례일 때. 방·동승자 조건은 부르는 쪽이 본다. */
-fun trafficOfferDue(level: Proactive, worst: String?, next: Event?, lateAsked: Set<Long>, lastOfferMs: Long?, now: Long): Boolean =
-    worst == "HEAVY" && next != null && next.start !in lateAsked && next.contactNumber.ifBlank { next.contact }.isNotBlank() && offerDue(level, lastOfferMs, now)
+/** 정체 먼저 말 걸기: 경로가 크게 막히고(HEAVY), 다음 일정에 상대 연락처가 있고, 그 일정 지각 질문을 아직 안 했고, 먼저 말 걸기 차례일 때. 도착 예상(arrivalMs)이 일정보다 넉넉히 이르면 늦을 일이 없으니 묻지 않는다(모르면 묻는다). 방·동승자 조건은 부르는 쪽이 본다. */
+fun trafficOfferDue(level: Proactive, worst: String?, next: Event?, lateAsked: Set<Long>, lastOfferMs: Long?, now: Long, arrivalMs: Long? = null): Boolean =
+    worst == "HEAVY" && next != null && next.start !in lateAsked && (arrivalMs == null || arrivalMs + TRAFFIC_SLACK_MS >= next.start) && next.contactNumber.ifBlank { next.contact }.isNotBlank() && offerDue(level, lastOfferMs, now)
 
 /** F4: 지금 + 남은 분 > 일정 시작 + 2분이면 늦을 분(반올림), 아니면 null. */
 fun lateBy(nowMs: Long, etaMin: Int?, eventStartMs: Long): Int? {

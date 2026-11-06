@@ -223,6 +223,11 @@ class DriveTest {
         assertFalse(trafficOfferDue(n, "HEAVY", e, setOf(1000L), null, 0))
         assertFalse(trafficOfferDue(Proactive.OFF, "HEAVY", e, emptySet(), null, 0))
         assertFalse(trafficOfferDue(n, "HEAVY", e, emptySet(), 0L, 1000))
+        // 11-07 실측: 7분 뒤 도착인데 일정은 76분 뒤 → 늦을 일 없음
+        val far = e.copy(start = 76 * 60_000L)
+        assertFalse(trafficOfferDue(n, "HEAVY", far, emptySet(), null, 0, 7 * 60_000L))
+        assertTrue(trafficOfferDue(n, "HEAVY", far, emptySet(), null, 0, 66 * 60_000L))
+        assertTrue(trafficOfferDue(n, "HEAVY", far, emptySet(), null, 0, null))
         assertEquals("앞이 많이 막혀요. 다음 일정 상대에게 늦을 수 있다고 알릴까요?", TRAFFIC_OFFER_SPEECH)
     }
 
