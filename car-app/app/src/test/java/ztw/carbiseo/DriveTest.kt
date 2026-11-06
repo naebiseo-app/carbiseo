@@ -262,6 +262,7 @@ class DriveTest {
         val now = java.time.Instant.parse("2026-11-02T03:50:00Z").toEpochMilli()
         assertEquals("04:20", arriveAt(now, 30, java.time.ZoneOffset.UTC))
         assertEquals("13:20", arriveAt(now, 30, java.time.ZoneId.of("Asia/Seoul")))
+        assertEquals("04:25", arriveAt(now, 31, java.time.ZoneOffset.UTC)) // 5분 단위 올림
         val t = reserveTask("판교 한정식", "04:20")
         assertEquals("" to "안녕하세요, 04:20쯤 도착 예정인데 자리(주차) 가능할까요?", taskDraft(t))
         assertTrue(t.startsWith("판교 한정식 예약 / "))

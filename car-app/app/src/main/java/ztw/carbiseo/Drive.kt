@@ -231,9 +231,9 @@ const val SEND_KEEP_SPEECH = "할 일에 남겨 뒀어요. 정차하시면 보�
 private val RESERVE_NAME = Regex("식당|맛집|카페|레스토랑|한정식|횟집|고기")
 fun reservable(name: String?): Boolean = name != null && RESERVE_NAME.containsMatchIn(name)
 
-/** 지금 + 남은 분의 도착 시각 HH:MM. */
+/** 지금 + 남은 분의 도착 시각 HH:MM. 가게에 말하기 자연스럽게 5분 단위로 올린다. */
 fun arriveAt(nowMs: Long, etaMin: Int, zone: java.time.ZoneId): String =
-    java.time.format.DateTimeFormatter.ofPattern("HH:mm").format(java.time.Instant.ofEpochMilli(nowMs + etaMin * 60_000L).atZone(zone))
+    java.time.format.DateTimeFormatter.ofPattern("HH:mm").format(java.time.Instant.ofEpochMilli((nowMs + etaMin * 60_000L + 299_999L) / 300_000L * 300_000L).atZone(zone))
 
 fun reserveSpeech(name: String, hhmm: String) = "${name}에 ${hhmm}쯤 도착해요. 몇 분으로 예약할까요?"
 const val RESERVE_NO_DEST_SPEECH = "목적지를 먼저 잡아 주세요"
