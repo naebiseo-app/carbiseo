@@ -207,7 +207,7 @@ class DriveTest {
     @Test fun 비가_오면_지각_안내와_문자에_이유가_붙는다() {
         val e = Event("거래처 미팅", 0, "곳", LatLng(37.0, 127.0), "이지은", "010-0000-0000")
         assertEquals("비가 와서 다음 일정에 약 7분 늦을 것 같아요. 늦는다고 문자 보낼까요?", lateSpeech(7, true))
-        assertEquals("01000000000" to "비가 와서 운전 중이라 약 7분 늦을 것 같습니다. 죄송합니다.", taskDraft(lateTask(e, 7, true)))
+        assertEquals("01000000000" to "운전 중인데 비가 와서 약 7분 늦을 것 같습니다. 죄송합니다.", taskDraft(lateTask(e, 7, true)))
         assertEquals("01000000000" to "운전 중이라 약 7분 늦을 것 같습니다. 죄송합니다.", taskDraft(lateTask(e, 7, false)))
         assertEquals("01000000000" to "운전 중이라 늦을 것 같습니다. 죄송합니다.", taskDraft(lateTask(e, null))) // 정체 제안: 분 수 모름
     }

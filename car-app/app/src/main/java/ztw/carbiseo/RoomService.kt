@@ -587,7 +587,7 @@ class RoomService : Service() {
                 val soc = forcedSoc ?: adapters.soc; val word = mealWord(LocalTime.now(clock))
                 if (soc != null && soc <= CHARGE_OFFER_SOC && offerDue(proactive, lastChargeOffer, now)) { lastChargeOffer = now; nearKind = NearKind.CHARGE; askVoice(chargeOffer(soc), Ask.NEAR_FIND) }
                 else if (word != null && (tripMin() ?: 0) >= MEAL_OFFER_DRIVE_MIN && !reservable(dn) && offerDue(proactive, lastMealOffer, now)) { lastMealOffer = now; nearKind = NearKind.FOOD; askVoice(mealOffer(word), Ask.NEAR_FIND) }
-                else nextEvent(schedule, System.currentTimeMillis())?.takeIf { trafficOfferDue(proactive, forcedTraffic ?: adapters.trafficWorst, it, lateAsked, lastTrafficOffer, now) }?.let { ev ->
+                else nextEvent(schedule, System.currentTimeMillis())?.takeIf { machine.room == Room.DRIVE_WORK && headingTo(machine.signals.destination, it) && trafficOfferDue(proactive, forcedTraffic ?: adapters.trafficWorst, it, lateAsked, lastTrafficOffer, now) }?.let { ev ->
                     // 대답 '응'은 기존 LATE 경로(answerYn)로 간다. 지각 분은 아는 만큼만(lateBy), 모르면 분 수 없이
                     lastTrafficOffer = now; lateAsked += ev.start; lateEvent = ev to lateBy(System.currentTimeMillis(), e, ev.start); askVoice(TRAFFIC_OFFER_SPEECH, Ask.LATE)
                 }

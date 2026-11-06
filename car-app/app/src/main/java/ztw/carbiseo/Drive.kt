@@ -306,7 +306,7 @@ fun headingTo(dest: LatLng?, e: Event): Boolean = dest != null && distanceM(dest
 
 /** F4: 지연 문자 초안 = 할 일 카드 본문(taskDraft 형식). 연락처가 일정에 있으면 번호로 들어간다. */
 /** min = null(정체 먼저 말 걸기: 지각 분을 모를 때)이면 분 수 없이. rain이면 앞에 이유 한 구절. */
-fun lateTask(e: Event, min: Int?, rain: Boolean = false) = "${e.title} 일정 지연 알림${e.contactNumber.ifBlank { e.contact }.let { if (it.isNotBlank()) " $it" else "" }} / 내용: ${if (rain) "비가 와서 " else ""}운전 중이라 ${if (min != null) "약 ${min}분 " else ""}늦을 것 같습니다. 죄송합니다."
+fun lateTask(e: Event, min: Int?, rain: Boolean = false) = "${e.title} 일정 지연 알림${e.contactNumber.ifBlank { e.contact }.let { if (it.isNotBlank()) " $it" else "" }} / 내용: 운전 중${if (rain) "인데 비가 와서" else "이라"} ${if (min != null) "약 ${min}분 " else ""}늦을 것 같습니다. 죄송합니다."
 
 /** 문자 음성 발송: 휴대폰 번호(01x로 시작 10~11자리)일 때만 숫자만 돌려준다(보내기 시트와 같은 기준). 아니면 null = 카드만. 유선은 문자를 못 받는다. */
 fun sendable(number: String?): String? = number.orEmpty().filter(Char::isDigit).takeIf { Regex("""01\d{8,9}""").matches(it) }
