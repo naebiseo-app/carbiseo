@@ -166,6 +166,7 @@ async function reserveResult(env: Env, id: string) {
   const summary = memo?.summary ? guardText("summary", String(memo.summary)) : "직접 확인이 필요해요";
   await env.DB.prepare("UPDATE inbox SET status=?, summary=?, meta=json_set(COALESCE(meta,'{}'),'$.parking',?) WHERE kind='reserve' AND call_id=? AND status='calling'")
     .bind(memo?.status === "ok" ? "ok" : "need_manual", summary, parking, id).run();
+  return !!memo;
 }
 
 // 손님 통화 카드는 끊은 뒤 받아쓰기로 만든다. 통화 중 도구 호출은 답을 7초 늦추고 말을 두 번 하게 했다(11-06 실통화), summary.completed는 안 온다(12통 전부 not_requested)
@@ -179,13 +180,12 @@ async function transcriptCard(env: Env, raw: string) {
   } catch (e) { console.log("recording delete error", String(e)); }
 }
 
-// 요약을 저장했으면 true(이미 처리된 재전송·무관한 이벤트는 false)
+// 요약을 저장했으면 true(이미 처리된 재전송·무관한 이벤트·요약 실패는 false)
 async function transcriptWork(env: Env, raw: string): Promise<boolean> {
   const f = new URLSearchParams(raw), id = f.get("CallId") ?? "", from = f.get("From") ?? "";
   if (f.get("Event") !== "transcript.completed" || !env.CLAWOPS_API_KEY) return false;
   if (f.get("Direction") === "outbound" && (await env.DB.prepare("SELECT 1 FROM inbox WHERE kind='reserve' AND call_id=? AND status='calling'").bind(id).first())) {
-    await reserveResult(env, id);
-    return true;
+    return reserveResult(env, id);
   }
   if (f.get("Direction") !== "inbound") return false;
   const owner = sameNumber(from, env.OWNER_NUMBER) && !(await kvGet(env.DB, "owner_as_guest"));
@@ -216,7 +216,7 @@ async function transcriptWork(env: Env, raw: string): Promise<boolean> {
   const cols = fromCols(from), who = String(memo?.caller ?? "").replace(/["'`{}]/g, "").slice(0, 40);
   await saveCallCard(env.DB, { call_id: id, ...cols, from_label: who || cols.from_label, summary, urgent: isUrgent(`${summary} ${said}`) ? 1 : 0 },
     { via: "transcript", caller: who, callback_by: String(memo?.callback_by ?? "").slice(0, 50) }, from);
-  return true;
+  return !said || !!memo; // 요약 실패면 녹음을 남긴다
 }
 
 // 최소 MCP streamable HTTP(JSON-RPC 2.0, 단일 JSON 응답). 배치·SSE·세션은 안 씀

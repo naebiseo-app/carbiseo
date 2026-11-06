@@ -286,6 +286,18 @@ test("요약 뒤 녹음 삭제: 예약 결과·수신 카드 모두 DELETE, keep
   } finally { h.restore(); }
 });
 
+test("요약 실패면 녹음을 지우지 않는다: 예약·수신 모두", async () => {
+  const f = fake({ memo: null });
+  try {
+    const env = mkEnv();
+    await place(env);
+    await hook(env, CID, "outbound");
+    assert.equal(rows(env)[0].status, "need_manual");
+    await hook(env, "CA1111111111111111111111111111111111", "inbound", "01055556789");
+    assert.equal(dels(f).length, 0);
+  } finally { f.restore(); }
+});
+
 test("예약 전화 하루 5통 상한: 오늘(KST) 5건이면 발신 없이 daily_limit, 어제 행은 안 센다", async () => {
   const f = fake();
   try {
