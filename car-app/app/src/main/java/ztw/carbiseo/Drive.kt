@@ -50,12 +50,12 @@ fun urgentNeed(said: String?): Boolean {
     return "답장" !in n && ("급해" in n || "화장실" in n)
 }
 
-/** F5 차 음성 입구: [말하기]로 한 마디 듣고 키워드로만 가른다(LLM 없음). 급해·화장실(Q3) > 아까 전화 > 일정. */
-enum class CarIntent { RECENT_CALLS, URGENT, NEXT_EVENT, UNKNOWN }
+/** F5 차 음성 입구: [말하기]로 한 마디 듣고 키워드로만 가른다(LLM 없음). 급해·화장실(Q3) > 아까 전화 > 예약(인원은 partyOf로 따로 읽는다) > 일정. */
+enum class CarIntent { RECENT_CALLS, URGENT, NEXT_EVENT, RESERVE, UNKNOWN }
 private val RECENT_CALL_WORDS = Regex("아까전화|전화뭐|누구전화")
 fun carIntent(said: String?): CarIntent {
     val n = said.orEmpty().replace(Regex("""\s"""), "")
-    return when { urgentNeed(said) -> CarIntent.URGENT; RECENT_CALL_WORDS.containsMatchIn(n) -> CarIntent.RECENT_CALLS; "일정" in n -> CarIntent.NEXT_EVENT; else -> CarIntent.UNKNOWN }
+    return when { urgentNeed(said) -> CarIntent.URGENT; RECENT_CALL_WORDS.containsMatchIn(n) -> CarIntent.RECENT_CALLS; "예약" in n -> CarIntent.RESERVE; "일정" in n -> CarIntent.NEXT_EVENT; else -> CarIntent.UNKNOWN }
 }
 /** Q1 조용한 비서: 한 질문에서 못 알아들었을 때 다시 묻는 건 1번뿐. again()이 true면 한 번 더 묻고, false면 화면 2택으로 넘긴다. 새 질문마다 reset. */
 class Reask {
@@ -203,7 +203,7 @@ fun lateTask(e: Event, min: Int) = "${e.title} 일정 지연 알림${e.contactNu
 /** 문자 음성 발송: 휴대폰 번호(01x로 시작 10~11자리)일 때만 숫자만 돌려준다(보내기 시트와 같은 기준). 아니면 null = 카드만. 유선은 문자를 못 받는다. */
 fun sendable(number: String?): String? = number.orEmpty().filter(Char::isDigit).takeIf { Regex("""01\d{8,9}""").matches(it) }
 
-const val LANDLINE_SPEECH = "유선 번호는 문자를 받을 수 없어요. 가게 전화 예약은 다음 버전에서 지원해요"
+const val LANDLINE_SPEECH = "유선 번호는 문자를 받을 수 없어요"
 
 /** 서버 에러 코드 -> 사람이 읽을 한국어 한 문장(영어 코드를 그대로 읽지 않는다). */
 fun sendFailReason(code: String) = if (code == "bad_to_number") "번호를 다시 확인해 주세요" else "잠시 뒤 다시 시도해 주세요"
@@ -214,34 +214,45 @@ const val SENT_SPEECH = "보냈어요"
 const val SEND_FAIL_SPEECH = "문자를 못 보냈어요. 할 일에 남겨 뒀어요"
 const val SEND_KEEP_SPEECH = "할 일에 남겨 뒀어요. 정차하시면 보내기 버튼을 눌러 주세요"
 
-/** O4 예약 대행: 목적지 이름이 식당·주차장류인가. 이름을 모르면 false. */
-private val RESERVE_NAME = Regex("식당|맛집|카페|레스토랑|주차장|파킹|한정식|횟집|고기")
+/** O4 예약 대행: 목적지 이름이 식당·카페류인가. 이름을 모르면 false. */
+private val RESERVE_NAME = Regex("식당|맛집|카페|레스토랑|한정식|횟집|고기")
 fun reservable(name: String?): Boolean = name != null && RESERVE_NAME.containsMatchIn(name)
 
 /** 지금 + 남은 분의 도착 시각 HH:MM. */
 fun arriveAt(nowMs: Long, etaMin: Int, zone: java.time.ZoneId): String =
     java.time.format.DateTimeFormatter.ofPattern("HH:mm").format(java.time.Instant.ofEpochMilli(nowMs + etaMin * 60_000L).atZone(zone))
 
-fun reserveSpeech(name: String, hhmm: String) = "${name}에 도착 시각 ${hhmm}쯤이에요. 예약 문자 초안 만들어 둘까요?"
-const val RESERVE_DONE_SPEECH = "정차하시면 할 일에서 확인해 주세요"
-/** O4: 예약 문자 초안 = 할 일 카드 본문(taskDraft 형식, 번호는 정차 후 입력). */
-fun reserveTask(name: String, hhmm: String, phone: String? = null): String {
-    val body = "내용: 안녕하세요, ${hhmm}쯤 도착 예정인데 자리(주차) 가능할까요?"
-    return when {
-        phone.isNullOrBlank() -> "$name 예약 / $body"
-        sendable(phone) != null -> "$name 예약 / 번호: $phone / $body" // 휴대폰: taskDraft가 번호를 뽑아 문자로
-        else -> "$name 예약 / 가게전화: $phone / $body" // 유선: 문자 대신 「가게에 전화」 버튼
-    }
+fun reserveSpeech(name: String, hhmm: String) = "${name}에 ${hhmm}쯤 도착해요. 몇 분으로 예약할까요?"
+const val RESERVE_NO_DEST_SPEECH = "목적지를 먼저 잡아 주세요"
+const val RESERVE_KEEP_SPEECH = "인원을 못 알아들었어요. 할 일에 남겨 뒀어요"
+const val RESERVE_FAIL_SPEECH = "전화를 걸지 못했어요. 할 일에 남겨 뒀어요"
+fun reserveCallSpeech(name: String) = "${name}에 전화해 볼게요"
+
+/** 서버가 알려 준 예약 전화 결과(inbox kind=reserve 행) 한 문장. calling이면 null(아직 통화 중). ok면 요약 + 주차 가능 여부(meta.parking), 그 밖(need_manual 등)은 직접 확인. */
+fun reserveResultSpeech(place: String, i: InboxItem): String? = when (i.status) {
+    "", "calling" -> null
+    "ok" -> sentences(i.summary.ifBlank { "${place} 예약을 마쳤어요" }, when (i.parking) { "가능" -> "주차 가능해요"; "불가" -> "주차는 안 돼요"; else -> null })
+    else -> "${place} 예약은 직접 확인이 필요해요"
 }
+
+private val PARTY_UNITS = listOf("한", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉")
+private val PARTY_COUNTED = Regex("""(\d{1,2})(?:명|분|인|사람)|(스물|열)?(한|두|세|네|다섯|여섯|일곱|여덟|아홉)?(?:명|분|인|사람)""")
+private val PARTY_BARE = Regex("""(\d{1,2}|열|다섯|여섯|일곱|여덟|아홉)(?:이요|이에요|이서|이|요)?""")
+private fun koNum(tens: String, unit: String) = (when (tens) { "열" -> 10; "스물" -> 20; else -> 0 }) + PARTY_UNITS.indexOf(unit) + 1 // unit이 비면 indexOf = -1 → +0
+/** 대답·말에서 예약 인원(1~20)을 읽는다: "두 명"·"2명"·"열두 분"·"혼자". '네'·'일곱 시'를 인원으로 오해하지 않게 수사는 명·분·인·사람이 붙을 때만 읽고, 말 전체가 숫자나 다섯 이상 수사 하나뿐이면("다섯이요") 그것도 읽는다. 못 읽으면 null. */
+fun partyOf(said: String?): Int? {
+    val n = said.orEmpty().replace(Regex("""[\s.,!?]"""), "")
+    if ("혼자" in n) return 1
+    val counted = PARTY_COUNTED.findAll(n).firstNotNullOfOrNull { m -> (m.groupValues[1].toIntOrNull() ?: koNum(m.groupValues[2], m.groupValues[3])).takeIf { it in 1..20 } }
+    return counted ?: PARTY_BARE.matchEntire(n)?.groupValues?.get(1)?.let { w -> w.toIntOrNull() ?: if (w == "열") 10 else PARTY_UNITS.indexOf(w) + 1 }?.takeIf { it in 1..20 }
+}
+
+/** O4: 전화를 못 걸었거나 인원을 못 읽었을 때 남기는 예약 문자 초안 = 할 일 카드 본문(taskDraft 형식, 번호는 정차 후 입력). */
+fun reserveTask(name: String, hhmm: String) = "$name 예약 / 내용: 안녕하세요, ${hhmm}쯤 도착 예정인데 자리(주차) 가능할까요?"
 /** 유선 가게 전화(카드의 `가게전화: 번호`). 없으면 null. */
 fun shopPhone(text: String): String? = Regex("""가게전화\s*[:：]\s*([0-9-]+)""").find(text)?.groupValues?.get(1)
-const val NO_PHONE_SPEECH = "가게 번호를 못 찾았어요. 차를 세우면 내비에서 가게를 열어 드릴게요"
 /** 예약 카드("가게 예약 / ...")의 가게 이름. 아니면 null. */
 fun reserveShop(text: String): String? = Regex("""^(.+?) 예약 /""").find(text)?.groupValues?.get(1)
-/** 받침 있으면 "은", 없으면 "는"(한글이 아니면 "는"). */
-fun eunNeun(w: String) = if (w.lastOrNull()?.let { it in '가'..'힣' && (it - '가') % 28 != 0 } == true) "은" else "는"
-fun landlineSpeech(name: String) = "${name}${eunNeun(name)} 가게 전화라 문자를 못 받아요. 지금 전화 연결할까요?"
-const val CALL_KEEP_SPEECH = "알겠어요. 할 일에 가게 번호를 남겨 뒀어요"
 
 /** 설정 "바로 연결 번호": 쉼표·공백으로 나눠 하이픈을 뗀 숫자 10~11자리, 최대 10개. 하나라도 틀리면 null. */
 fun parseDirect(text: String): List<String>? =
@@ -289,9 +300,9 @@ fun homeFromRecent(recents: List<Pair<String?, LatLng>>): LatLng? = recents.firs
 
 /** L6 런타임 권한(매니페스트의 위험 권한). CAR_SPEED는 AAOS 런타임 권한: 거부되면 속도만 null. RECORD_AUDIO 거부면 알림 대답은 화면 버튼. POST_NOTIFICATIONS는 33+. */
 const val PERM_NOTIF = "android.permission.POST_NOTIFICATIONS"
-val RUNTIME_PERMS = listOf("android.car.permission.CAR_SPEED", "android.permission.RECORD_AUDIO", PERM_NOTIF, "android.permission.CALL_PHONE")
+val RUNTIME_PERMS = listOf("android.car.permission.CAR_SPEED", "android.permission.RECORD_AUDIO", PERM_NOTIF)
 fun missingPermissions(sdk: Int, granted: (String) -> Boolean): List<String> = RUNTIME_PERMS.filter { (it != PERM_NOTIF || sdk >= 33) && !granted(it) }
-fun permName(p: String) = when (p) { "android.permission.RECORD_AUDIO" -> "마이크"; PERM_NOTIF -> "알림"; "android.permission.CALL_PHONE" -> "전화"; else -> "차 속도" }
+fun permName(p: String) = when (p) { "android.permission.RECORD_AUDIO" -> "마이크"; PERM_NOTIF -> "알림"; else -> "차 속도" }
 
 /** 서버 car_context용 기어 한 글자. */
 fun gearCode(g: Gear): String? = when (g) { Gear.PARK -> "P"; Gear.DRIVE -> "D"; Gear.REVERSE -> "R"; Gear.NEUTRAL -> "N"; Gear.UNKNOWN -> null }

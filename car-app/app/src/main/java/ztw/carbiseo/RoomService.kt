@@ -84,7 +84,7 @@ class RoomService : Service() {
     private val notifFresh = mutableSetOf<Long>()
     private val notifSaid = mutableSetOf<Long>()
     // 음성으로 묻고 대답을 기다리는 질문(알림 묻기는 talk가 따로). 대답은 heard()가 받는다.
-    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, CALL, INTENT }
+    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, INTENT }
     private class PendingSend(val label: String, val number: String, val body: String, val task: String) // 보낼 문자(label·number·body)와 못 보냈을 때 남길 할 일 본문
     private var pending = Ask.NONE
     private val chatHistory = mutableListOf<Pair<String, String>>() // 말동무 대화 맥락(메모리만, 저장·로그 없음). 메인 스레드에서만
@@ -95,9 +95,8 @@ class RoomService : Service() {
     private val callbackAsked = mutableSetOf<Long>() // 문자 먼저 보낼지 이미 물은 카드(카드당 한 번)
     private var callback: Pair<InboxItem, String>? = null
     private var sending: PendingSend? = null
-    private var shopCall: Pair<String, String>? = null // O4 유선: 전화 걸까요?를 물은 (번호, 못 걸면 남길 카드)
-    private var reserve: Pair<String, String>? = null // 예약 초안을 물은 (목적지 이름, 도착 HH:MM)
-    private var forcedPhone: String? = null // 디버그 ROUTE의 --es phone(가짜 번호로 서버 없이 시연)
+    private var reserve: Pair<String, String>? = null // 예약 인원을 물은 (목적지 이름, 도착 HH:MM)
+    private val reserveWait = mutableMapOf<Long, Pair<String, Long>>() // 전화를 건 예약 서버 행 id -> (가게 이름, 건 시각 elapsedRealtime). 결과를 한 번만 읽고 뺀다. 메인 스레드에서만
     private var forcedDest: String? = null // 디버그 ROUTE의 --es name (에뮬은 내비가 목적지 이름을 안 줄 수 있어서)
     private var familyDay = -1L // 가족에게 도착 예상을 보낸 날(하루 한 번)
     private var restSnoozeUntil = 0L // 휴식 제안에 '아니'라고 한 뒤 30분(시뮬 시각)
@@ -111,8 +110,10 @@ class RoomService : Service() {
             if (!alive) return
             val t0 = SystemClock.elapsedRealtime()
             val slow = pollN++ % SLOW_EVERY == 0 // 일정·착신 설정은 거의 안 바뀌니 30초에 한 번(카드는 매번)
+            val rw = reserveWait.keys.minOrNull() // 예약 전화 결과를 기다리는 중이면 그 행부터 다시 읽는다(서버가 행을 제자리에서 바꿔서 since 폴링엔 안 보인다)
             pollNet.execute {
                 try {
+                    rw?.let { w -> Server.fetchInbox(w - 1)?.let { (rows, _) -> ui.post { onReserveRows(rows) } } }
                     val r = Server.fetchInbox(since)
                     ui.post {
                         offline = r == null; r?.let { (items, minId) -> inbox = pruneGone(inbox, minId); onInbox(items) } // 끝나는 대로 다시 시도한다
@@ -200,16 +201,26 @@ class RoomService : Service() {
         if (urgentNeed(said) && machine.room.let { it != null && it != Room.PARK }) { talk.cancel(); askStep = talk.step; return addRestStop(true, true) }
         when (p) {
             // Q1 조용한 비서: 못 알아들으면 한 번만 다시 묻고, 그다음은 화면 2택(unsure). 번호를 알면 초안을 읽어 주고 "이대로 보낼까요?"(SEND). 모르면 지금처럼 카드만.
-            Ask.LATE, Ask.RESERVE, Ask.CALLBACK, Ask.SEND, Ask.CALL, Ask.REST -> when (voiceCmd(said)) {
+            Ask.LATE, Ask.CALLBACK, Ask.SEND, Ask.REST -> when (voiceCmd(said)) {
                 Cmd.Yes -> answerYn(p, true)
                 Cmd.No, Cmd.Later -> answerYn(p, false) // '나중에'는 이 질문들엔 '아니'
                 else -> if (p == Ask.REST) unsure(p, "들르기" to { answerYn(p, true) }, "괜찮아요" to { answerYn(p, false) }, { answerYn(p, false) })
-                    else unsure(p, (when (p) { Ask.RESERVE -> "만들기"; Ask.CALL -> "전화하기"; else -> "보내기" }) to { answerYn(p, true) }, "그만두기" to { answerYn(p, false) }, { answerYn(p, false) })
+                    else unsure(p, "보내기" to { answerYn(p, true) }, "그만두기" to { answerYn(p, false) }, { answerYn(p, false) })
+            }
+            // 예약 인원: 인원을 읽으면 그것이 승인(바로 전화), '아니·나중에'는 아무 일도 안 한다. 두 번 못 알아들으면 전화 없이 할 일 카드로(화면 2택 없음).
+            Ask.RESERVE -> reserve?.let { (n, t) ->
+                val c = voiceCmd(said); val party = partyOf(said)
+                when {
+                    c == Cmd.No || c == Cmd.Later -> {}
+                    party != null -> callReserve(n, t, party)
+                    reask.again() -> { pending = p; speaker.speak(REASK_SPEECH, ::listenNow) }
+                    else -> { addLocalTask(reserveTask(n, t)); say(RESERVE_KEEP_SPEECH) }
+                }
             }
             // F5: [말하기] 뒤 한 마디. 못 알아들으면 "다시 말씀해 주세요" 한 번만, 그다음은 화면 2택(주행 중엔 그냥 끝).
             // S1 피로 중엔 급해·화장실만 통과, 업무 말은 한 문장으로 거절(fatigueGate)
             Ask.INTENT -> carIntent(said).let { ci ->
-                if (ci != CarIntent.UNKNOWN) runIntent(ci) else {
+                if (ci != CarIntent.UNKNOWN) runIntent(ci, said) else {
                     val unk = { unsure(p, "아까 전화" to { say(recentCallsSpeech(cards())) }, "다음 일정" to { say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis()))) }, {}, "어떤 걸 알려 드릴까요?") }
                     if (said.isNullOrBlank()) unk() else chatOr(said, unk)
                 }
@@ -224,14 +235,23 @@ class RoomService : Service() {
     }
 
     /** [말하기]·이름 호출·Gleo가 같이 쓰는 의도 실행. 피로 중 업무는 여기서 거절한다. */
-    private fun runIntent(ci: CarIntent) {
+    private fun runIntent(ci: CarIntent, said: String? = null) {
         fatigueGate(ci, fatigued(machine.room, tripMin()))?.let { say(it); return }
         when (ci) {
             CarIntent.URGENT -> addRestStop(true, true)
             CarIntent.RECENT_CALLS -> say(recentCallsSpeech(cards()))
             CarIntent.NEXT_EVENT -> say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis())))
+            CarIntent.RESERVE -> reserveIntent(said)
             CarIntent.UNKNOWN -> {}
         }
+    }
+
+    /** [말하기] "두 명 예약해 줘": 목적지가 있으면 인원이 말에 있을 때 되묻지 않고 바로 전화, 없으면 인원을 묻는다. */
+    private fun reserveIntent(said: String?) {
+        val dn = forcedDest ?: adapters.destName; val e = adapters.etaMin
+        if (dn == null || e == null) return say(RESERVE_NO_DEST_SPEECH)
+        val t = arriveAt(clock.millis(), e, clock.zone); reserve = dn to t
+        partyOf(said)?.let { callReserve(dn, t, it) } ?: askVoice(reserveSpeech(dn, t), Ask.RESERVE)
     }
 
     /** 말동무: 못 알아들은 말을 서버 AI에 묻고 답을 읽는다. 실패·no_key면 fallback(기존 못 알아들음 경로). 대화는 메모리에만(최근 6개, PARK로 바뀌면 비움). */
@@ -255,11 +275,9 @@ class RoomService : Service() {
         when (p) {
             // 번호를 알면 초안을 읽어 주고 "이대로 보낼까요?"(SEND). 모르면 지금처럼 카드만.
             Ask.LATE -> lateEvent?.let { (ev, m) -> if (y) lateTask(ev, m).let { t -> taskDraft(t).let { (n, b) -> sendOrCard(PendingSend("", n, b, t), LATE_DONE_SPEECH, true) } } }
-            Ask.RESERVE -> reserve?.let { (n, t) -> if (y) reserveWithPhone(n, t) }
             // 질문이 이미 초안을 읽어 줬으니 '응'이면 바로 발송(한 번 더 묻지 않는다)
             Ask.CALLBACK -> callback?.let { (i, m) -> if (y) sendOrCard(PendingSend(i.fromLabel, i.fromNumber, m, callbackTask(i, m)), CALLBACK_DONE_SPEECH, false) }
             Ask.SEND -> sending?.let { s -> if (y) doSend(s) else { addLocalTask(s.task); say(SEND_KEEP_SPEECH) } }
-            Ask.CALL -> shopCall?.let { (ph, task) -> if (y) callShop(ph, task) else { addLocalTask(task); say(CALL_KEEP_SPEECH) } }
             Ask.REST -> if (y) addRestStop(true) else { restSnoozeUntil = clock.millis() + REST_SNOOZE_MS; restOnce.reset(); restOffer = false }
             else -> {}
         }
@@ -284,28 +302,26 @@ class RoomService : Service() {
         if (confirm && canAsk()) { sending = ps; askVoice(sendConfirmSpeech(s.body), Ask.SEND) } else if (confirm) { addLocalTask(s.task); say(doneSpeech) } else doSend(ps)
     }
 
-    /** O4: 초안 승인 시 목적지로 가게 번호를 찾아(디버그 --es phone이면 그 값) 휴대폰=문자 승인, 유선=전화 버튼 카드, 못 찾음=카드만. */
-    private fun reserveWithPhone(n: String, t: String) {
+    /** O4: 서버가 AI로 가게에 예약 전화를 건다(번호 조회·휴대폰/유선 구분 모두 서버). 못 걸면 예약 문자 초안을 할 일 카드로 남긴다. 결과는 폴링이 가져와 한 번 읽는다(onReserveRows). */
+    private fun callReserve(n: String, t: String, party: Int) {
         val dest = machine.signals.destination
         net.execute {
-            val ph = forcedPhone ?: dest?.let { Server.placePhone(n, it.lat, it.lng) }
+            val id = dest?.let { Server.reserve(n, t, party, it.lat, it.lng) }; Log.i("ROOM", "reserve $n party=$party -> ${id ?: "FAIL"}")
             ui.post {
-                val task = reserveTask(n, t, ph); val m = sendable(ph)
-                when {
-                    m != null -> sendOrCard(PendingSend(n, m, taskDraft(task).second, task), RESERVE_DONE_SPEECH, true)
-                    !ph.isNullOrBlank() -> if (canAsk()) { shopCall = ph to task; askVoice(landlineSpeech(n), Ask.CALL) } else { addLocalTask(task); say(CALL_KEEP_SPEECH) }
-                    else -> { addLocalTask(task); say(NO_PHONE_SPEECH) }
-                }
+                if (id == null) { addLocalTask(reserveTask(n, t)); say(RESERVE_FAIL_SPEECH); return@post }
+                if (id > 0) reserveWait[id] = n to SystemClock.elapsedRealtime()
+                say(reserveCallSpeech(n))
             }
         }
     }
 
-    /** O4 유선 가게: 운전 중에도 핸즈프리 통화(차 블루투스 전화). 권한이 없거나 못 걸면 카드로 남긴다. */
-    private fun callShop(ph: String, task: String) {
-        val call = checkSelfPermission(android.Manifest.permission.CALL_PHONE) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        // 서비스에서 통화 화면(ACTION_CALL)을 띄우면 백그라운드 실행 차단(BAL_BLOCK, 에뮬 실측) → 화면 없이 거는 TelecomManager.placeCall
-        runCatching { check(call); getSystemService(android.telecom.TelecomManager::class.java).placeCall(android.net.Uri.fromParts("tel", ph, null), android.os.Bundle()) }
-            .onFailure { Log.w("ROOM", "call FAIL $it"); addLocalTask(task); say("전화를 걸 수 없어요. 할 일에 가게 번호를 남겨 뒀어요") }
+    /** 예약 전화 결과: 기다리는 행이 calling이 아닌 상태로 처음 보이면 한 번만 읽고 기다림에서 뺀다. 10분 넘게 안 끝나면 기다림을 포기(사무실 카드 목록엔 남는다). */
+    private fun onReserveRows(rows: List<InboxItem>) {
+        val now = SystemClock.elapsedRealtime()
+        reserveWait.values.removeAll { now - it.second > RESERVE_WAIT_MS }
+        for (i in rows) if (i.kind == "reserve") reserveWait[i.id]?.let { (place, _) ->
+            reserveResultSpeech(place, i)?.let { reserveWait.remove(i.id); say(it) }
+        }
     }
 
     /** 기존 문자 발송 경로(Server.send). 성공하면 "보냈어요", 실패하면 카드로 남긴다. */
@@ -439,7 +455,7 @@ class RoomService : Service() {
                     lateBy(now, e, ev.start)?.let { m -> lateAsked += ev.start; lateEvent = ev to m; askVoice(lateSpeech(m), Ask.LATE) }
                 }
             }
-            // O4: 식당·주차장류 목적지로 출발하면 한 번 "도착 시각쯤, 예약 문자 초안 만들어 둘까요?"(업무·쉼 방 상관없이)
+            // O4: 식당·카페류 목적지로 출발하면 한 번 "몇 분으로 예약할까요?"(업무·쉼 방 상관없이)
             val dn = forcedDest ?: adapters.destName
             if (machine.room.let { it != null && it != Room.PARK } && !passenger && e != null && reservable(dn) && canAsk() &&
                 reserveOnce.fire(true)) arriveAt(clock.millis(), e, clock.zone).let { t -> reserve = dn!! to t; askVoice(reserveSpeech(dn, t), Ask.RESERVE) }
@@ -547,14 +563,13 @@ class RoomService : Service() {
         .setContentTitle(notifTitle(r))
         .setOngoing(true).build()
 
-    // 디버그 빌드 전용: adb shell am broadcast -a ztw.carbiseo.ROUTE --ef lat 37.4979 --ef lng 127.0276 [--es name "판교 한정식" = O4 예약 초안용 목적지 이름] [--es phone 02-0000-0000 = 서버 없이 가게 번호]
+    // 디버그 빌드 전용: adb shell am broadcast -a ztw.carbiseo.ROUTE --ef lat 37.4979 --ef lng 127.0276 [--es name "판교 한정식" = O4 예약용 목적지 이름]
     private fun registerDebugRoute() {
         val r = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
                 val lat = i.getFloatExtra("lat", 0f).toDouble()
                 val lng = i.getFloatExtra("lng", 0f).toDouble()
                 forcedDest = i.getStringExtra("name")
-                forcedPhone = i.getStringExtra("phone")
                 Log.i("ROOM", "debug requestRoute $lat,$lng name=$forcedDest")
                 adapters.navi?.requestRoute(RouteInfo(lat, lng, null, null, forcedDest ?: "목적지", "", "", "", RouteOption.RECOMMENDED, "", false))
             }
@@ -701,6 +716,7 @@ class RoomService : Service() {
         private const val HEARTBEAT_MS = 5 * 60_000L
         private const val CHAT_KEEP = 6 // 말동무 기억: 최근 user/assistant 합쳐 6개
         private const val POLL_MS = 5_000L
+        private const val RESERVE_WAIT_MS = 10 * 60_000L // 예약 전화 결과를 기다리는 최대 시간
         private const val SLOW_EVERY = 6 // 일정·설정 조회 주기(폴링 6번에 한 번)
         const val ACTION_REST = "ztw.carbiseo.REST"
         const val ACTION_TALK = "ztw.carbiseo.TALK" // F5: [말하기] 버튼

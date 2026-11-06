@@ -42,12 +42,6 @@ object Server {
         } finally { c.disconnect() }
     }.getOrNull()
 
-    /** O4: 목적지 이름·좌표로 가게 번호 조회. 못 찾음·키 없음·네트워크 실패는 null. */
-    fun placePhone(name: String, lat: Double, lng: Double): String? = runCatching {
-        val c = open("/car/place-phone?name=${java.net.URLEncoder.encode(name, "UTF-8")}&lat=$lat&lng=$lng", "GET")
-        try { JSONObject(c.inputStream.bufferedReader().readText()).str("phone").ifBlank { null } } finally { c.disconnect() }
-    }.getOrNull()
-
     /** JSON 한 번 보내고 응답 JSON(오류 본문 포함). 네트워크 실패면 null. */
     private fun postJson(path: String, body: JSONObject, readMs: Int = 5000): JSONObject? = runCatching {
         val c = open(path, "POST")
@@ -100,7 +94,7 @@ object Server {
                 InboxItem(it.getLong("id"), it.str("from_label"), it.str("summary"),
                     it.optInt("urgent") != 0, it.optLong("created_at"), it.str("raw"), it.str("kind").ifEmpty { "call" },
                     it.str("status"), meta?.str("code") ?: "", meta?.str("car") ?: "", it.str("room"), it.str("from_number"),
-                    meta?.str("app") ?: "", meta?.optBoolean("replyable") == true, meta?.optBoolean("direct") == true, meta?.optLong("replaces", 0L) ?: 0L, meta?.str("channel") ?: "")
+                    meta?.str("app") ?: "", meta?.optBoolean("replyable") == true, meta?.optBoolean("direct") == true, meta?.optLong("replaces", 0L) ?: 0L, meta?.str("channel") ?: "", meta?.str("parking") ?: "")
             } to minId
         } finally { c.disconnect() }
     }.getOrNull()
@@ -116,6 +110,11 @@ object Server {
             JSONObject(c.inputStream.bufferedReader().readText()).let { it.str("service_number") to it.optBoolean("forwarded") }
         } finally { c.disconnect() }
     }.getOrNull()
+
+    /** AI 예약 전화 요청. 성공하면 서버 inbox 행 id(kind=reserve, 결과는 이 행이 calling에서 바뀐다), 실패·네트워크 오류면 null. */
+    fun reserve(place: String, arrive: String, party: Int, lat: Double, lng: Double): Long? =
+        postJson("/car/reserve", JSONObject().put("place", place).put("arrive", arrive).put("party", party).put("lat", lat).put("lng", lng))
+            ?.takeIf { it.optBoolean("ok") }?.optLong("id", 0L)
 
     fun fetchSchedule(): List<Event>? = runCatching {
         val c = open("/car/schedule", "GET")

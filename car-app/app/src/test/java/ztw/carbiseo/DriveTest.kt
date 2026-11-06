@@ -253,8 +253,8 @@ class DriveTest {
     }
 
     @Test fun 예약_대행은_식당_주차장류_이름만() {
-        for (n in listOf("판교 한정식", "대박 횟집", "스타 카페", "공영주차장", "OO파킹", "맛집 거리", "숯불고기", "이탈리안 레스토랑", "착한식당")) assertTrue(n, reservable(n))
-        for (n in listOf("판교역", "한빛물산", "", "우리집")) assertFalse(n, reservable(n))
+        for (n in listOf("판교 한정식", "대박 횟집", "스타 카페", "맛집 거리", "숯불고기", "이탈리안 레스토랑", "착한식당")) assertTrue(n, reservable(n))
+        for (n in listOf("판교역", "한빛물산", "", "우리집", "공영주차장", "OO파킹")) assertFalse(n, reservable(n)) // 주차장·파킹은 예약 전화 대상이 아니다
         assertFalse(reservable(null))
     }
 
@@ -262,22 +262,16 @@ class DriveTest {
         val now = java.time.Instant.parse("2026-11-02T03:50:00Z").toEpochMilli()
         assertEquals("04:20", arriveAt(now, 30, java.time.ZoneOffset.UTC))
         assertEquals("13:20", arriveAt(now, 30, java.time.ZoneId.of("Asia/Seoul")))
-        assertEquals("판교 한정식에 도착 시각 04:20쯤이에요. 예약 문자 초안 만들어 둘까요?", reserveSpeech("판교 한정식", "04:20"))
         val t = reserveTask("판교 한정식", "04:20")
         assertEquals("" to "안녕하세요, 04:20쯤 도착 예정인데 자리(주차) 가능할까요?", taskDraft(t))
         assertTrue(t.startsWith("판교 한정식 예약 / "))
-        assertFalse(RESERVE_DONE_SPEECH.contains("누르"))
     }
 
-    @Test fun 예약_가게번호_휴대폰_유선_없음_세갈래() {
-        val mob = reserveTask("가명 식당", "04:20", "010-0000-0000")
-        assertEquals("01000000000", taskDraft(mob).first); assertEquals("01000000000", sendable(taskDraft(mob).first)); assertEquals(null, shopPhone(mob))
-        val land = reserveTask("가명 식당", "04:20", "02-0000-0000")
-        assertEquals("02-0000-0000", shopPhone(land)); assertEquals(null, sendable(taskDraft(land).first))
-        assertTrue(landlineSpeech("가명 식당").startsWith("가명 식당은 ")); assertTrue(landlineSpeech("가명 카페").startsWith("가명 카페는 ")); assertTrue(landlineSpeech("가명 식당").contains("지금 전화 연결할까요"))
-        val none = reserveTask("가명 식당", "04:20", null)
-        assertEquals(null, shopPhone(none)); assertEquals("" to "안녕하세요, 04:20쯤 도착 예정인데 자리(주차) 가능할까요?", taskDraft(none)); assertEquals(none, reserveTask("가명 식당", "04:20", ""))
-        assertEquals("가명 식당", reserveShop(none)); assertEquals(null, reserveShop("김민수 회신 / 내용: 확인"))
+    @Test fun 예약_카드는_번호_없이_가게_이름만() {
+        val t = reserveTask("가명 식당", "04:20")
+        assertEquals(null, shopPhone(t)); assertEquals("" to "안녕하세요, 04:20쯤 도착 예정인데 자리(주차) 가능할까요?", taskDraft(t))
+        assertEquals("가명 식당", reserveShop(t)); assertEquals(null, reserveShop("김민수 회신 / 내용: 확인"))
+        assertEquals("유선 번호는 문자를 받을 수 없어요", LANDLINE_SPEECH)
     }
 
     @Test fun 바로_연결_번호_입력_파싱() {
@@ -359,9 +353,9 @@ class DriveTest {
     @Test fun 꺼진_권한만_모은다() {
         assertEquals(emptyList<String>(), missingPermissions(34) { true })
         assertEquals(RUNTIME_PERMS, missingPermissions(34) { false })
-        assertEquals(listOf("android.car.permission.CAR_SPEED", "android.permission.RECORD_AUDIO", "android.permission.CALL_PHONE"), missingPermissions(32) { false }) // 알림 권한은 33부터
+        assertEquals(listOf("android.car.permission.CAR_SPEED", "android.permission.RECORD_AUDIO"), missingPermissions(32) { false }) // 알림 권한은 33부터
         assertEquals(listOf(PERM_NOTIF), missingPermissions(34) { it != PERM_NOTIF })
-        assertEquals("마이크·알림·전화", missingPermissions(34) { it == "android.car.permission.CAR_SPEED" }.joinToString("·") { permName(it) })
+        assertEquals("마이크·알림", missingPermissions(34) { it == "android.car.permission.CAR_SPEED" }.joinToString("·") { permName(it) })
     }
 
     @Test fun 주행_규제_글자수와_자막() {
@@ -373,5 +367,36 @@ class DriveTest {
         assertTrue(UxLimits(0x50, 120).caption)
         assertFalse(UxLimits(0x80, 120).caption)
         assertFalse(UxLimits(0x100, 120).caption)
+    }
+
+    @Test fun 인원은_명_분_인이_붙은_수사나_숫자로_읽는다() {
+        for ((s, n) in listOf("두 명" to 2, "2명" to 2, "세명이요" to 3, "네 명이에요" to 4, "다섯 명" to 5, "여덟 분" to 8, "열 명" to 10, "열두 명" to 12, "열한 분" to 11,
+            "스물 명" to 20, "20명" to 20, "혼자" to 1, "혼자요" to 1, "한 명" to 1, "두 명 예약해 줘" to 2, "예약 3명" to 3, "다섯" to 5, "다섯이요" to 5, "열" to 10, "7" to 7))
+            assertEquals(s, n, partyOf(s))
+        for (s in listOf("네", "응", "한", "두 시에요", "일곱 시에 예약해 줘", "스물한 명", "30명", "0명", "21", "아니요", "나중에", "예약해 줘", "", "   "))
+            assertEquals(s, null, partyOf(s))
+        assertEquals(null, partyOf(null))
+    }
+
+    @Test fun 예약_의도는_예약이라는_말이_있을때_급해와_아까전화_다음() {
+        for (s in listOf("두 명 예약해 줘", "예약해 줘", "저녁 예약 좀")) assertEquals(s, CarIntent.RESERVE, carIntent(s))
+        assertEquals(CarIntent.URGENT, carIntent("급해요 예약은 나중에")); assertEquals(CarIntent.RECENT_CALLS, carIntent("아까 전화 예약 건이야"))
+        assertEquals(CarIntent.NEXT_EVENT, carIntent("다음 일정 알려줘"))
+        assertEquals(FATIGUE_BLOCK_SPEECH, fatigueGate(CarIntent.RESERVE, true)); assertEquals(null, fatigueGate(CarIntent.RESERVE, false))
+    }
+
+    @Test fun 예약_전화_문구와_결과_음성() {
+        assertEquals("판교 한정식에 04:20쯤 도착해요. 몇 분으로 예약할까요?", reserveSpeech("판교 한정식", "04:20"))
+        assertEquals("판교 한정식에 전화해 볼게요", reserveCallSpeech("판교 한정식"))
+        assertEquals("목적지를 먼저 잡아 주세요", RESERVE_NO_DEST_SPEECH)
+        assertEquals("전화를 걸지 못했어요. 할 일에 남겨 뒀어요", RESERVE_FAIL_SPEECH)
+        fun row(status: String, summary: String = "", parking: String = "") = InboxItem(7, "판교 한정식", summary, false, 0L, "", kind = "reserve", status = status, parking = parking)
+        assertEquals(null, reserveResultSpeech("판교 한정식", row("calling"))) // 통화 중이면 아직 말하지 않는다
+        assertEquals("두 명 7시 예약됐어요.", reserveResultSpeech("판교 한정식", row("ok", "두 명 7시 예약됐어요.")))
+        assertEquals("두 명 7시 예약됐어요. 주차 가능해요.", reserveResultSpeech("판교 한정식", row("ok", "두 명 7시 예약됐어요", "가능")))
+        assertEquals("두 명 7시 예약됐어요. 주차는 안 돼요.", reserveResultSpeech("판교 한정식", row("ok", "두 명 7시 예약됐어요", "불가")))
+        assertEquals("두 명 7시 예약됐어요.", reserveResultSpeech("판교 한정식", row("ok", "두 명 7시 예약됐어요", "모름")))
+        assertEquals("판교 한정식 예약을 마쳤어요.", reserveResultSpeech("판교 한정식", row("ok")))
+        assertEquals("판교 한정식 예약은 직접 확인이 필요해요", reserveResultSpeech("판교 한정식", row("need_manual", "무시되는 요약", "가능")))
     }
 }
