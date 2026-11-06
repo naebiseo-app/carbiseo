@@ -2,6 +2,8 @@ import { CALL_ID, carChip, callerNumber, cleanMent, cleanName, field, freshCtx, 
 import { adminPage, basicOk, demoSchedule, encodeReplay, parseFakeCall, replayScript, type MailRow, type ReplyRow } from "./admin.ts";
 import { FALLBACK, guardText, isBlocked } from "./guard.ts";
 import { connectGoogle, disconnectGoogle, googleStatus, syncCalendar, syncIfStale } from "./calendar.ts";
+import { parkingNear, type Lot } from "./parking.ts";
+import parkingLots from "./parking_lots.json" with { type: "json" };
 import { parseNotify, parseReply, TAKE_REPLIES_SQL, type Notif } from "./notif.ts";
 
 interface Env {
@@ -18,7 +20,7 @@ interface Env {
   SMS_RELAY_SECRET?: string;
   ANTHROPIC_API_KEY?: string; // 말동무 대화(/car/chat). 없으면 no_key 고정 문구
   KAKAO_REST_KEY?: string; // 카카오 로컬 키워드 검색(가게 번호). 없으면 place-phone은 no_key
-  PARKING_API_KEY?: string; // 공공 실시간 주차(/car/parking). 없으면 no_key. 실제 호출은 아직 없음
+  PARKING_API_KEY?: string; // 공공 실시간 주차(/car/parking). 없으면 no_key
   GOOGLE_CLIENT_SECRET?: string; // 구글 캘린더 연결(/phone/google). 없으면 no_secret
   O4_LIVE?: string; // "1"일 때만 예약 전화가 실제 가게 번호로 간다. 아니면 항상 OWNER_NUMBER
 }
@@ -671,10 +673,13 @@ export default {
       return json({ parked: (await kvGet(env.DB, "parked")) ?? null });
     }
 
-    // 공공 실시간 주차 뼈대: 키를 받아 응답 필드를 확인한 뒤 실제 호출을 붙인다
+    // 공공 실시간 주차: 좌표 근처 1km 주차장 최대 3곳의 빈자리. 위치는 저장·로그하지 않는다
     if (m === "GET" && pathname === "/car/parking") {
       if (!authed) return json({ error: "unauthorized" }, 401);
-      return json({ reason: env.PARKING_API_KEY ? "not_implemented" : "no_key" });
+      const q = new URL(req.url).searchParams;
+      const lat = q.get("lat") ?? "", lng = q.get("lng") ?? "";
+      if (lat.trim() === "" || lng.trim() === "" || Math.abs(Number(lat)) > 90 || Math.abs(Number(lng)) > 180 || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return json({ error: "bad lat/lng" }, 400);
+      return json(await parkingNear(env.PARKING_API_KEY, parkingLots as Lot[], Number(lat), Number(lng)));
     }
 
     // 데모 메일함(설계 O2): 실제 메일은 보내지 않고 inbox kind='sent'(channel=mail)에 저장
