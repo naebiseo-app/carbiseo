@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { pickScript, parseRoom, cleanName, parseEta, nextWorkMorning, ownerScript } from "../src/script.ts";
+import { pickScript, parseRoom, cleanName, parseEta, nextWorkMorning, ownerScript, reportLine } from "../src/script.ts";
 
 const WED_19 = Date.UTC(2026, 10, 4, 10, 0); // 2026-11-04(수) 19:00 KST
 
@@ -113,10 +113,10 @@ test("첫 인사: AI 비서 소개 + 방별 상황 + 하나씩 묻는다는 안�
 test("손님 대본: 되읽기 확인·기한/급함은 직접 말했을 때만 생략·번호 한 자리씩·톤 유지(지적 1·2·4·5·9)", () => {
   for (const r of ["PARK", "DRIVE_WORK", "DRIVE_REST", null] as const) {
     const s = pickScript(r, "김도윤").instruction;
-    assert.match(s, /되읽어 확인합니다\(예: '김민수 님, 맞으시죠\?'\)/);
+    assert.match(s, /다음 말에 붙여 자연스럽게 되읽습니다\(예: '네, 김민수 님\. 어떤 일로 전화 주셨어요\?'\)/);
     assert.match(s, /틀렸다고 하면 .*고친 이름으로 한 번 더 확인/);
-    assert.match(s, /\[3\] '몇 시까지 연락드릴까요\?' — 상대가 .*구체적인 시각이나 기한을 직접 말했을 때만 건너뜁니다.*반드시 묻습니다/);
-    assert.match(s, /\[4\] 급한 일인지는 따로 묻지 않습니다/);
+    assert.match(s, /\[4\] '몇 시까지 연락드릴까요\?' — 상대가 .*구체적인 시각이나 기한을 직접 말했을 때만 건너뜁니다.*반드시 묻습니다/);
+    assert.match(s, /급한 일인지는 따로 묻지 않습니다/);
     assert.match(s, /한 자리씩 끊어 읽습니다\(예: 6000은 '육, 공, 공, 공'\. '육천'처럼 읽지 않습니다\)/);
     assert.match(s, /같은 차분하고 친절한 톤.*감정 연기·강조 억양/);
     assert.match(s, /말하는 중에는 끼어들지 않습니다/);
@@ -125,11 +125,18 @@ test("손님 대본: 되읽기 확인·기한/급함은 직접 말했을 때만 
   }
 });
 
+test("손님 대본: 이름만 말해도 용건은 반드시 묻고, 도구 호출은 말하지 않는다(11-06 실통화)", () => {
+  const s = pickScript("PARK", "김도윤").instruction;
+  assert.match(s, /상대가 이름만 말했으면 용건을 들은 것이 아닙니다/);
+  assert.match(s, /무슨 일인지 듣기 전에는 \[4\]·\[5\]로 가지 않고/);
+  assert.match(reportLine("CA0"), /말없이 호출합니다/);
+});
+
 test("지어내기 금지·소속 한 글자 되읽기·아는 번호 이름 확인·주인 이름 고정", () => {
   const ai = (owner?: string, known?: string) => pickScript("PARK", owner, undefined, null, "ai", null, null, WED_19 - 5 * 3_600_000, undefined, known).instruction;
   assert.match(ai("김도윤"), /직접 말한 이름·소속만/);
   assert.match(ai("김도윤"), /이름을 짐작하거나 지어내서 부르지 않습니다/);
-  assert.match(ai("김도윤"), /한 글자씩 끊어 읽습니다\(예: '새, 봄, 상사, 이지은 님 맞으시죠\?'\)/);
+  assert.match(ai("김도윤"), /한 글자씩 끊어 읽습니다\(예: '새, 봄, 상사, 이지은 님이시군요\.'\)/);
   assert.match(ai("김도윤"), /통화 첫머리에서 말한 것을 포함해.*절대 다시 묻지 않고/);
   assert.match(ai("김도윤"), /김도윤님 이름은 적힌 글자 그대로만 말하고 다른 이름으로 바꾸지 않습니다/);
   assert.doesNotMatch(ai(undefined), /\{owner\}|이름은 적힌 글자/);
