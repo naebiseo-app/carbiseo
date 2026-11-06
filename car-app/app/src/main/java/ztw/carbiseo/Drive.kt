@@ -244,7 +244,7 @@ fun reserveCallSpeech(name: String) = "${name}에 전화해 볼게요"
 /** 서버가 알려 준 예약 전화 결과(inbox kind=reserve 행) 한 문장. calling이면 null(아직 통화 중). ok면 요약 + 주차 가능 여부(meta.parking), 그 밖(need_manual 등)은 직접 확인. */
 fun reserveResultSpeech(place: String, i: InboxItem): String? = when (i.status) {
     "", "calling" -> null
-    "ok" -> sentences(i.summary.ifBlank { "${place} 예약을 마쳤어요" }, when (i.parking) { "가능" -> "주차 가능해요"; "불가" -> "주차는 안 돼요"; else -> null })
+    "ok" -> sentences(i.summary.ifBlank { "${place} 예약을 마쳤어요" }, when { "주차" in i.summary -> null; i.parking == "가능" -> "주차 가능해요"; i.parking == "불가" -> "주차는 안 돼요"; else -> null })
     else -> "${place} 예약은 직접 확인이 필요해요"
 }
 

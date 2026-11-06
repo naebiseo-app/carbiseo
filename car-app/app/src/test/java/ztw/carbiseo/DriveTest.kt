@@ -394,6 +394,7 @@ class DriveTest {
         assertEquals("전화를 걸지 못했어요. 할 일에 남겨 뒀어요", RESERVE_FAIL_SPEECH)
         fun row(status: String, summary: String = "", parking: String = "") = InboxItem(7, "판교 한정식", summary, false, 0L, "", kind = "reserve", status = status, parking = parking)
         assertEquals(null, reserveResultSpeech("판교 한정식", row("calling"))) // 통화 중이면 아직 말하지 않는다
+        assertEquals("두 명 7시 예약됐어요. 주차도 가능하대요.", reserveResultSpeech("판교 한정식", row("ok", "두 명 7시 예약됐어요. 주차도 가능하대요.", "가능"))) // 요약에 주차가 있으면 두 번 말하지 않는다
         assertEquals("두 명 7시 예약됐어요.", reserveResultSpeech("판교 한정식", row("ok", "두 명 7시 예약됐어요.")))
         assertEquals("두 명 7시 예약됐어요. 주차 가능해요.", reserveResultSpeech("판교 한정식", row("ok", "두 명 7시 예약됐어요", "가능")))
         assertEquals("두 명 7시 예약됐어요. 주차는 안 돼요.", reserveResultSpeech("판교 한정식", row("ok", "두 명 7시 예약됐어요", "불가")))
