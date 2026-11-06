@@ -96,7 +96,7 @@ async function saveCallCard(db: D1Database, c: Card, extra: object = {}, from = 
 // 도구 결과도 AI가 읽는다: 호출 직후 AI가 통화를 끊은 일이 있어(11-06 실통화) 끊지 말라고 돌려준다
 const AFTER_REPORT = "기록했습니다. 지금은 아무 말도 하지 않습니다. 통화를 끊지 말고 상대가 끊을 때까지 기다립니다. 상대가 말하면 이어서 답합니다.";
 
-const SUMMARY_SYSTEM = "전화 받아쓰기를 운전자가 볼 메모로 정리합니다. 받아쓰기에 있는 내용만 쓰고, 시각은 상대가 말한 그대로 씁니다. '아, 네' 같은 맞장구는 이름이 아니고, 비서가 되읽어 상대가 고친 이름이 있으면 고친 이름을 씁니다. JSON 한 줄만 답합니다: {\"caller\":\"상대 이름·소속, 없으면 빈 문자열\",\"summary\":\"누가 무슨 일로 언제까지 연락을 원하는지와 전해 달라는 내용을 모두 담은 한두 문장\",\"callback_by\":\"연락 희망 시각, 없으면 빈 문자열\"}";
+const SUMMARY_SYSTEM = "전화 받아쓰기를 운전자가 볼 메모로 정리합니다. 받아쓰기에 있는 내용만 쓰고, 상대가 말하지 않은 것은 없다고도 쓰지 않습니다. 연락 시각을 말했으면 summary에 반드시 넣습니다. '아, 네' 같은 맞장구는 이름이 아니고, 비서가 되읽어 상대가 고친 이름이 있으면 고친 이름을 씁니다. JSON 한 줄만 답합니다: {\"caller\":\"상대 이름·소속, 없으면 빈 문자열\",\"summary\":\"존댓말 한두 문장. 예: 김민수 님이 미팅 변경 건으로 전화하셨고 3시까지 연락을 부탁하셨어요. 자료도 보내 달라고 하셨어요.\",\"callback_by\":\"상대가 말한 연락 시각 표현 그대로(예: 3시까지), 없으면 빈 문자열\"}";
 
 // 받아쓰기 → 메모. 실패는 null(호출한 쪽이 상대 말 그대로 쓴다)
 async function summarizeCall(key: string | undefined, dialog: string): Promise<{ caller?: string; summary?: string; callback_by?: string } | null> {
