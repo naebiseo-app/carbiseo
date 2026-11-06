@@ -46,9 +46,9 @@ test("저장·덮어쓰기·clear, 주소는 카카오 좌표→주소", async (
   mock([{ road_address: { address_name: "가명로 1" }, address: null }]);
   const env = mkEnv({ KAKAO_REST_KEY: "kk" });
   assert.equal(await get(env), null);
-  assert.deepEqual(await (await post(env, { lat: 37.4, lng: "127.1", memo: "B2 3열", tasks: ["약국"] })).json(), { ok: true });
+  assert.deepEqual(await (await post(env, { lat: 37.4, lng: "127.1", memo: "B2 3열", tasks: [{ id: -1, title: "약국" }] })).json(), { ok: true, address: "가명로 1" });
   const p = await get(env);
-  assert.deepEqual([p.lat, p.lng, p.address, p.memo, p.tasks], [37.4, 127.1, "가명로 1", "B2 3열", ["약국"]]);
+  assert.deepEqual([p.lat, p.lng, p.address, p.memo, p.tasks], [37.4, 127.1, "가명로 1", "B2 3열", [{ id: -1, title: "약국", number: null }]]);
   assert.ok(Number.isFinite(p.at));
   await post(env, { lat: 35, lng: 129 });
   const q = await get(env);
@@ -57,16 +57,17 @@ test("저장·덮어쓰기·clear, 주소는 카카오 좌표→주소", async (
   assert.equal(await get(env), null);
 });
 
-test("좌표 잘못됨 400(저장 안 함), memo 40자·tasks 3개·80자로 자름", async () => {
+test("좌표 잘못됨 400(저장 안 함), memo 40자·tasks 8개·80자로 자르고 잘못된 항목은 버림", async () => {
   const env = mkEnv();
   for (const bad of [{}, { lat: "x", lng: 1 }, { lat: 1 }, { lat: null, lng: 1 }, { lat: "", lng: 1 }, { lat: Infinity, lng: 1 }, { lat: 1, lng: {} }, "bad"])
     assert.equal((await post(env, bad)).status, 400, JSON.stringify(bad));
   assert.equal(await get(env), null);
   assert.deepEqual(await (await post(env, {})).json(), { ok: false });
-  await post(env, { lat: 1, lng: 2, memo: "가".repeat(60), tasks: ["a".repeat(100), 5, " ", "b", "c", "d"] });
+  await post(env, { lat: 1, lng: 2, memo: "가".repeat(60), tasks: [{ id: 1, title: "a".repeat(100) }, 5, "x", { id: 1.5, title: "x" }, { id: 2, title: " " }, ...[3, 4, 5, 6, 7, 8, 9, 10].map((id) => ({ id, title: "t" + id }))] });
   const p = await get(env);
   assert.equal(p.memo.length, 40);
-  assert.deepEqual(p.tasks, ["a".repeat(80), "b", "c"]);
+  assert.equal(p.tasks.length, 8);
+  assert.deepEqual([p.tasks[0].title.length, p.tasks[1].id], [80, 3]);
 });
 
 test("주소 조회 실패해도 저장은 한다(빈 주소), 키 없어도 마찬가지", async () => {
@@ -74,6 +75,7 @@ test("주소 조회 실패해도 저장은 한다(빈 주소), 키 없어도 마
   const env = mkEnv({ KAKAO_REST_KEY: "kk" });
   assert.equal((await post(env, { lat: 1, lng: 2 })).status, 200);
   assert.equal((await get(env)).address, "");
+  assert.deepEqual(await (await post(env, { lat: 1, lng: 2 })).json(), { ok: true, address: null });
   const env2 = mkEnv();
   assert.equal((await post(env2, { lat: 1, lng: 2 })).status, 200);
   assert.equal((await get(env2)).address, "");
@@ -86,6 +88,42 @@ test("인증 없으면 401: 저장·폰 조회·공공 주차", async () => {
   assert.equal((await call(env, "GET", "/phone/parked", undefined, "Bearer x")).status, 401);
   assert.equal((await call(env, "GET", "/car/parking?lat=1&lng=2", undefined, "Bearer x")).status, 401);
   assert.equal(env.DB.db.prepare("SELECT 1 FROM kv WHERE key='parked'").get(), undefined);
+});
+
+const doneCall = (env: any, id: unknown, auth?: string) => call(env, "POST", "/phone/parked/done", { id }, auth);
+const addRow = (env: any, num: string | null) => Number(env.DB.db.prepare("INSERT INTO inbox(kind,status,from_number,from_label) VALUES('task','open',?,?)").run(num, "김민수").lastInsertRowid);
+
+test("폰 조회: 서버 행 id는 발신 번호를 붙이고 kv에는 번호를 저장하지 않음, 로컬 id는 null", async () => {
+  const env = mkEnv();
+  const a = addRow(env, "010-0000-0000"), b = addRow(env, null);
+  await post(env, { lat: 1, lng: 2, tasks: [{ id: a, title: "김민수에게 답장" }, { id: b, title: "이지은 확인" }, { id: -3, title: "약국" }] });
+  assert.deepEqual((await get(env)).tasks.map((t: any) => t.number), ["010-0000-0000", null, null]);
+  assert.ok(!(env.DB.db.prepare("SELECT value FROM kv WHERE key='parked'").get() as any).value.includes("010-0000-0000"));
+});
+
+test("폰에서 끝냄: 조회에서 빠지고, 차 GET에 id, 서버 행 done, 재전송해도 유지, 로컬 id는 행 건드리지 않음", async () => {
+  const env = mkEnv();
+  const a = addRow(env, "010-0000-0000"), b = addRow(env, null);
+  await post(env, { lat: 1, lng: 2, tasks: [{ id: a, title: "A" }, { id: b, title: "B" }, { id: -1, title: "C" }] });
+  assert.deepEqual(await (await call(env, "GET", "/car/parked")).json(), { done: [] });
+  assert.deepEqual(await (await doneCall(env, a)).json(), { ok: true });
+  await doneCall(env, -1); await doneCall(env, a);
+  assert.deepEqual((await get(env)).tasks.map((t: any) => t.id), [b]);
+  assert.deepEqual(await (await call(env, "GET", "/car/parked")).json(), { done: [a, -1] });
+  assert.equal((env.DB.db.prepare("SELECT status FROM inbox WHERE id=?").get(a) as any).status, "done");
+  assert.equal((env.DB.db.prepare("SELECT status FROM inbox WHERE id=?").get(b) as any).status, "open");
+  await post(env, { lat: 1, lng: 2, memo: "m", tasks: [{ id: a, title: "A" }, { id: b, title: "B" }] });
+  assert.deepEqual((await get(env)).tasks.map((t: any) => t.id), [b]);
+  await post(env, { clear: true });
+  assert.deepEqual(await (await call(env, "GET", "/car/parked")).json(), { done: [] });
+  assert.equal((await doneCall(env, "x")).status, 400);
+  assert.equal((await doneCall(env, 1.5)).status, 400);
+});
+
+test("done·GET /car/parked 인증 없으면 401", async () => {
+  const env = mkEnv();
+  assert.equal((await doneCall(env, 1, "Bearer x")).status, 401);
+  assert.equal((await call(env, "GET", "/car/parked", undefined, "Bearer x")).status, 401);
 });
 
 test("공공 주차 뼈대: 키 없으면 no_key", async () => {
