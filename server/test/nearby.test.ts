@@ -6,9 +6,14 @@ const real = globalThis.fetch;
 const mock = (documents: unknown[], ok = true) => { globalThis.fetch = (async () => ({ ok, json: async () => ({ documents }) })) as unknown as typeof fetch; };
 test.afterEach(() => { globalThis.fetch = real; });
 
-test("성공: 첫 결과를 숫자로 바꿔 돌려준다", async () => {
-  mock([{ place_name: "가명 식당", y: "37.41", x: "127.11", distance: "820" }]);
-  assert.deepEqual(await nearby("k", "FD6", "37.4", "127.1"), { name: "가명 식당", lat: 37.41, lng: 127.11, distance: 820 });
+test("성공: 결과를 숫자로 바꿔 가까운 순 그대로 돌려준다", async () => {
+  mock([{ place_name: "가명 식당", y: "37.41", x: "127.11", distance: "820" }, { place_name: "가명 분식", y: "37.42", x: "127.12", distance: "1500" }]);
+  assert.deepEqual(await nearby("k", "FD6", "37.4", "127.1"), { places: [{ name: "가명 식당", lat: 37.41, lng: 127.11, distance: 820 }, { name: "가명 분식", lat: 37.42, lng: 127.12, distance: 1500 }] });
+});
+test("충전소(CS2) 허용, 15곳까지만", async () => {
+  mock(Array.from({ length: 20 }, (_, i) => ({ place_name: `충전${i}`, y: "37.4", x: "127.1", distance: String(i) })));
+  const r = await nearby("k", "CS2", "37.4", "127.1");
+  assert.equal("places" in r && r.places.length, 15);
 });
 test("허용 밖 category·잘못된 좌표: bad_request(호출 안 함)", async () => {
   globalThis.fetch = (async () => { throw new Error("called"); }) as unknown as typeof fetch;

@@ -346,17 +346,17 @@ export async function placePhone(key: string | undefined, name: string, lat: str
   } catch { return none("upstream"); }
 }
 
-/** 차 현재 좌표 근처 가장 가까운 1곳(카카오 카테고리 검색, 반경 5km). category는 FD6 식당·CE7 카페·OL7 주유소만. 좌표·결과는 저장·로그하지 않는다. */
-export async function nearby(key: string | undefined, category: string, lat: string, lng: string): Promise<{ name: string; lat: number; lng: number; distance: number } | { reason: string }> {
+/** 차 현재 좌표 근처 가까운 순 최대 15곳(카카오 카테고리 검색, 반경 5km). 지나온 곳을 거르는 건 차가 한다. category는 FD6 식당·CE7 카페·OL7 주유소·CS2 충전소만. 좌표·결과는 저장·로그하지 않는다. */
+export async function nearby(key: string | undefined, category: string, lat: string, lng: string): Promise<{ places: { name: string; lat: number; lng: number; distance: number }[] } | { reason: string }> {
   if (!key) return { reason: "no_key" };
-  if (!["FD6", "CE7", "OL7"].includes(category) || lat.trim() === "" || lng.trim() === "" || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return { reason: "bad_request" };
+  if (!["FD6", "CE7", "OL7", "CS2"].includes(category) || lat.trim() === "" || lng.trim() === "" || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return { reason: "bad_request" };
   try {
-    const r = await fetch(`https://dapi.kakao.com/v2/local/search/category.json?category_group_code=${category}&x=${lng}&y=${lat}&radius=5000&sort=distance`, { headers: { Authorization: `KakaoAK ${key}` } });
+    const r = await fetch(`https://dapi.kakao.com/v2/local/search/category.json?category_group_code=${category}&x=${lng}&y=${lat}&radius=5000&sort=distance&size=15`, { headers: { Authorization: `KakaoAK ${key}` } });
     if (!r.ok) return { reason: "upstream" };
-    const d = ((await r.json()) as { documents?: { place_name?: string; y?: string; x?: string; distance?: string }[] }).documents?.[0];
-    const out = d && { name: d.place_name ?? "", lat: Number(d.y), lng: Number(d.x), distance: Number(d.distance) };
-    if (!out || !out.name || !Number.isFinite(out.lat) || !Number.isFinite(out.lng) || !Number.isFinite(out.distance)) return { reason: "not_found" };
-    return out;
+    const docs = ((await r.json()) as { documents?: { place_name?: string; y?: string; x?: string; distance?: string }[] }).documents ?? [];
+    const places = docs.slice(0, 15).map((d) => ({ name: d.place_name ?? "", lat: Number(d.y), lng: Number(d.x), distance: Number(d.distance) }))
+      .filter((p) => p.name && Number.isFinite(p.lat) && Number.isFinite(p.lng) && Number.isFinite(p.distance));
+    return places.length ? { places } : { reason: "not_found" };
   } catch { return { reason: "upstream" }; }
 }
 
