@@ -151,7 +151,7 @@ async function transcriptCard(env: Env, raw: string) {
   const segs = ((await r.json()) as { segments?: { speaker: string; text: string }[] }).segments ?? [];
   const ai = segs[0]?.speaker; // 첫 화자 = AI 소개
   const said = segs.filter((s) => s.speaker !== ai).map((s) => s.text).join(" ");
-  const dialog = segs.map((s) => `${s.speaker === ai ? "비서" : "상대"}: ${s.text}`).join("\n");
+  const dialog = segs.map((s) => `${s.speaker === ai ? "비서" : "상대"}: ${s.text}`).join("\n").replace(/\d[\d -]{7,}\d/g, "[번호]"); // 전화번호는 외부 AI로 보내지 않는다
   if (owner) { // 주인 통화 → 되읽고 확인한 문자는 바로 발송, 시킨 일마다 할 일 카드. 요약 실패면 주인 말 그대로 1장(자동 발송 없음)
     if (!said) return;
     const memo = await summarizeCall(env.ANTHROPIC_API_KEY, TASK_SYSTEM, dialog);
@@ -162,7 +162,7 @@ async function transcriptCard(env: Env, raw: string) {
       const to = String(x?.to ?? "").trim().slice(0, 40), body = String(x?.body ?? "").trim();
       if (!to || !body) continue;
       const num = await numberFor(env, to);
-      const p = num ? parseSend({ to_number: num, body, to_label: to, confirmed: true }) : null;
+      const p = num && !body.includes("[번호]") ? parseSend({ to_number: num, body, to_label: to, confirmed: true }) : null;
       const r = p && !("error" in p) ? await sendText(env, p.to, p.body, p.label, id) : null;
       if (!r?.ok) tasks.push(`${to}에게 문자 / 내용: ${body}`); // 못 보낸 문자는 할 일로 남긴다
     }

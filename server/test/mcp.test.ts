@@ -175,6 +175,23 @@ const callCard = (env: any, label: string, num: string | null) => env.DB.db.prep
 const kvSet = (env: any, key: string, v: unknown) => env.DB.db.prepare("INSERT INTO kv(key,value,updated_at) VALUES(?,?,0)").run(key, JSON.stringify(v));
 const SEND = { to: "이지은", body: "3시에 도착합니다." };
 
+test("받아쓰기의 전화번호는 외부 AI로 안 보내고, 번호가 가려진 문자는 할 일 카드로", async () => {
+  const real = globalThis.fetch; let sent = ""; let relay = 0;
+  globalThis.fetch = (async (u: string, init: any) => {
+    if (String(u).includes("anthropic")) { sent = init.body; return new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify({ tasks: [], sends: [{ to: "이지은", body: "[번호]로 전화 주세요" }] }) }] })); }
+    if (String(u).includes("relay")) { relay++; return new Response("{}"); }
+    return new Response(JSON.stringify({ segments: [{ speaker: "speaker_0", text: "네" }, { speaker: "speaker_1", text: "이지은에게 010-5555-6789로 전화 달라고 문자 보내줘" }] }));
+  }) as unknown as typeof fetch;
+  try {
+    const env = mkEnvS();
+    callCard(env, "이지은", GUEST);
+    await hook(env, OWNER);
+    assert.doesNotMatch(sent, /5555/);
+    assert.equal(relay, 0);
+    assert.equal(rows(env, "task")[0].summary, "이지은에게 문자 / 내용: [번호]로 전화 주세요");
+  } finally { globalThis.fetch = real; }
+});
+
 test("주인 통화: 최근 전화 카드에 이름이 있으면 자동 발송, sent 행이 남고 할 일 카드는 없음", async () => {
   const f = ownerFetch({ tasks: [], sends: [SEND] });
   try {
