@@ -232,7 +232,7 @@ class DriveTest {
     }
 
     @Test fun 근처_찾기_말은_종류별로_가른다() {
-        for (t in listOf("배고파", "밥 먹자", "근처 식당 찾아줘", "맛집 가고 싶어")) assertEquals(t, NearKind.FOOD, nearWish(t))
+        for (t in listOf("배고파", "출출해", "뭐 먹지", "밥 먹자", "근처 식당 찾아줘", "맛집 가고 싶어")) assertEquals(t, NearKind.FOOD, nearWish(t))
         for (t in listOf("커피 마시고 싶다", "근처 카페 찾아줘", "카페 가자")) assertEquals(t, NearKind.CAFE, nearWish(t))
         for (t in listOf("기름 떨어졌어", "주유소 어디야", "기름 없어")) assertEquals(t, NearKind.GAS, nearWish(t))
         for (t in listOf("충전소 찾아줘", "충전해야 해", "배터리 부족해")) assertEquals(t, NearKind.CHARGE, nearWish(t))
@@ -242,6 +242,30 @@ class DriveTest {
         assertEquals(CarIntent.NEARBY, carIntent("배고파")); assertEquals(CarIntent.RESERVE, carIntent("두 명 예약해 줘")); assertEquals(CarIntent.NEXT_EVENT, carIntent("오늘 일정"))
         assertEquals("근처 식당 찾아드릴까요?", nearAskSpeech(NearKind.FOOD)); assertEquals("근처 카페 찾아드릴까요?", nearAskSpeech(NearKind.CAFE)); assertEquals("근처 주유소 찾아드릴까요?", nearAskSpeech(NearKind.GAS))
         assertEquals(null, fatigueGate(CarIntent.NEARBY, true))
+    }
+
+    @Test fun 점심_저녁_시간대는_양_끝_포함() {
+        val t = { h: Int, m: Int -> java.time.LocalTime.of(h, m) }
+        assertEquals(null, mealWord(t(11, 29))); assertEquals("점심", mealWord(t(11, 30))); assertEquals("점심", mealWord(t(13, 30))); assertEquals(null, mealWord(t(13, 31)))
+        assertEquals(null, mealWord(t(17, 29))); assertEquals("저녁", mealWord(t(17, 30))); assertEquals("저녁", mealWord(t(19, 30))); assertEquals(null, mealWord(t(19, 31)))
+    }
+
+    @Test fun 먼저_말_걸기는_끔_첫_제안_자주만_2시간_뒤() {
+        val h = 60 * 60_000L
+        assertFalse(offerDue(Proactive.OFF, null, 0))
+        assertTrue(offerDue(Proactive.NORMAL, null, 0)); assertTrue(offerDue(Proactive.OFTEN, null, 0))
+        assertFalse(offerDue(Proactive.NORMAL, 0L, 5 * h)) // 보통은 운전 1회에 1번
+        assertFalse(offerDue(Proactive.OFTEN, 0L, 2 * h - 1)); assertTrue(offerDue(Proactive.OFTEN, 0L, 2 * h))
+        assertEquals("점심 시간이에요. 근처 식당 찾아드릴까요?", mealOffer("점심")); assertEquals("배터리가 18퍼센트 남았어요. 근처 충전소 찾아드릴까요?", chargeOffer(18))
+        assertEquals(20, CHARGE_OFFER_SOC); assertEquals(60, MEAL_OFFER_DRIVE_MIN)
+    }
+
+    @Test fun 주차_메모는_주차와_층_구역이_함께_있을_때만() {
+        assertEquals("지하 2층 C구역", parkMemo("주차 지하 2층 C구역")); assertEquals("지하2층 B2구역", parkMemo("지하2층 B2구역에 주차했어"))
+        assertEquals("3층", parkMemo("3층에 주차했어")); assertEquals("A구역", parkMemo("주차는 A구역"))
+        assertEquals(null, parkMemo("2층")); assertEquals(null, parkMemo("주차했어")); assertEquals(null, parkMemo("답장 주차 2층이라고 해줘")); assertEquals(null, parkMemo(null))
+        assertEquals(CarIntent.PARK_MEMO, carIntent("주차 지하 2층 C구역")); assertEquals(CarIntent.UNKNOWN, carIntent("2층"))
+        assertEquals(CarIntent.NEARBY, carIntent("배고파")); assertEquals(null, fatigueGate(CarIntent.PARK_MEMO, false))
     }
 
     @Test fun 근처_찾은_가게_문장은_미터와_킬로미터로_읽는다() {

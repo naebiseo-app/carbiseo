@@ -52,7 +52,7 @@ fun urgentNeed(said: String?): Boolean {
 
 /** 근처 찾기 제안: 배고파·커피·기름. code는 서버 /car/nearby의 카카오 category_group_code. */
 enum class NearKind(val code: String, val label: String) { FOOD("FD6", "식당"), CAFE("CE7", "카페"), GAS("OL7", "주유소"), CHARGE("CS2", "충전소") }
-private val NEAR_FOOD = Regex("배고|밥먹(자|고싶|을|으러)|밥집|근처식당|식당찾|맛집|먹을데|먹을곳")
+private val NEAR_FOOD = Regex("배고|출출|허기|뭐먹지|밥먹(자|고싶|을|으러)|밥집|근처식당|식당찾|맛집|먹을데|먹을곳")
 private val NEAR_CAFE = Regex("커피(마시|한잔|먹고|사)|근처카페|카페찾|카페가")
 private val NEAR_GAS = Regex("기름(없|떨어|넣|부족)|주유")
 private val NEAR_CHARGE = Regex("충전(소|하|해야)|배터리(없|부족|떨어)")
@@ -70,13 +70,40 @@ fun nearFoundSpeech(name: String, meters: Int) = "$name, ${if (meters < 1000) "$
 const val NEAR_NONE_SPEECH = "근처에서 찾지 못했어요"
 const val NEAR_NO_LOC_SPEECH = "지금 위치를 알 수 없어요"
 const val NEAR_ADDED_SPEECH = "경로에 넣었어요"
+const val NEAR_NAVI_WAIT_SPEECH = "내비가 아직 준비 중이에요. 잠시 뒤 다시 말씀해 주세요"
 
-/** F5 차 음성 입구: [말하기]로 한 마디 듣고 키워드로만 가른다(LLM 없음). 급해·화장실(Q3) > 아까 전화 > 예약(인원은 partyOf로 따로 읽는다) > 일정 > 근처 찾기. */
-enum class CarIntent { RECENT_CALLS, URGENT, NEXT_EVENT, RESERVE, NEARBY, UNKNOWN }
+/** 먼저 말 걸기: 끔 / 필요할 때만(운전 1회에 종류별 한 번) / 자주(같은 종류 2시간마다). */
+enum class Proactive { OFF, NORMAL, OFTEN }
+const val CHARGE_OFFER_SOC = 20
+const val MEAL_OFFER_DRIVE_MIN = 60
+private const val OFFER_GAP_MS = 2 * 60 * 60_000L
+/** 점심 11:30~13:30, 저녁 17:30~19:30(양 끝 포함). 아니면 null. */
+fun mealWord(t: java.time.LocalTime): String? = when {
+    t >= java.time.LocalTime.of(11, 30) && t <= java.time.LocalTime.of(13, 30) -> "점심"
+    t >= java.time.LocalTime.of(17, 30) && t <= java.time.LocalTime.of(19, 30) -> "저녁"
+    else -> null
+}
+/** lastOfferMs = 이번 운전에서 이 종류를 마지막으로 제안한 시각(null = 아직 안 함). */
+fun offerDue(level: Proactive, lastOfferMs: Long?, now: Long): Boolean =
+    level != Proactive.OFF && (lastOfferMs == null || (level == Proactive.OFTEN && now - lastOfferMs >= OFFER_GAP_MS))
+fun mealOffer(word: String) = "$word 시간이에요. 근처 식당 찾아드릴까요?"
+fun chargeOffer(soc: Int) = "배터리가 ${soc}퍼센트 남았어요. 근처 충전소 찾아드릴까요?"
+
+/** 주차 메모: "주차 지하 2층 C구역" -> "지하 2층 C구역". '주차'가 없거나 층·구역을 못 읽거나 답장 문장이면 null. */
+private val PARK_SPOT = Regex("""지하\s?\d+층|\d+층|[A-Za-z가-힣]?\d*구역""")
+fun parkMemo(said: String?): String? {
+    val t = said.orEmpty()
+    if ("주차" !in t || "답장" in t) return null
+    return PARK_SPOT.findAll(t).joinToString(" ") { it.value }.ifEmpty { null }
+}
+const val PARK_MEMO_SPEECH = "주차 위치를 적어 뒀어요"
+
+/** F5 차 음성 입구: [말하기]로 한 마디 듣고 키워드로만 가른다(LLM 없음). 급해·화장실(Q3) > 아까 전화 > 예약(인원은 partyOf로 따로 읽는다) > 일정 > 주차 메모 > 근처 찾기. */
+enum class CarIntent { RECENT_CALLS, URGENT, NEXT_EVENT, RESERVE, PARK_MEMO, NEARBY, UNKNOWN }
 private val RECENT_CALL_WORDS = Regex("아까전화|전화뭐|누구전화")
 fun carIntent(said: String?): CarIntent {
     val n = said.orEmpty().replace(Regex("""\s"""), "")
-    return when { urgentNeed(said) -> CarIntent.URGENT; RECENT_CALL_WORDS.containsMatchIn(n) -> CarIntent.RECENT_CALLS; "일정" in n -> CarIntent.NEXT_EVENT; "예약" in n -> CarIntent.RESERVE; nearWish(said) != null -> CarIntent.NEARBY; else -> CarIntent.UNKNOWN }
+    return when { urgentNeed(said) -> CarIntent.URGENT; RECENT_CALL_WORDS.containsMatchIn(n) -> CarIntent.RECENT_CALLS; "일정" in n -> CarIntent.NEXT_EVENT; "예약" in n -> CarIntent.RESERVE; parkMemo(said) != null -> CarIntent.PARK_MEMO; nearWish(said) != null -> CarIntent.NEARBY; else -> CarIntent.UNKNOWN }
 }
 /** Q1 조용한 비서: 한 질문에서 못 알아들었을 때 다시 묻는 건 1번뿐. again()이 true면 한 번 더 묻고, false면 화면 2택으로 넘긴다. 새 질문마다 reset. */
 class Reask {

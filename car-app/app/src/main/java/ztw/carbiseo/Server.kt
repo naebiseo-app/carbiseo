@@ -117,6 +117,11 @@ object Server {
         return (if (j?.optBoolean("ok") == true) j.optLong("id", 0L) else null) to (j?.str("code") ?: "")
     }
 
+    /** 주차 기록(하차 카드의 차 쪽 데이터): 위치·메모·안 끝난 할 일 제목. 2xx면 true. */
+    fun postParked(lat: Double, lng: Double, memo: String, tasks: List<String>): Boolean =
+        post("/car/parked", JSONObject().put("lat", lat).put("lng", lng).put("memo", memo).put("tasks", org.json.JSONArray(tasks)))
+    fun clearParked(): Boolean = post("/car/parked", JSONObject().put("clear", true))
+
     /** 근처 가까운 순 최대 15곳(서버가 카카오 카테고리 검색). 못 찾았거나 실패하면 빈 목록. 좌표는 이 호출에만 쓴다. */
     fun nearby(code: String, lat: Double, lng: Double): List<NearPlace> = runCatching {
         val c = open("/car/nearby?category=$code&lat=$lat&lng=$lng", "GET")

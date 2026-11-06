@@ -956,6 +956,16 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
                 }
             }
         }
+        Text("먼저 말 걸기", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            for ((lv, t) in listOf(Proactive.OFF to "끄기", Proactive.NORMAL to "필요할 때만", Proactive.OFTEN to "자주")) {
+                val on = RoomService.proactive == lv
+                Button({ RoomService.proactive = lv; prefs.edit().putString("proactive", lv.name).apply() }, Tall,
+                    colors = ButtonDefaults.buttonColors(containerColor = if (on) ParkAcc else ParkNote)) {
+                    Text(t, color = if (on) Color.White else ParkInk, fontSize = 18.sp)
+                }
+            }
+        }
         Text("업무 끝 시각: ${RoomService.workEndHour}시", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             for (h in WORK_END_CHOICES) {

@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import java.time.Clock
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.util.concurrent.Executors
 
 /** 방 판정 본체. 내비가 앞에 와도 Activity와 무관하게 돈다. 화면은 companion의 room/sig를 읽는다(같은 프로세스). */
@@ -60,6 +61,9 @@ class RoomService : Service() {
     private val hold = SpeechHold { mode }
     private var forced: Alert? = null // 디버그 브로드캐스트로 강제한 값
     private var forcedTrip: Int? = null // 디버그: 트립 주행시간(분) 강제
+    private var forcedSoc: Int? = null // 디버그: 배터리 잔량(%) 강제 (먼저 말 걸기의 충전 제안만 읽는다)
+    private var lastMealOffer: Long? = null; private var lastChargeOffer: Long? = null // 이번 운전에서 먼저 제안한 시각(시뮬 시각). 새 운전에서 비운다
+    private var parkMemoText: String? = null // "주차 지하 2층"으로 적어 둔 메모. 새 운전에서 비운다
 
     /** 트립 주행시간(분): SDK 값(이번 운전 시작 때 값과의 차이, H12), 없으면(에뮬은 3종 모두 ERROR_NOT_SUPPORTED_PROPERTY) 이번 운전을 앱이 잰 분. */
     private fun tripMin(): Int? = forcedTrip ?: trip.of(adapters.tripMin) ?: driveStart?.let { ((clock.millis() - it) / 60_000).toInt() }
@@ -252,9 +256,17 @@ class RoomService : Service() {
             CarIntent.RECENT_CALLS -> say(recentCallsSpeech(cards()))
             CarIntent.NEXT_EVENT -> say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis())))
             CarIntent.RESERVE -> reserveIntent(said)
+            CarIntent.PARK_MEMO -> parkMemo(said)?.let { parkMemoText = it; machine.signals.location?.let { l -> postParked(l); say(PARK_MEMO_SPEECH) } ?: say(NEAR_NO_LOC_SPEECH) }
             CarIntent.NEARBY -> nearWish(said)?.let { nearKind = it; askVoice(nearAskSpeech(it), Ask.NEAR_FIND) }
             CarIntent.UNKNOWN -> {}
         }
+    }
+
+    /** 주차 기록을 서버에 한 번: 위치·메모·아직 안 끝난 할 일 카드 제목 최대 3개(번호는 뺀다). */
+    private fun postParked(l: LatLng) {
+        val tasks = cards().filter { it.kind == "task" }.take(3).map { cardText(it).substringBefore(" — ").substringBefore(" · ") }
+        val memo = parkMemoText.orEmpty()
+        net.execute { Log.i("ROOM", "parked -> ${Server.postParked(l.lat, l.lng, memo, tasks)}") }
     }
 
     /** [말하기] "두 명 예약해 줘": 목적지가 있으면 인원이 말에 있을 때 되묻지 않고 바로 전화, 없으면 인원을 묻는다. */
@@ -309,10 +321,11 @@ class RoomService : Service() {
 
     /** 근처 찾기 "들를게": 경유지(목적지 없으면 경로)로 넣고, 식당·카페는 이어서 예약을 묻는다. 도착 시각은 시속 30킬로(분당 500m)로 올림. */
     private fun nearGo() {
-        val kind = nearKind ?: return; val h = nearHit ?: return; val n = adapters.navi ?: return
+        val kind = nearKind ?: return; val h = nearHit ?: return; val n = adapters.navi ?: return say(NEAR_NAVI_WAIT_SPEECH)
         if (machine.signals.destination != null) n.addWaypoint(RequestWaypointInfo(h.lat, h.lng, h.name, WaypointIndex.FIRST, "", "", "", "")) else route(LatLng(h.lat, h.lng), h.name)
         if (kind != NearKind.FOOD && kind != NearKind.CAFE) return say(NEAR_ADDED_SPEECH)
         val t = arriveAt(clock.millis(), maxOf(1, Math.ceil(h.distance / 500.0).toInt()), clock.zone)
+        reserveOnce.fire(true) // 식당이 목적지가 돼도 틱의 자동 예약 질문이 또 묻지 않게
         reserve = h.name to t; reservePlace = LatLng(h.lat, h.lng); askVoice(reserveSpeech(h.name, t), Ask.RESERVE)
     }
 
@@ -499,6 +512,12 @@ class RoomService : Service() {
             val dn = forcedDest ?: adapters.destName
             if (machine.room.let { it != null && it != Room.PARK } && !passenger && e != null && reservable(dn) && canAsk() &&
                 reserveOnce.fire(true)) arriveAt(clock.millis(), e, clock.zone).let { t -> reserve = dn!! to t; reservePlace = null; askVoice(reserveSpeech(dn, t), Ask.RESERVE) }
+            // 먼저 말 걸기(근처 찾기 흐름 그대로): 충전이 먼저, 한 틱에 하나. 시각·운전 시간은 TIME·TRIP 디버그와 같은 값
+            if (machine.room.let { it != null && it != Room.PARK } && !passenger && canAsk()) clock.millis().let { now ->
+                val soc = forcedSoc ?: adapters.soc; val word = mealWord(LocalTime.now(clock))
+                if (soc != null && soc <= CHARGE_OFFER_SOC && offerDue(proactive, lastChargeOffer, now)) { lastChargeOffer = now; nearKind = NearKind.CHARGE; askVoice(chargeOffer(soc), Ask.NEAR_FIND) }
+                else if (word != null && (tripMin() ?: 0) >= MEAL_OFFER_DRIVE_MIN && !reservable(dn) && offerDue(proactive, lastMealOffer, now)) { lastMealOffer = now; nearKind = NearKind.FOOD; askVoice(mealOffer(word), Ask.NEAR_FIND) }
+            }
             if (homeOnce.fire(homeSoon(machine.room, machine.signals.destination, machine.settings, e))) {
                 if (!passenger) say(HOME_SOON_SPEECH)
                 notifyFamily(e)
@@ -531,6 +550,7 @@ class RoomService : Service() {
             val df = decodeDeferred(p.getString("deferred", "")); val fw = p.getBoolean("forward_ok", false)
             val fv = p.getString("fav_senders", "").orEmpty(); ui.post { favs = parseFavs(fv) }
             val fd = p.getLong("family_day", -1); ui.post { familyDay = fd }
+            val pa = runCatching { Proactive.valueOf(p.getString("proactive", null) ?: "") }.getOrDefault(Proactive.NORMAL); ui.post { proactive = pa }
             val wo = p.getBoolean("wake_on", false); val wn = p.getString("wake_name", null)?.takeIf { validName(it) } ?: WAKE_DEFAULT_NAME; ui.post { wakeOn = wo; wakeName = wn }
             val ab = p.getString("arrive_said", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }
             val sd = p.getBoolean("setup_done", false); val md = p.getString("mode", "ai") ?: "ai"; val bd = p.getLong("brief_day", -1)
@@ -547,6 +567,7 @@ class RoomService : Service() {
                 parkedAt = now; restOffer = false; hold.clear(); parkRemind.reset(); chatHistory.clear()
                 // 정차 요약: 이번 실행에 와서 아직 안 알리고 안 본 알림(쉼 방 비즐겨찾기·피로·동승자 등으로 미룬 것)
                 notifQueue.clear(); talk.cancel(); listening = false; pending = Ask.NONE; reservePlace = null
+                machine.signals.location?.let(::postParked) // 짧은 정차에도 위치는 갱신
                 val left = inbox.filter { it.id in notifFresh && it.id !in notifSaid && it.id !in seen && !isAd(it) }.sortedBy { it.id }
                 if (left.isNotEmpty() && !passenger) offerNotifs(left)
             }
@@ -555,7 +576,8 @@ class RoomService : Service() {
                 replay = replay?.copy(hint = null) // 출발하면 도움 카드는 내리고(운전 중엔 귓속말만), 다음 도움부터 TTS
                 if (from == Room.PARK && talk.step != NotifTalk.Step.NONE) { talk.cancel(); askStep = talk.step; listening = false } // P에서 남겨 둔 바는 출발하면 닫는다(카드는 남음)
                 // M4: 2분 미만 P는 같은 운전 — 휴식·피로·집 문턱 1회 안내와 운전 시작 시각을 유지
-                if (newDrive(parked)) { homeOnce.reset(); reserveOnce.reset(); restOnce.reset(); fatigueOnce.reset(); trip.reset(); driveStart = now; restSnoozeUntil = 0 }
+                if (newDrive(parked)) { homeOnce.reset(); reserveOnce.reset(); restOnce.reset(); fatigueOnce.reset(); trip.reset(); driveStart = now; restSnoozeUntil = 0
+                    lastMealOffer = null; lastChargeOffer = null; parkMemoText = null; net.execute { Server.clearParked() } }
                 else Log.i("ROOM", "short park ${parked!! / 1000}s -> same drive")
                 // H9: 오래 세운 뒤의 출발이면 그 전에 켠 동승자 모드는 끈다
                 if (passenger && parked != null && parked >= PASSENGER_RESET_PARK_MS && passengerAt < now - parked) { togglePassenger(false); say("동승자 모드를 껐어요") }
@@ -634,6 +656,10 @@ class RoomService : Service() {
         val tr = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { forcedTrip = i.getIntExtra("min", -1).takeIf { it >= 0 }; Log.i("ROOM", "debug trip force=$forcedTrip") }
         }
+        // adb shell am broadcast -a ztw.carbiseo.SOC --ei soc 15 (-1 = 해제, 차 실제 값으로). 먼저 말 걸기의 충전 제안 확인용
+        val soc = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) { forcedSoc = i.getIntExtra("soc", -1).takeIf { it >= 0 }; Log.i("ROOM", "debug soc force=$forcedSoc") }
+        }
         // adb shell am broadcast -a ztw.carbiseo.SIGNAL --ei left 4 (초록불까지 남은 초). 5초 넘게 남은 값이 오면 다음 신호로 보고 다시 말할 수 있게.
         // ponytail: 실시간 신호 API는 강릉시만 공개(data.go.kr 15140011, 키 없음). 키 생기면 서버에서 교차로별 남은 초 → 같은 입력으로.
         val sig = object : BroadcastReceiver() {
@@ -684,7 +710,7 @@ class RoomService : Service() {
         val wakePcm = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { runCatching { java.io.File(filesDir, "wake.pcm").readBytes() }.onSuccess { Log.i("ROOM", "debug wake pcm ${it.size}B active=${wake != null}"); wake?.feedPcm(it) } }
         }
-        for ((rc, action) in listOf(cc to "ztw.carbiseo.CALLCARD", hear to "ztw.carbiseo.HEAR", wakePcm to "ztw.carbiseo.WAKEPCM", say to "ztw.carbiseo.SAY", wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP", loc to "ztw.carbiseo.LOC", tm to "ztw.carbiseo.TIME", sig to "ztw.carbiseo.SIGNAL")) {
+        for ((rc, action) in listOf(cc to "ztw.carbiseo.CALLCARD", hear to "ztw.carbiseo.HEAR", wakePcm to "ztw.carbiseo.WAKEPCM", say to "ztw.carbiseo.SAY", wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP", loc to "ztw.carbiseo.LOC", tm to "ztw.carbiseo.TIME", soc to "ztw.carbiseo.SOC", sig to "ztw.carbiseo.SIGNAL")) {
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(rc, IntentFilter(action), Context.RECEIVER_EXPORTED) else registerReceiver(rc, IntentFilter(action))
             receivers += rc
         }
@@ -773,6 +799,7 @@ class RoomService : Service() {
         private const val NAVI_PKG = "ai.umos.maps.android.navigation.app" // Pleos 내비 앱(26 실측)
         var restOffer by mutableStateOf(false); private set // S2: 화면에 휴게소 버튼
         var restMin by mutableIntStateOf(REST_DEFAULT_MIN) // 연속 주행 기준(분). 설정 화면이 바꾼다.
+        var proactive by mutableStateOf(Proactive.NORMAL) // 먼저 말 걸기 수준(prefs "proactive"). 설정 화면이 바꾼다.
         var workEndHour by mutableIntStateOf(18) // 업무 끝 시각(시, 17~20). 설정 화면이 바꾼다. 방 판정·업무 외 판정이 이 값을 쓴다.
         fun setWorkEnd(c: Context, h: Int) { workEndHour = h; save(c) { putInt("work_end", h) } }
         const val WAKE_DEFAULT_NAME = "내비서"
