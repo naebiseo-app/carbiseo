@@ -315,6 +315,12 @@ fun lateBy(nowMs: Long, etaMin: Int?, eventStartMs: Long): Int? {
 }
 
 const val LATE_DEST_RADIUS_M = 1000.0
+const val TRIP_CHECK_MS = 5 * 60_000L
+const val TRIP_LOOKAHEAD_MS = 2 * 3_600_000L
+/** 일정 장소로 안 가는 중이어도 "지금 바로 가도 늦는지"를 내비에 물을 차례인가. 2시간 안의 일정만, 5분에 한 번. 좌표 없는 일정은 묻지 않는다. */
+fun tripCheckDue(next: Event?, dest: LatLng?, lateAsked: Set<Long>, lastCheckMs: Long?, now: Long): Boolean =
+    next != null && next.at.lat != 0.0 && next.start !in lateAsked && !headingTo(dest, next) &&
+        next.start - now <= TRIP_LOOKAHEAD_MS && (lastCheckMs == null || now - lastCheckMs >= TRIP_CHECK_MS)
 /** F4 오탐 줄이기: 지금 가는 목적지가 그 일정 장소(1km 안)일 때만 지각을 묻는다. 목적지를 모르면 묻지 않는다. */
 fun headingTo(dest: LatLng?, e: Event): Boolean = dest != null && distanceM(dest, e.at) <= LATE_DEST_RADIUS_M
 

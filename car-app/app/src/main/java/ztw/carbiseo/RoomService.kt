@@ -98,6 +98,9 @@ class RoomService : Service() {
     private val chatHistory = mutableListOf<Pair<String, String>>() // 말동무 대화 맥락(메모리만, 저장·로그 없음). 메인 스레드에서만
     private var lateEvent: Pair<Event, Int?>? = null // 분 수 null = 정체 먼저 말 걸기(지각 분을 모름)
     private val lateAsked = mutableSetOf<Long>() // 이미 물은 일정(start)
+    private var lastTripCheck: Long? = null
+    private var tripFor: Long? = null // 내비에 시간을 물은 일정(start)
+    private var forcedTripEta: Int? = null // 디버그: 다음 일정까지 걸리는 분 강제
     private val reserveOnce = Once() // O4: 운전 1회당 한 번
     private val callFresh = mutableSetOf<Long>() // 이번 실행에 새로 온 통화 카드 id
     private val callbackAsked = mutableSetOf<Long>() // 문자 먼저 보낼지 이미 물은 카드(카드당 한 번)
@@ -573,6 +576,12 @@ class RoomService : Service() {
                 nextEvent(schedule, now)?.takeIf { it.start !in lateAsked && headingTo(machine.signals.destination, it) }?.let { ev ->
                     lateBy(now, e, ev.start)?.let { m -> lateAsked += ev.start; lateEvent = ev to m; askVoice(lateSpeech(m, machine.signals.rain), Ask.LATE) }
                 }
+                // 다른 곳으로 가거나 목적지가 없어도, 내비가 재 본 시간으로 지금 바로 가도 늦으면 같은 질문을 한다
+                val nx = nextEvent(schedule, now)
+                if (adapters.naviReady && tripCheckDue(nx, machine.signals.destination, lateAsked, lastTripCheck, now)) { lastTripCheck = now; tripFor = nx!!.start; adapters.askTrip(nx.at, nx.place) }
+                (forcedTripEta ?: adapters.takeTripEta())?.let { t -> nx?.takeIf { it.start == tripFor && it.start !in lateAsked && !headingTo(machine.signals.destination, it) }?.let { ev ->
+                    lateBy(now, t, ev.start)?.let { m -> lateAsked += ev.start; lateEvent = ev to m; askVoice(lateSpeech(m, machine.signals.rain), Ask.LATE) }
+                } }
             }
             // 도착 10분 전: 그 일정 장소로 가는 중이면 일정마다 한 번 "곧 도착해요". 동승자·피로 모드에선 말하지 않는다. 지각 질문이 나간 일정은 건너뜀(arriveBrief)
             if (machine.room == Room.DRIVE_WORK && !passenger && !fatigued(machine.room, tripMin()) && canAsk())
@@ -807,6 +816,10 @@ class RoomService : Service() {
             val traf = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) { forcedTraffic = i.getStringExtra("worst")?.takeIf { it.isNotBlank() }; Log.i("ROOM", "debug traffic force=$forcedTraffic") } }
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(traf, IntentFilter("ztw.carbiseo.TRAFFIC"), Context.RECEIVER_EXPORTED) else registerReceiver(traf, IntentFilter("ztw.carbiseo.TRAFFIC"))
             receivers += traf
+            // adb shell am broadcast -a ztw.carbiseo.TRIPETA --ei min 120 (extra 없으면 해제). 지금 가도 늦는 장면 확인용
+            val tripEta = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) { forcedTripEta = i.getIntExtra("min", -1).takeIf { it >= 0 }; Log.i("ROOM", "debug tripEta force=$forcedTripEta") } }
+            if (Build.VERSION.SDK_INT >= 33) registerReceiver(tripEta, IntentFilter("ztw.carbiseo.TRIPETA"), Context.RECEIVER_EXPORTED) else registerReceiver(tripEta, IntentFilter("ztw.carbiseo.TRIPETA"))
+            receivers += tripEta
         }
     }
 

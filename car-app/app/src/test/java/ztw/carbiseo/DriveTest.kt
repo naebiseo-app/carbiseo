@@ -212,6 +212,19 @@ class DriveTest {
         assertEquals("01000000000" to "운전 중이라 늦을 것 같습니다. 죄송합니다.", taskDraft(lateTask(e, null))) // 정체 제안: 분 수 모름
     }
 
+    @Test fun 지금_가도_늦는지는_일정_장소로_안_갈_때_2시간_안의_일정만_5분마다_묻는다() {
+        val h = 3_600_000L
+        val e = Event("거래처 미팅", h, "곳", LatLng(37.0, 127.0), "김민수", "010-0000-0000")
+        assertTrue(tripCheckDue(e, null, emptySet(), null, 0))
+        assertTrue(tripCheckDue(e, LatLng(35.0, 129.0), emptySet(), 0L, TRIP_CHECK_MS)) // 다른 곳으로 가는 중
+        assertFalse(tripCheckDue(e, e.at, emptySet(), null, 0)) // 그 장소로 가는 중이면 경로 ETA를 쓴다
+        assertFalse(tripCheckDue(e, null, setOf(h), null, 0))
+        assertFalse(tripCheckDue(e, null, emptySet(), 0L, TRIP_CHECK_MS - 1))
+        assertFalse(tripCheckDue(e.copy(start = 3 * h), null, emptySet(), null, 0))
+        assertFalse(tripCheckDue(e.copy(at = LatLng(0.0, 0.0)), null, emptySet(), null, 0))
+        assertFalse(tripCheckDue(null, null, emptySet(), null, 0))
+    }
+
     @Test fun 정체_먼저_말_걸기는_HEAVY와_일정_상대와_안_물은_일정이_모두_맞을_때만() {
         val e = Event("거래처 미팅", 1000, "곳", LatLng(37.0, 127.0), "김민수", "010-0000-0000")
         val n = Proactive.NORMAL

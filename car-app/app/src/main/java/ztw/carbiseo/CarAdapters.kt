@@ -8,6 +8,8 @@ import ai.pleos.playground.navi.data.DestinationArrivedInfo
 import ai.pleos.playground.navi.data.DestinationInfo
 import ai.pleos.playground.navi.data.RouteStartInfo
 import ai.pleos.playground.navi.data.RouteStateInfo
+import ai.pleos.playground.navi.data.TripInfo
+import ai.pleos.playground.navi.data.TripRequest
 import ai.pleos.playground.navi.data.WaypointChangedInfo
 import ai.pleos.playground.navi.helper.NaviHelper
 import ai.pleos.playground.navi.helper.listener.NaviHelperEventListener
@@ -81,6 +83,9 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
     var congestionTime: Long? = null; private set // RouteStateInfo.trafficStatus.summary.totalCongestionTime 원값(단위 미확인)
     // 내비 앱은 부팅 후 자기 화면(지도)을 한 번 그리기 전까지 SDK 요청을 전부 버린다("navi not ready", 에뮬 실측). 첫 응답이 오면 준비된 것.
     var naviReady = false; private set
+    private var tripEta: Int? = null // requestTrip 응답(분). takeTripEta로 한 번만 읽는다
+    fun takeTripEta() = tripEta.also { tripEta = null }
+    fun askTrip(at: LatLng, name: String) { runCatching { navi?.requestTrip(TripRequest(at.lat, at.lng, "", name, "")) }.onFailure { Log.w(TAG, "trip FAIL $it") } }
     var forcedLocation: LatLng? = null // 디버그 브로드캐스트 LOC로 주입한 위치(에뮬 위치가 고정이라)
     var onNaviReady: (() -> Unit)? = null
     private fun naviAnswered() = ui.post { if (!naviReady) { naviReady = true; Log.i(TAG, "navi ready"); onNaviReady?.invoke() } }
@@ -298,6 +303,7 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
                 Log.i(TAG, "recent n=${l.size} home=${h != null}")
                 if (h != null) ui.post { m.settings = m.settings.copy(home = h); RoomService.homeSrc = "최근 목적지 '집'" }
             }
+            override fun onTripInfo(i: TripInfo) { Log.i(TAG, "trip eta=${i.eta} dist=${i.distance}"); ui.post { tripEta = i.eta / 60 } }
             override fun onBookMarkChanged() { n.getBookmarkInfo() }
             override fun onNavigationStatus(s: NavigationStatus) { Log.i(TAG, "navStatus $s"); if (s == NavigationStatus.ROUTE_DRIVE) n.getDestinationInfo() }
         })
