@@ -15,7 +15,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import com.google.android.gms.auth.api.identity.AuthorizationRequest
+import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.common.api.Scope
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
@@ -89,7 +93,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() { super.onStart(); prefs.registerOnSharedPreferenceChangeListener(watch) }
     override fun onStop() { prefs.unregisterOnSharedPreferenceChangeListener(watch); super.onStop() }
-    override fun onResume() { super.onResume(); refresh(); syncContactsDaily() } // 설정 화면에서 돌아오면 권한 상태를 다시 읽는다
+    override fun onResume() { super.onResume(); refresh(); syncContactsDaily(); refreshGoogle() } // 설정 화면에서 돌아오면 권한 상태를 다시 읽는다
 
     private fun refresh() {
         listenerOn = getSystemService(NotificationManager::class.java).isNotificationListenerAccessGranted(ComponentName(this, Listener::class.java))
@@ -134,6 +138,46 @@ class MainActivity : ComponentActivity() {
         if (!contactsOn.value) { if (prefs.getBoolean("contactsDelete", false)) deleteContacts(); return }
         if (!hasContactsPermission()) { setContacts(false); return }
         if (System.currentTimeMillis() - prefs.getLong("contactsAt", 0L) >= 24 * 3600_000L) sendContacts()
+    }
+
+    // ───────── 구글 캘린더 연결 ─────────
+    // 구글이 폰에 서버용 인증 코드를 주면 서버로 넘기기만 한다. 토큰은 폰에 저장하지 않는다.
+    private val googleState = mutableStateOf<GoogleState?>(null)
+    private val googleMsg = mutableStateOf("")
+    private val askGoogle = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { r ->
+        runCatching { Identity.getAuthorizationClient(this).getAuthorizationResultFromIntent(r.data).serverAuthCode }
+            .onSuccess { sendGoogle(it) }.onFailure { googleMsg.value = "연결하지 못했어요. 다시 시도해 주세요" } // 취소도 여기로 온다
+    }
+
+    private fun refreshGoogle() { net.execute { googleState.value = Relay.googleState() } }
+
+    private fun sendGoogle(code: String?) {
+        if (code.isNullOrEmpty()) { googleMsg.value = "연결하지 못했어요. 다시 시도해 주세요"; return }
+        googleMsg.value = "연결하는 중이에요"
+        net.execute {
+            googleMsg.value = if (Relay.googleConnect(code)) "" else "연결하지 못했어요. 잠시 뒤 다시 시도해 주세요"
+            googleState.value = Relay.googleState()
+        }
+    }
+
+    private fun connectGoogle() {
+        googleMsg.value = ""
+        val req = AuthorizationRequest.builder().setRequestedScopes(listOf(Scope("https://www.googleapis.com/auth/calendar.events.readonly")))
+            .requestOfflineAccess(GOOGLE_WEB_CLIENT_ID).build()
+        Identity.getAuthorizationClient(this).authorize(req)
+            .addOnSuccessListener { r ->
+                val pi = r.pendingIntent
+                if (r.hasResolution() && pi != null) askGoogle.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+                else sendGoogle(r.serverAuthCode)
+            }
+            .addOnFailureListener { googleMsg.value = "연결하지 못했어요. 다시 시도해 주세요" }
+    }
+
+    private fun disconnectGoogle() {
+        net.execute {
+            googleMsg.value = if (Relay.googleDisconnect()) "" else "끊지 못했어요. 잠시 뒤 다시 시도해 주세요"
+            googleState.value = Relay.googleState()
+        }
     }
 
     private fun open(i: Intent) = runCatching { startActivity(i) }
@@ -371,6 +415,20 @@ class MainActivity : ComponentActivity() {
             item {
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(S1).padding(horizontal = 18.dp, vertical = 4.dp)) {
                     ToggleRow(Ic.msg, "연락처 연결", "이름으로 문자를 보낼 때 번호를 찾아요. 휴대폰 번호와 이름이 내비서 서버에 저장되고, 끄면 지워요.", contactsOn.value) { setContacts(it) }
+                }
+            }
+            item {
+                val (sub, action) = googleLabels(googleState.value)
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(S1).padding(horizontal = 18.dp, vertical = 14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(S2), contentAlignment = Alignment.Center) { Icon(Ic.list, null, Modifier.size(20.dp)) }
+                        Column(Modifier.weight(1f)) {
+                            Text("구글 캘린더 연결", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Text(sub, color = Mute, fontSize = 13.sp, lineHeight = 18.sp)
+                        }
+                    }
+                    if (googleMsg.value.isNotEmpty()) Text(googleMsg.value, color = WarmSub, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                    LinkButton(action, Modifier.fillMaxWidth().padding(top = 10.dp)) { if (googleState.value?.connected == true && !googleState.value!!.expired) disconnectGoogle() else connectGoogle() }
                 }
             }
             item { Text("통화 내용은 요약만 차에 남고, 원본 녹음은 저장하지 않아요. 알림은 메시지 앱 이름과 보낸 사람만 이 폰에 기록돼요.", color = Mute, fontSize = 13.sp, lineHeight = 20.sp, modifier = Modifier.padding(horizontal = 4.dp)) }

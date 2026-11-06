@@ -40,4 +40,12 @@ class RelayTest {
     @Test fun 연락처는_3000건까지() {
         assertEquals(3000, normalizeContacts(List(3500) { "이름$it" to "0100000%04d".format(it) }).size)
     }
+
+    @Test fun 구글_연결_문구는_상태별로() {
+        assertEquals("연결", googleLabels(null).second)
+        assertEquals("연결", googleLabels(GoogleState(false, false)).second)
+        assertEquals("연결 끊기", googleLabels(GoogleState(true, false)).second)
+        assertEquals("다시 연결", googleLabels(GoogleState(true, true)).second)
+        assertEquals(true, googleLabels(GoogleState(true, true)).first.startsWith("다시 연결 필요"))
+    }
 }

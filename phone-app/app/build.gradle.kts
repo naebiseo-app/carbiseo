@@ -18,5 +18,6 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.09.03"))
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("com.google.android.gms:play-services-auth:22.0.0") // 구글 캘린더 권한(서버용 인증 코드)
     testImplementation("junit:junit:4.13.2")
 }

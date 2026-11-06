@@ -39,6 +39,18 @@ fun normalizeContacts(rows: List<Pair<String?, String?>>): List<Pair<String, Str
     return out.map { it.key to it.value }
 }
 
+/** 구글 캘린더 연결 상태(서버 GET /phone/google). 구글 토큰은 서버에만 있고 폰에는 두지 않는다. */
+data class GoogleState(val connected: Boolean, val expired: Boolean)
+
+const val GOOGLE_WEB_CLIENT_ID = "859657362107-5v6l2h94epvjabej05s7efl150jk0jej.apps.googleusercontent.com" // 공개값
+
+/** 설정 행의 (부제, 버튼 이름). 상태를 못 읽었으면(null) 연결 안 됨으로 본다. */
+fun googleLabels(s: GoogleState?): Pair<String, String> = when {
+    s == null || !s.connected -> "연결 안 됨 · 연결하면 앞으로 7일 일정을 차에서 알려 줘요" to "연결"
+    s.expired -> "다시 연결 필요 · 연결이 만료됐어요" to "다시 연결"
+    else -> "연결됨 · 앞으로 7일 일정을 가져와요" to "연결 끊기"
+}
+
 /** 서버 호출(블로킹, 백그라운드에서만). 토큰은 차 앱과 같은 CAR_TOKEN. */
 object Relay {
     private fun open(path: String, method: String) = (URL(BuildConfig.SERVER_URL + path).openConnection() as HttpURLConnection).apply {
@@ -60,6 +72,30 @@ object Relay {
         c.doOutput = true; c.setRequestProperty("Content-Type", "application/json")
         val a = org.json.JSONArray().also { arr -> list.forEach { arr.put(JSONObject().put("name", it.first).put("number", it.second)) } }
         c.outputStream.use { it.write(JSONObject().put("contacts", a).toString().toByteArray()) }
+        (c.responseCode in 200..299).also { c.disconnect() }
+    }.getOrDefault(false)
+
+    private fun google(method: String) = open("/phone/google", method).apply { readTimeout = 15000 } // 연결은 서버가 구글과 두 번 오가서 길게
+
+    fun googleState(): GoogleState? = runCatching {
+        val c = google("GET")
+        try {
+            if (c.responseCode !in 200..299) return@runCatching null
+            val o = JSONObject(c.inputStream.bufferedReader().readText())
+            GoogleState(o.optBoolean("connected"), o.optBoolean("expired"))
+        } finally { c.disconnect() }
+    }.getOrNull()
+
+    /** 구글이 폰에 준 인증 코드를 서버로. 서버가 토큰으로 바꾼다. */
+    fun googleConnect(code: String): Boolean = runCatching {
+        val c = google("POST")
+        c.doOutput = true; c.setRequestProperty("Content-Type", "application/json")
+        c.outputStream.use { it.write(JSONObject().put("code", code).toString().toByteArray()) }
+        (c.responseCode in 200..299).also { c.disconnect() }
+    }.getOrDefault(false)
+
+    fun googleDisconnect(): Boolean = runCatching {
+        val c = google("DELETE")
         (c.responseCode in 200..299).also { c.disconnect() }
     }.getOrDefault(false)
 
