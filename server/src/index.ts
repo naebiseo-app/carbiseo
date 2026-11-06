@@ -1,6 +1,7 @@
 import { CALL_ID, carChip, callerNumber, cleanMent, cleanName, field, freshCtx, hhmm, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, isDirect, parkingScript, reserveScript, sameNumber, type Mode, type Recent } from "./script.ts";
 import { adminPage, basicOk, demoSchedule, encodeReplay, parseFakeCall, replayScript, type MailRow, type ReplyRow } from "./admin.ts";
 import { FALLBACK, guardText, isBlocked } from "./guard.ts";
+import { connectGoogle, disconnectGoogle, googleStatus, syncCalendar, syncIfStale } from "./calendar.ts";
 import { parseNotify, parseReply, TAKE_REPLIES_SQL, type Notif } from "./notif.ts";
 
 interface Env {
@@ -18,6 +19,7 @@ interface Env {
   ANTHROPIC_API_KEY?: string; // 말동무 대화(/car/chat). 없으면 no_key 고정 문구
   KAKAO_REST_KEY?: string; // 카카오 로컬 키워드 검색(가게 번호). 없으면 place-phone은 no_key
   PARKING_API_KEY?: string; // 공공 실시간 주차(/car/parking). 없으면 no_key. 실제 호출은 아직 없음
+  GOOGLE_CLIENT_SECRET?: string; // 구글 캘린더 연결(/phone/google). 없으면 no_secret
   O4_LIVE?: string; // "1"일 때만 예약 전화가 실제 가게 번호로 간다. 아니면 항상 OWNER_NUMBER
 }
 
@@ -28,12 +30,12 @@ const now = () => Date.now();
 
 const RESERVE_DAILY_MAX = 5; // 예약 전화 하루(KST) 상한: 오발신·반복 호출로 전화비가 새는 것을 막는다
 
-async function kvGet(db: D1Database, key: string) {
+export async function kvGet(db: D1Database, key: string) {
   const r = await db.prepare("SELECT value FROM kv WHERE key=?").bind(key).first<{ value: string }>();
   return r ? JSON.parse(r.value) : null;
 }
 
-async function kvPut(db: D1Database, key: string, value: unknown) {
+export async function kvPut(db: D1Database, key: string, value: unknown) {
   await db.prepare("INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at").bind(key, JSON.stringify(value), now()).run();
 }
 
@@ -789,8 +791,22 @@ export default {
       return json(await carChat(env.ANTHROPIC_API_KEY, text, history));
     }
 
+    // 구글 캘린더 연결: 폰이 받은 인증 코드를 서버가 토큰으로 바꾼다(토큰은 폰·응답에 안 나간다)
+    if (pathname === "/phone/google") {
+      if (!authed) return json({ error: "unauthorized" }, 401);
+      if (m === "POST") {
+        const code = ((await req.json().catch(() => ({}))) as Record<string, unknown>).code;
+        if (typeof code !== "string" || !code) return json({ error: "code required" }, 400);
+        const r = await connectGoogle(env, code, now());
+        return json(r.body, r.status);
+      }
+      if (m === "GET") return json(await googleStatus(env));
+      if (m === "DELETE") { await disconnectGoogle(env, now()); return json({ ok: true }); }
+    }
+
     if (m === "GET" && pathname === "/car/schedule") {
       if (!authed) return json({ error: "unauthorized" }, 401);
+      await syncIfStale(env, now());
       return json({ items: (await kvGet(env.DB, "schedule")) ?? [] });
     }
 
@@ -870,6 +886,7 @@ export default {
   },
   // 보관 정책: 웹훅 원문(raw)은 7일 뒤 비우고, 행 전체는 30일 뒤 삭제 (wrangler.toml crons, 매일 1회)
   async scheduled(_e: unknown, env: Env) {
+    await syncCalendar(env, now()).catch(() => {});
     for (const [sql, cut] of retention(now())) await env.DB.prepare(sql).bind(cut).run();
   },
 };
