@@ -94,7 +94,19 @@ async function saveCallCard(db: D1Database, c: Card, extra: object = {}, from = 
 }
 
 // 도구 결과도 AI가 읽는다: 호출 직후 AI가 통화를 끊은 일이 있어(11-06 실통화) 끊지 말라고 돌려준다
-const AFTER_REPORT = "기록했습니다. 통화를 끊지 말고 상대가 끊을 때까지 기다립니다. 상대가 말하면 이어서 답합니다.";
+const AFTER_REPORT = "기록했습니다. 지금은 아무 말도 하지 않습니다. 통화를 끊지 말고 상대가 끊을 때까지 기다립니다. 상대가 말하면 이어서 답합니다.";
+
+// 끝맺음 전에 끊기면 report_call이 없고 summary.completed도 안 온다(11-06 12통 전부 not_requested) → 받아쓰기의 상대 말로 카드
+async function cutoffCard(env: Env, raw: string) {
+  const f = new URLSearchParams(raw), id = f.get("CallId") ?? "", from = f.get("From") ?? "";
+  if (f.get("Event") !== "transcript.completed" || f.get("Direction") !== "inbound" || !env.CLAWOPS_API_KEY) return;
+  if (sameNumber(from, env.OWNER_NUMBER) && !(await kvGet(env.DB, "owner_as_guest"))) return;
+  if (await env.DB.prepare("SELECT 1 FROM inbox WHERE kind='call' AND call_id=? AND status<>'ringing'").bind(id).first()) return;
+  const r = await fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls/${id}/transcript`, { headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}` } });
+  const segs = ((await r.json()) as { segments?: { speaker: string; text: string }[] }).segments ?? [];
+  const said = segs.filter((s) => s.speaker !== segs[0].speaker).map((s) => s.text).join(" "); // 첫 화자 = AI 소개
+  await saveCallCard(env.DB, { call_id: id, ...fromCols(from), summary: said ? `끊긴 통화: ${said}` : "말씀 없이 끊긴 전화예요", urgent: isUrgent(said) ? 1 : 0 }, { via: "transcript" }, from);
+}
 
 // MCP report_call: AI가 끝맺음 뒤에 요약을 보낸다 → 끊는 순간 카드. 결과 "ok" 또는 오류 문구.
 export async function reportCall(env: Env, a: Record<string, unknown>): Promise<string> {
@@ -455,6 +467,7 @@ export default {
           { method: "POST", headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}` } });
         console.log("transcript request", callId, r.status); // 202 접수, 409 이미 요청됨
       }
+      if (sig === "ok") await cutoffCard(env, raw).catch((e) => console.log("cutoff card error", String(e)));
       const card = sig === "ok" ? summaryCard(raw) : null;
       if (card && sameNumber(new URLSearchParams(raw).get("From") ?? "", env.OWNER_NUMBER) && !(await kvGet(env.DB, "owner_as_guest"))) {
         // 주인 모드 통화 → 할 일 카드(문자 초안 등). 재전송 대비 1장만

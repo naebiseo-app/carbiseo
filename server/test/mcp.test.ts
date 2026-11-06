@@ -97,6 +97,33 @@ test("report_call 두 번: 뒤 내용으로 교체(새 id, meta.replaces), 카�
   assert.equal(JSON.parse(now[0].meta).replaces, first.id);
 });
 
+test("transcript.completed: 끝맺음 전 끊긴 통화만 상대 말로 카드, 주인·이미 보고한 통화는 건너뜀", async () => {
+  const real = globalThis.fetch; let calls = 0;
+  globalThis.fetch = (async () => { calls++; return new Response(JSON.stringify({ segments: [{ speaker: "speaker_0", text: "안녕하세요" }, { speaker: "speaker_1", text: "이지은입니다." }, { speaker: "speaker_0", text: "네" }, { speaker: "speaker_1", text: "계약서 건이요." }] })); }) as unknown as typeof fetch;
+  try {
+    const hook = async (env: any, from: string) => {
+      const raw = new URLSearchParams({ CallId: CID, From: from, Direction: "inbound", Event: "transcript.completed" }).toString();
+      const mac = await crypto.subtle.sign("HMAC", await crypto.subtle.importKey("raw", new TextEncoder().encode("k"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]), new TextEncoder().encode(signData("https://x/clawops/events", null, raw)));
+      await worker.fetch(new Request("https://x/clawops/events", { method: "POST", headers: { "x-signature": btoa(String.fromCharCode(...new Uint8Array(mac))) }, body: raw }), env);
+    };
+    const env = { ...mkEnv(), CLAWOPS_API_KEY: "a", CLAWOPS_ACCOUNT_ID: "b" };
+    await hook(env, OWNER);
+    assert.equal(cards(env).length, 0);
+    await hook(env, GUEST);
+    await hook(env, GUEST); // 재전송돼도 1장
+    assert.equal(cards(env).length, 1);
+    assert.equal(cards(env)[0].summary, "끊긴 통화: 이지은입니다. 계약서 건이요.");
+    const before = calls;
+    const env2 = { ...mkEnv(), CLAWOPS_API_KEY: "a", CLAWOPS_ACCOUNT_ID: "b" };
+    await ring(env2, GUEST);
+    await report(env2, { call_id: CID, caller: "김민수", summary: "미팅 변경" });
+    await hook(env2, GUEST);
+    assert.equal(cards(env2).length, 1);
+    assert.equal(cards(env2)[0].summary, "미팅 변경");
+    assert.equal(calls, before);
+  } finally { globalThis.fetch = real; }
+});
+
 test("report_call: 주인 통화는 카드 없이 ok(스위치 켜면 손님처럼)", async () => {
   const env = mkEnv();
   await ring(env, OWNER);
