@@ -25,6 +25,8 @@ const json = (o: unknown, status = 200) =>
 
 const now = () => Date.now();
 
+const RESERVE_DAILY_MAX = 5; // 예약 전화 하루(KST) 상한: 오발신·반복 호출로 전화비가 새는 것을 막는다
+
 async function kvGet(db: D1Database, key: string) {
   const r = await db.prepare("SELECT value FROM kv WHERE key=?").bind(key).first<{ value: string }>();
   return r ? JSON.parse(r.value) : null;
@@ -590,6 +592,9 @@ export default {
       if (!arrive) return json({ error: "bad arrive" }, 400);
       if (typeof party !== "number" || !Number.isInteger(party) || party < 1 || party > 20) return json({ error: "bad party" }, 400);
       if (lat === null || lng === null || (lat !== "" && !Number.isFinite(Number(lat))) || (lng !== "" && !Number.isFinite(Number(lng)))) return json({ error: "bad lat/lng" }, 400);
+      const day0 = Math.floor((now() + 9 * 3_600_000) / 86_400_000) * 86_400_000 - 9 * 3_600_000; // 오늘 0시(KST)
+      const used = await env.DB.prepare("SELECT COUNT(*) AS n FROM inbox WHERE kind='reserve' AND created_at>=?").bind(day0).first<{ n: number }>();
+      if ((used?.n ?? 0) >= RESERVE_DAILY_MAX) return json({ ok: false, code: "daily_limit" });
       // ponytail: 시연·심사 중 실제 가게로 전화가 가면 안 된다. O4_LIVE=1일 때만 실제 가게 번호, 그 외엔 항상 주인 번호로 건다
       const to = (env.O4_LIVE === "1" ? (await placePhone(env.KAKAO_REST_KEY, place, lat, lng)).phone : env.OWNER_NUMBER)?.replace(/[\s-]/g, "");
       if (!to) return json({ ok: false, code: "no_number" });

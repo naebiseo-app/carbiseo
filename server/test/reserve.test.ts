@@ -285,3 +285,20 @@ test("요약 뒤 녹음 삭제: 예약 결과·수신 카드 모두 DELETE, keep
     assert.deepEqual([rows(env)[0].status, rows(env)[0].summary], ["ok", "예약이 확정됐어요."]);
   } finally { h.restore(); }
 });
+
+test("예약 전화 하루 5통 상한: 오늘(KST) 5건이면 발신 없이 daily_limit, 어제 행은 안 센다", async () => {
+  const f = fake();
+  try {
+    const env = mkEnv();
+    const add = (t: number) => env.DB.db.prepare("INSERT INTO inbox(kind,status,call_id,from_label,summary,created_at) VALUES('reserve','ok','x','x','x',?)").run(t);
+    const day0 = Math.floor((Date.now() + 9 * 3_600_000) / 86_400_000) * 86_400_000 - 9 * 3_600_000;
+    for (let i = 0; i < 5; i++) add(day0 - 1000); // 어제 23:59(KST)
+    assert.equal(((await (await reserve(env, OK)).json()) as any).ok, true); // 어제 5건은 무관
+    f.calls.length = 0;
+    for (let i = 0; i < 3; i++) add(day0 + 1000); // 오늘 1(위 발신)+3 = 4
+    assert.equal(((await (await reserve(env, OK)).json()) as any).ok, true); // 5번째
+    f.calls.length = 0;
+    assert.deepEqual(await (await reserve(env, OK)).json(), { ok: false, code: "daily_limit" });
+    assert.equal(f.calls.length, 0);
+  } finally { f.restore(); }
+});
