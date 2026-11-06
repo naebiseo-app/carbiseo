@@ -30,8 +30,23 @@ const settings = (env: any, body: unknown) =>
   worker.fetch(new Request("https://x/car/settings", { method: "POST", headers: { authorization: "Bearer t" }, body: JSON.stringify(body) }), env);
 const ring = async (env: any, from: string, id = CID) =>
   ((await (await worker.fetch(new Request("https://x/clawops/call-context/cc", { method: "POST", body: `CallId=${id}&From=${from}` }), env)).json()) as any).CallContext;
-const report = (env: any, args: object) =>
-  worker.fetch(new Request("https://x/mcp/cc", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "report_call", arguments: args } }) }), env);
+// 서명 웹훅: 받아쓰기·요약 이벤트를 /clawops/events로
+const hook = async (env: any, from: string, id: string, Event = "transcript.completed", more: Record<string, string> = {}) => {
+  const raw = new URLSearchParams({ CallId: id, From: from, Direction: "inbound", Event, ...more }).toString();
+  const mac = await crypto.subtle.sign("HMAC", await crypto.subtle.importKey("raw", new TextEncoder().encode("k"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]), new TextEncoder().encode(signData("https://x/clawops/events", null, raw)));
+  await worker.fetch(new Request("https://x/clawops/events", { method: "POST", headers: { "x-signature": btoa(String.fromCharCode(...new Uint8Array(mac))) }, body: raw }), env);
+};
+// 받아쓰기 fetch를 가짜로(요약 호출이 오면 memo). 쓴 쪽이 finally에서 되돌린다
+const fakeFetch = (memo?: object) => {
+  const st = { calls: 0, real: globalThis.fetch };
+  globalThis.fetch = (async (u: string) => {
+    st.calls++;
+    if (String(u).includes("anthropic")) return new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify(memo) }] }));
+    return new Response(JSON.stringify({ segments: [{ speaker: "speaker_0", text: "안녕하세요" }, { speaker: "speaker_1", text: "견적 문의요." }] }));
+  }) as unknown as typeof fetch;
+  return st;
+};
+const mkEnvA = () => ({ ...mkEnv(), CLAWOPS_API_KEY: "a", CLAWOPS_ACCOUNT_ID: "b", ANTHROPIC_API_KEY: "k" });
 const cards = (env: any) => env.DB.db.prepare("SELECT * FROM inbox WHERE kind='call' ORDER BY id").all() as any[];
 const LINE = "바로 연결 목록에 넣은 분입니다";
 
@@ -64,22 +79,22 @@ test("call-context: 목록 번호면 direct 줄·Variables.direct, 아니면 없
   assert.ok(!m.Instruction.includes(LINE));
 });
 
-test("카드: report_call·summary.completed 모두 목록 번호면 urgent=1·meta.direct", async () => {
-  const env = mkEnv();
-  await settings(env, { direct_numbers: [VIP] });
-  await ring(env, VIP);
-  await report(env, { call_id: CID, summary: "견적 문의" });
-  await ring(env, OTHER, CID2);
-  await report(env, { call_id: CID2, summary: "견적 문의" });
-  const raw = new URLSearchParams({ CallId: "CAe210942f21a47ab8e7eb36072fff5482", From: VIP, Direction: "inbound", Event: "summary.completed", SummaryJson: JSON.stringify({ coreSummary: "안부 전화" }) }).toString();
-  const mac = await crypto.subtle.sign("HMAC", await crypto.subtle.importKey("raw", new TextEncoder().encode("k"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]),
-    new TextEncoder().encode(signData("https://x/clawops/events", null, raw)));
-  await worker.fetch(new Request("https://x/clawops/events", { method: "POST", headers: { "x-signature": btoa(String.fromCharCode(...new Uint8Array(mac))) }, body: raw }), env);
-  const c = cards(env);
-  assert.equal(c.length, 3);
-  assert.deepEqual([c[0].urgent, JSON.parse(c[0].meta).direct, JSON.parse(c[0].meta).via], [1, true, "mcp"]); // 기존 meta와 합쳐짐
-  assert.deepEqual([c[1].urgent, JSON.parse(c[1].meta).direct], [0, undefined]);
-  assert.deepEqual([c[2].urgent, JSON.parse(c[2].meta).direct], [1, true]);
+test("카드: transcript.completed·summary.completed 모두 목록 번호면 urgent=1·meta.direct", async () => {
+  const f = fakeFetch({ summary: "견적 문의" });
+  try {
+    const env = mkEnvA();
+    await settings(env, { direct_numbers: [VIP] });
+    await ring(env, VIP);
+    await hook(env, VIP, CID);
+    await ring(env, OTHER, CID2);
+    await hook(env, OTHER, CID2);
+    await hook(env, VIP, "CAe210942f21a47ab8e7eb36072fff5482", "summary.completed", { SummaryJson: JSON.stringify({ coreSummary: "안부 전화" }) });
+    const c = cards(env);
+    assert.equal(c.length, 3);
+    assert.deepEqual([c[0].urgent, JSON.parse(c[0].meta).direct, JSON.parse(c[0].meta).via], [1, true, "transcript"]); // 기존 meta와 합쳐짐
+    assert.deepEqual([c[1].urgent, JSON.parse(c[1].meta).direct], [0, undefined]);
+    assert.deepEqual([c[2].urgent, JSON.parse(c[2].meta).direct], [1, true]);
+  } finally { globalThis.fetch = f.real; }
 });
 
 test("ment_text: 저장·따옴표 괄호 제거·ment 대본 반영·빈 값이면 기본 문구·잘못된 값 400", async () => {
@@ -97,26 +112,31 @@ test("ment_text: 저장·따옴표 괄호 제거·ment 대본 반영·빈 값이
   assert.ok((await ring(env, OTHER)).Instruction.includes("운전 중이라 전화를 받을 수 없습니다."));
 });
 
-test("바로 연결: 전화 오는 순간 ringing 카드, 요약이 오면 새 id 행(meta.replaces)으로 바꾸고 ringing 행 삭제", async () => {
-  const env = mkEnv();
-  await settings(env, { direct_numbers: [VIP] });
-  await ring(env, OTHER, CID2);
-  assert.equal(cards(env).length, 0); // 목록 밖 번호는 요약 전 카드 없음
-  await ring(env, VIP);
-  await ring(env, VIP); // 재전송돼도 1장
-  let c = cards(env);
-  assert.equal(c.length, 1);
-  assert.deepEqual([c[0].status, c[0].urgent, c[0].call_id, c[0].summary, JSON.parse(c[0].meta).direct], ["ringing", 1, CID, "바로 연결 번호에서 전화가 왔어요", true]);
-  const id = c[0].id;
-  await report(env, { call_id: CID, caller: "김민수", summary: "견적 문의" });
-  c = cards(env);
-  assert.equal(c.length, 1);
-  assert.deepEqual([c[0].status, c[0].urgent, c[0].summary, c[0].from_label, JSON.parse(c[0].meta).via, JSON.parse(c[0].meta).direct], ["summarized", 1, "견적 문의", "김민수", "mcp", true]);
-  assert.ok(c[0].id > id && JSON.parse(c[0].meta).replaces === id); // 차는 id>since만 받으므로 새 id + 지울 카드 id
-  const inbox = (await (await worker.fetch(new Request("https://x/car/inbox?since=0", { headers: { authorization: "Bearer t" } }), env)).json()) as any;
-  assert.equal(JSON.parse(inbox.items.find((i: any) => i.call_id === CID).meta).replaces, id); // 응답 items[].meta(JSON 문자열).replaces
-  await report(env, { call_id: CID, summary: "견적 문의" }); // 같은 내용 재전송은 건너뜀
-  assert.equal(cards(env)[0].summary, "견적 문의");
+test("바로 연결: 전화 오는 순간 ringing 카드, 받아쓰기 카드가 오면 새 id 행(meta.replaces)으로 바꾸고 ringing 행 삭제", async () => {
+  const f = fakeFetch({ caller: "김민수", summary: "견적 문의" });
+  try {
+    const env = mkEnvA();
+    await settings(env, { direct_numbers: [VIP] });
+    await ring(env, OTHER, CID2);
+    assert.equal(cards(env).length, 0); // 목록 밖 번호는 요약 전 카드 없음
+    await ring(env, VIP);
+    await ring(env, VIP); // 재전송돼도 1장
+    let c = cards(env);
+    assert.equal(c.length, 1);
+    assert.deepEqual([c[0].status, c[0].urgent, c[0].call_id, c[0].summary, JSON.parse(c[0].meta).direct], ["ringing", 1, CID, "바로 연결 번호에서 전화가 왔어요", true]);
+    const id = c[0].id;
+    await hook(env, VIP, CID);
+    c = cards(env);
+    assert.equal(c.length, 1);
+    assert.deepEqual([c[0].status, c[0].urgent, c[0].summary, c[0].from_label, JSON.parse(c[0].meta).via, JSON.parse(c[0].meta).direct], ["summarized", 1, "견적 문의", "김민수", "transcript", true]);
+    assert.ok(c[0].id > id && JSON.parse(c[0].meta).replaces === id); // 차는 id>since만 받으므로 새 id + 지울 카드 id
+    const inbox = (await (await worker.fetch(new Request("https://x/car/inbox?since=0", { headers: { authorization: "Bearer t" } }), env)).json()) as any;
+    assert.equal(JSON.parse(inbox.items.find((i: any) => i.call_id === CID).meta).replaces, id); // 응답 items[].meta(JSON 문자열).replaces
+    const before = f.calls;
+    await hook(env, VIP, CID); // 이미 카드가 있으면 건너뜀(받아쓰기 fetch 안 함)
+    assert.equal(f.calls, before);
+    assert.equal(cards(env).length, 1);
+  } finally { globalThis.fetch = f.real; }
 });
 
 test("/car/inbox: since>0은 오래된 순 50건 + more, 이어 받으면 유실 없음, since=0은 최신 50건", async () => {

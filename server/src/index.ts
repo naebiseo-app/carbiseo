@@ -76,7 +76,7 @@ const fromCols = (n: string) => {
 };
 
 type Card = ReturnType<typeof fromCols> & { call_id: string; summary: string; urgent: number };
-// 같은 통화의 카드는 1장만: 웹훅 재전송, report_call 뒤 오는 summary.completed는 건너뛴다
+// 같은 통화의 카드는 1장만: 웹훅 재전송, 받아쓰기 카드 뒤 오는 summary.completed는 건너뛴다
 // ponytail: 칩은 카드 만든 시점의 차량 맥락. 정확히 하려면 call-context 때 값을 ring meta에 남겨 call_id로 잇기
 // from = 발신번호 원문. 바로 연결 목록(settings.direct_numbers)에 있으면 urgent=1·meta.direct (차는 피로·퇴근 중에도 읽음)
 async function saveCallCard(db: D1Database, c: Card, extra: object = {}, from = "", status = "summarized") {
@@ -92,9 +92,6 @@ async function saveCallCard(db: D1Database, c: Card, extra: object = {}, from = 
     .bind(status, parseRoom(cc?.room) ?? null, c.call_id, c.from_label, c.from_number, c.summary, c.urgent, now(), meta, c.call_id, status).run();
   if (ringId) await db.prepare("DELETE FROM inbox WHERE id=?").bind(ringId).run();
 }
-
-// 도구 결과도 AI가 읽는다: 호출 직후 AI가 통화를 끊은 일이 있어(11-06 실통화) 끊지 말라고 돌려준다
-const AFTER_REPORT = "기록했습니다. 지금은 아무 말도 하지 않습니다. 통화를 끊지 말고 상대가 끊을 때까지 기다립니다. 상대가 말하면 이어서 답합니다.";
 
 const SUMMARY_SYSTEM = "전화 받아쓰기를 운전자가 볼 메모로 정리합니다. 받아쓰기에 있는 내용만 쓰고, 상대가 말하지 않은 것은 없다고도 쓰지 않습니다. 연락 시각을 말했으면 summary에 반드시 넣습니다. '아, 네' 같은 맞장구는 이름이 아니고, 비서가 되읽어 상대가 고친 이름이 있으면 고친 이름을 씁니다. JSON 한 줄만 답합니다: {\"caller\":\"상대 이름·소속, 없으면 빈 문자열\",\"summary\":\"존댓말 한두 문장. 예: 김민수 님이 미팅 변경 건으로 전화하셨고 3시까지 연락을 부탁하셨어요. 자료도 보내 달라고 하셨어요.\",\"callback_by\":\"상대가 말한 연락 시각 표현 그대로(예: 3시까지), 없으면 빈 문자열\"}";
 
@@ -131,44 +128,8 @@ async function transcriptCard(env: Env, raw: string) {
     { via: "transcript", caller: who, callback_by: String(memo?.callback_by ?? "").slice(0, 50) }, from);
 }
 
-// MCP report_call: AI가 끝맺음 뒤에 요약을 보낸다 → 끊는 순간 카드. 결과 "ok" 또는 오류 문구.
-export async function reportCall(env: Env, a: Record<string, unknown>): Promise<string> {
-  const id = String(a.call_id ?? "");
-  if (!CALL_ID.test(id)) return "bad call_id";
-  const s = (k: string, max: number) => (typeof a[k] === "string" ? (a[k] as string).trim().slice(0, max) : "");
-  // 발신번호는 AI 입력이 아니라 그 통화의 ring 행(call-context 원문)에서. id는 위 검사로 영숫자만이라 LIKE에 그대로 넣어도 된다
-  const ring = await env.DB.prepare("SELECT raw FROM inbox WHERE kind='ring' AND raw LIKE ? ORDER BY id DESC LIMIT 1").bind(`%${id}%`).first<{ raw: string }>();
-  const from = callerNumber(ring?.raw ?? "");
-  if (sameNumber(from, env.OWNER_NUMBER) && !(await kvGet(env.DB, "owner_as_guest"))) return "ok"; // 주인 통화는 기존 할 일 경로
-  const summary = (s("summary", 300) || [s("caller", 100), s("purpose", 200)].filter(Boolean).join(", ")).slice(0, 300);
-  // 카드 이름표는 AI가 확인받은 이름(없으면 끝번호) → 아는 번호 확인·"문자 먼저 보낼까요"·낭독이 이름을 쓴다
-  const cols = fromCols(from); const who = s("caller", 40).replace(/["'`{}]/g, "");
-  // 끝맺음 뒤 내용이 늘어 다시 호출(같은 내용 재전송은 건너뜀): 앞 카드를 ringing으로 돌려 saveCallCard의 교체(새 id + meta.replaces) 경로를 탄다
-  await env.DB.prepare("UPDATE inbox SET status='ringing' WHERE kind='call' AND call_id=? AND status='summarized' AND summary<>?").bind(id, summary).run();
-  await saveCallCard(env.DB, { call_id: id, ...cols, from_label: who || cols.from_label, summary, urgent: a.urgent === true || isUrgent(summary) ? 1 : 0 },
-    { via: "mcp", caller: s("caller", 100), purpose: s("purpose", 200), callback_by: s("callback_by", 50) }, from);
-  console.log("report_call", id);
-  return "ok";
-}
-
-const STR = { type: "string" };
-const REPORT_TOOL = {
-  name: "report_call",
-  description: "끝맺음 말을 마친 뒤 말없이 호출. 그 뒤 전할 내용이 늘면 전체를 합쳐 다시 호출. 이 통화에서 들은 내용만 보낸다(지어내지 않음).",
-  inputSchema: {
-    type: "object", required: ["call_id"],
-    properties: {
-      call_id: { ...STR, description: "대본에 적힌 이 통화의 call_id" },
-      caller: { ...STR, description: "통화에서 되읽은 이름·소속 그대로. '아, 네' 같은 맞장구는 넣지 않는다" }, purpose: { ...STR, description: "용건" },
-      urgent: { type: "boolean", description: "급하다고 했으면 true" },
-      callback_by: { ...STR, description: "상대가 말한 회신 시각 그대로, 없으면 빈 문자열" },
-      summary: { ...STR, description: "이름·용건·상대가 말한 시각을 들은 그대로 담은 한두 문장 한국어 요약" },
-    },
-  },
-};
-
 // 최소 MCP streamable HTTP(JSON-RPC 2.0, 단일 JSON 응답). 배치·SSE·세션은 안 씀
-async function mcp(req: Request, env: Env): Promise<Response> {
+async function mcp(req: Request): Promise<Response> {
   const msg = (await req.json().catch(() => null)) as { id?: unknown; method?: unknown; params?: any } | null;
   if (!msg || typeof msg.method !== "string") return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } }, 400);
   if (msg.id === undefined) return new Response(null, { status: 202 }); // 알림(notifications/initialized 등)
@@ -177,13 +138,7 @@ async function mcp(req: Request, env: Env): Promise<Response> {
   if (msg.method === "initialize") return ok({ protocolVersion: p.protocolVersion ?? "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "carbiseo", version: "1.0.0" } });
   if (msg.method === "ping") return ok({});
   if (msg.method === "tools/list") return ok({ tools: [] }); // 카드는 통화 뒤 받아쓰기로. ClawOps 연결은 PATCH가 막혀 있어 도구 목록을 비운다
-  if (msg.method === "tools/call") {
-    // ClawOps가 MCP 요청마다 X-ClawOps-Call-Id를 싣는다(docs voice-agent/call-variables) → AI가 옮겨 적은 값보다 우선
-    const hdr = req.headers.get("x-clawops-call-id") ?? "";
-    const args = { ...(p.arguments ?? {}), ...(CALL_ID.test(hdr) ? { call_id: hdr } : {}) };
-    const text = p.name === "report_call" ? await reportCall(env, args) : "unknown tool";
-    return ok({ content: [{ type: "text", text: text === "ok" ? AFTER_REPORT : text }], isError: text !== "ok" });
-  }
+  if (msg.method === "tools/call") return ok({ content: [{ type: "text", text: "unknown tool" }], isError: true });
   return json({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
 }
 
@@ -456,11 +411,11 @@ export default {
       return json({ CallContext: { Instruction: s.instruction + dl, Variables: { room: s.room ?? "UNKNOWN", car: carChip(cc, now()), ...(direct ? { direct: "1" } : {}) } } });
     }
 
-    // ClawOps 에이전트 MCP 연결(report_call). 비밀은 경로에(authType none)
+    // ClawOps 에이전트 MCP 연결(도구 없음, 응답만). 비밀은 경로에(authType none)
     if (pathname.startsWith("/mcp/")) {
       if (pathname.slice("/mcp/".length) !== env.CALL_CONTEXT_SECRET) return json({ error: "not found" }, 404);
       if (m !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
-      return mcp(req, env);
+      return mcp(req);
     }
 
     // 번호 statusCallback: 통화가 끝나는 즉시 받아쓰기 요청 → 약 16초 뒤 summary.completed(카드). managed_agent 모드는 agent.disconnected 웹훅이 안 와서(10-31 실측) 이 경로가 주 경로
