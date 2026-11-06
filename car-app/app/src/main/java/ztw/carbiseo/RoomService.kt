@@ -61,8 +61,9 @@ class RoomService : Service() {
     private val hold = SpeechHold { mode }
     private var forced: Alert? = null // 디버그 브로드캐스트로 강제한 값
     private var forcedTrip: Int? = null // 디버그: 트립 주행시간(분) 강제
+    private var forcedTraffic: String? = null // 디버그: 경로 정체 단계 강제 (정체 제안만 읽는다)
     private var forcedSoc: Int? = null // 디버그: 배터리 잔량(%) 강제 (먼저 말 걸기의 충전 제안만 읽는다)
-    private var lastMealOffer: Long? = null; private var lastChargeOffer: Long? = null // 이번 운전에서 먼저 제안한 시각(시뮬 시각). 새 운전에서 비운다
+    private var lastMealOffer: Long? = null; private var lastChargeOffer: Long? = null; private var lastTrafficOffer: Long? = null // 이번 운전에서 먼저 제안한 시각(시뮬 시각). 새 운전에서 비운다
     private var parkMemoText: String? = null // "주차 지하 2층"으로 적어 둔 메모. 새 운전에서 비운다
 
     /** 트립 주행시간(분): SDK 값(이번 운전 시작 때 값과의 차이, H12), 없으면(에뮬은 3종 모두 ERROR_NOT_SUPPORTED_PROPERTY) 이번 운전을 앱이 잰 분. */
@@ -95,7 +96,7 @@ class RoomService : Service() {
     private class PendingSend(val label: String, val number: String, val body: String, val task: String) // 보낼 문자(label·number·body)와 못 보냈을 때 남길 할 일 본문
     private var pending = Ask.NONE
     private val chatHistory = mutableListOf<Pair<String, String>>() // 말동무 대화 맥락(메모리만, 저장·로그 없음). 메인 스레드에서만
-    private var lateEvent: Pair<Event, Int>? = null
+    private var lateEvent: Pair<Event, Int?>? = null // 분 수 null = 정체 먼저 말 걸기(지각 분을 모름)
     private val lateAsked = mutableSetOf<Long>() // 이미 물은 일정(start)
     private val reserveOnce = Once() // O4: 운전 1회당 한 번
     private val callFresh = mutableSetOf<Long>() // 이번 실행에 새로 온 통화 카드 id
@@ -253,6 +254,7 @@ class RoomService : Service() {
             }
             // 하차 카드 [고치기]: 답한 문장을 40자로 잘라 그대로 메모로. 못 들으면 한 번만 다시 묻고 그다음은 접는다
             Ask.PARK_MEMO -> when {
+                voiceCmd(said).let { it == Cmd.No || it == Cmd.Later } -> {} // '아니·취소·됐어'는 메모가 아니라 그만두기
                 !said.isNullOrBlank() -> saveParkMemo(said.trim().take(40))
                 reask.again() -> { pending = p; speaker.speak(REASK_SPEECH, ::listenNow) }
             }
@@ -321,7 +323,7 @@ class RoomService : Service() {
     private fun answerYn(p: Ask, y: Boolean) {
         when (p) {
             // 번호를 알면 초안을 읽어 주고 "이대로 보낼까요?"(SEND). 모르면 지금처럼 카드만.
-            Ask.LATE -> lateEvent?.let { (ev, m) -> if (y) lateTask(ev, m).let { t -> taskDraft(t).let { (n, b) -> sendOrCard(PendingSend("", n, b, t), LATE_DONE_SPEECH, true) } } }
+            Ask.LATE -> lateEvent?.let { (ev, m) -> if (y) lateTask(ev, m, machine.signals.rain).let { t -> taskDraft(t).let { (n, b) -> sendOrCard(PendingSend("", n, b, t), LATE_DONE_SPEECH, true) } } }
             // 질문이 이미 초안을 읽어 줬으니 '응'이면 바로 발송(한 번 더 묻지 않는다)
             Ask.CALLBACK -> callback?.let { (i, m) -> if (y) sendOrCard(PendingSend(i.fromLabel, i.fromNumber, m, callbackTask(i, m)), CALLBACK_DONE_SPEECH, false) }
             Ask.SEND -> sending?.let { s -> if (y) doSend(s) else { addLocalTask(s.task); say(SEND_KEEP_SPEECH) } }
@@ -558,6 +560,7 @@ class RoomService : Service() {
             }
             // 하차(P + 운전석 문 열림): 정차 위치를 그 시점 위치로 한 번 더 갱신. 신호·권한이 없으면 PARK 진입 때 저장한 것이 그대로 남는다.
             if (alightOnce.fire(machine.room == Room.PARK && gotOff(machine.signals.gear, adapters.forcedDoor ?: adapters.driverDoorPos))) machine.signals.location?.let { Log.i("ROOM", "alight -> park update"); postParked(it) }
+            if (machine.room == Room.PARK) adapters.arrivedName?.let { n -> parkCard?.takeIf { it.place == null }?.let { parkCard = it.copy(place = n) } } // 도착 이벤트가 P 진입보다 늦게 온 경우
             seat.update(adapters.passengerSeat)?.let { passengerOffer = it && !passenger }
             if (passenger) passengerOffer = false
             adapters.telltale.let { t -> if (t != lastTell) { lastTell = t; telltale = t; if (t != null && machine.room != Room.PARK) say(TELLTALE_SPEECH) } }
@@ -568,7 +571,7 @@ class RoomService : Service() {
             // F4: 업무 운전 중 도착 예상이 다음 일정 시작보다 늦으면 일정마다 한 번 묻는다
             if (machine.room == Room.DRIVE_WORK && !passenger && canAsk()) System.currentTimeMillis().let { now ->
                 nextEvent(schedule, now)?.takeIf { it.start !in lateAsked && headingTo(machine.signals.destination, it) }?.let { ev ->
-                    lateBy(now, e, ev.start)?.let { m -> lateAsked += ev.start; lateEvent = ev to m; askVoice(lateSpeech(m), Ask.LATE) }
+                    lateBy(now, e, ev.start)?.let { m -> lateAsked += ev.start; lateEvent = ev to m; askVoice(lateSpeech(m, machine.signals.rain), Ask.LATE) }
                 }
             }
             // 도착 10분 전: 그 일정 장소로 가는 중이면 일정마다 한 번 "곧 도착해요". 동승자·피로 모드에선 말하지 않는다. 지각 질문이 나간 일정은 건너뜀(arriveBrief)
@@ -584,6 +587,10 @@ class RoomService : Service() {
                 val soc = forcedSoc ?: adapters.soc; val word = mealWord(LocalTime.now(clock))
                 if (soc != null && soc <= CHARGE_OFFER_SOC && offerDue(proactive, lastChargeOffer, now)) { lastChargeOffer = now; nearKind = NearKind.CHARGE; askVoice(chargeOffer(soc), Ask.NEAR_FIND) }
                 else if (word != null && (tripMin() ?: 0) >= MEAL_OFFER_DRIVE_MIN && !reservable(dn) && offerDue(proactive, lastMealOffer, now)) { lastMealOffer = now; nearKind = NearKind.FOOD; askVoice(mealOffer(word), Ask.NEAR_FIND) }
+                else nextEvent(schedule, System.currentTimeMillis())?.takeIf { trafficOfferDue(proactive, forcedTraffic ?: adapters.trafficWorst, it, lateAsked, lastTrafficOffer, now) }?.let { ev ->
+                    // 대답 '응'은 기존 LATE 경로(answerYn)로 간다. 지각 분은 아는 만큼만(lateBy), 모르면 분 수 없이
+                    lastTrafficOffer = now; lateAsked += ev.start; lateEvent = ev to lateBy(System.currentTimeMillis(), e, ev.start); askVoice(TRAFFIC_OFFER_SPEECH, Ask.LATE)
+                }
             }
             if (homeOnce.fire(homeSoon(machine.room, machine.signals.destination, machine.settings, e))) {
                 if (!passenger) say(HOME_SOON_SPEECH)
@@ -647,7 +654,7 @@ class RoomService : Service() {
                 if (from == Room.PARK && talk.step != NotifTalk.Step.NONE) { talk.cancel(); askStep = talk.step; listening = false } // P에서 남겨 둔 바는 출발하면 닫는다(카드는 남음)
                 // M4: 2분 미만 P는 같은 운전 — 휴식·피로·집 문턱 1회 안내와 운전 시작 시각을 유지
                 if (newDrive(parked)) { homeOnce.reset(); reserveOnce.reset(); restOnce.reset(); fatigueOnce.reset(); trip.reset(); driveStart = now; restSnoozeUntil = 0
-                    lastMealOffer = null; lastChargeOffer = null; parkMemoText = null; net.execute { Server.clearParked() } }
+                    lastMealOffer = null; lastChargeOffer = null; lastTrafficOffer = null; parkMemoText = null; adapters.clearArrived(); net.execute { Server.clearParked() } }
                 else Log.i("ROOM", "short park ${parked!! / 1000}s -> same drive")
                 // H9: 오래 세운 뒤의 출발이면 그 전에 켠 동승자 모드는 끈다
                 if (passenger && parked != null && parked >= PASSENGER_RESET_PARK_MS && passengerAt < now - parked) { togglePassenger(false); say("동승자 모드를 껐어요") }
@@ -796,6 +803,10 @@ class RoomService : Service() {
             val scr = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) { screenOverride = i.getStringExtra("room")?.takeIf { it.isNotBlank() } } }
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(scr, IntentFilter("ztw.carbiseo.SCREEN"), Context.RECEIVER_EXPORTED) else registerReceiver(scr, IntentFilter("ztw.carbiseo.SCREEN"))
             receivers += scr
+            // adb shell am broadcast -a ztw.carbiseo.TRAFFIC --es worst HEAVY (extra 없이 보내면 해제, 차 실제 값으로). 정체 먼저 말 걸기 확인용
+            val traf = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) { forcedTraffic = i.getStringExtra("worst")?.takeIf { it.isNotBlank() }; Log.i("ROOM", "debug traffic force=$forcedTraffic") } }
+            if (Build.VERSION.SDK_INT >= 33) registerReceiver(traf, IntentFilter("ztw.carbiseo.TRAFFIC"), Context.RECEIVER_EXPORTED) else registerReceiver(traf, IntentFilter("ztw.carbiseo.TRAFFIC"))
+            receivers += traf
         }
     }
 

@@ -204,6 +204,28 @@ class DriveTest {
         assertEquals("다음 일정에 약 7분 늦을 것 같아요. 늦는다고 문자 보낼까요?", lateSpeech(7))
     }
 
+    @Test fun 비가_오면_지각_안내와_문자에_이유가_붙는다() {
+        val e = Event("거래처 미팅", 0, "곳", LatLng(37.0, 127.0), "이지은", "010-0000-0000")
+        assertEquals("비가 와서 다음 일정에 약 7분 늦을 것 같아요. 늦는다고 문자 보낼까요?", lateSpeech(7, true))
+        assertEquals("01000000000" to "비가 와서 운전 중이라 약 7분 늦을 것 같습니다. 죄송합니다.", taskDraft(lateTask(e, 7, true)))
+        assertEquals("01000000000" to "운전 중이라 약 7분 늦을 것 같습니다. 죄송합니다.", taskDraft(lateTask(e, 7, false)))
+        assertEquals("01000000000" to "운전 중이라 늦을 것 같습니다. 죄송합니다.", taskDraft(lateTask(e, null))) // 정체 제안: 분 수 모름
+    }
+
+    @Test fun 정체_먼저_말_걸기는_HEAVY와_일정_상대와_안_물은_일정이_모두_맞을_때만() {
+        val e = Event("거래처 미팅", 1000, "곳", LatLng(37.0, 127.0), "김민수", "010-0000-0000")
+        val n = Proactive.NORMAL
+        assertTrue(trafficOfferDue(n, "HEAVY", e, emptySet(), null, 0))
+        assertTrue(trafficOfferDue(n, "HEAVY", e.copy(contactNumber = "", contact = "이지은"), emptySet(), null, 0)) // 번호 대신 이름만 있어도 연락처
+        assertFalse(trafficOfferDue(n, "SLOW", e, emptySet(), null, 0)); assertFalse(trafficOfferDue(n, null, e, emptySet(), null, 0))
+        assertFalse(trafficOfferDue(n, "HEAVY", null, emptySet(), null, 0))
+        assertFalse(trafficOfferDue(n, "HEAVY", e.copy(contactNumber = "", contact = ""), emptySet(), null, 0))
+        assertFalse(trafficOfferDue(n, "HEAVY", e, setOf(1000L), null, 0))
+        assertFalse(trafficOfferDue(Proactive.OFF, "HEAVY", e, emptySet(), null, 0))
+        assertFalse(trafficOfferDue(n, "HEAVY", e, emptySet(), 0L, 1000))
+        assertEquals("앞이 많이 막혀요. 다음 일정 상대에게 늦을 수 있다고 알릴까요?", TRAFFIC_OFFER_SPEECH)
+    }
+
     @Test fun 응_아니_대답만_본다() {
         assertEquals(true, yesNo("응")); assertEquals(true, yesNo("보내")); assertEquals(true, yesNo("네, 보내 주세요"))
         assertEquals(false, yesNo("아니")); assertEquals(false, yesNo("괜찮아, 됐어"))

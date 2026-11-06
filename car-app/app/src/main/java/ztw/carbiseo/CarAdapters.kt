@@ -65,6 +65,7 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
     var cameraOverspeed = false; private set
     var cautionZone = false; private set
     var etaMin: Int? = null; private set // 목적지까지 남은 분. null = 목적지 없음.
+    fun clearArrived() { arrivedName = null }
     var arrivedName: String? = null; private set // 내비가 알린 도착 목적지 이름. 하차 카드의 장소 대체값. 다음 경로 시작(onRouteStarted)에 비운다
     var destName: String? = null; private set // 목적지 이름(내비 DestinationInfo.name). 비었거나 목적지 없음 = null
     // C: Pleos Vehicle SDK 값(메인 스레드에서만 씀). null = 모름/권한 없음.
