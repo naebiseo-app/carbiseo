@@ -30,6 +30,12 @@ class RoomStateMachineTest {
     private fun at(h: Int, min: Int = 0, day: Int = 0) { clock.ms = day * 86_400_000L + LocalTime.of(h, min).toSecondOfDay() * 1000L } // day 0 = 1970-01-01 목요일
     private fun early() = at(6)                            // 이른 아침: 목적지가 집이면 쉼, 아니면 업무
 
+    @Test fun 공휴일은_평일이어도_쉬는_날() {
+        assertEquals(true, dayOff(java.time.LocalDate.of(2026, 12, 25))) // 금요일 성탄절
+        assertEquals(false, dayOff(java.time.LocalDate.of(2026, 12, 24)))
+        assertEquals(true, dayOff(java.time.LocalDate.of(2026, 12, 26))) // 토요일
+    }
+
     @Test fun 정차_P이고_DO없으면_PARK() {
         m.update { copy(gear = Gear.PARK, distractionOptimized = false) }
         assertEquals(Room.PARK, m.room)
