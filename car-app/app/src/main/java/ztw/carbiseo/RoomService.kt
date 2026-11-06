@@ -97,6 +97,7 @@ class RoomService : Service() {
     private var sending: PendingSend? = null
     private var reserve: Pair<String, String>? = null // 예약 인원을 물은 (목적지 이름, 도착 HH:MM)
     private val reserveWait = mutableMapOf<Long, Pair<String, Long>>() // 전화를 건 예약 서버 행 id -> (가게 이름, 건 시각 elapsedRealtime). 결과를 한 번만 읽고 뺀다. 메인 스레드에서만
+    private val arriveSaid = mutableSetOf<Long>() // 도착 전 브리핑을 이미 한 일정(start). prefs arrive_said에 저장
     private var forcedDest: String? = null // 디버그 ROUTE의 --es name (에뮬은 내비가 목적지 이름을 안 줄 수 있어서)
     private var familyDay = -1L // 가족에게 도착 예상을 보낸 날(하루 한 번)
     private var restSnoozeUntil = 0L // 휴식 제안에 '아니'라고 한 뒤 30분(시뮬 시각)
@@ -455,6 +456,10 @@ class RoomService : Service() {
                     lateBy(now, e, ev.start)?.let { m -> lateAsked += ev.start; lateEvent = ev to m; askVoice(lateSpeech(m), Ask.LATE) }
                 }
             }
+            // 도착 10분 전: 그 일정 장소로 가는 중이면 일정마다 한 번 "곧 도착해요". 동승자·피로 모드에선 말하지 않는다. 지각 질문이 나간 일정은 건너뜀(arriveBrief)
+            if (machine.room == Room.DRIVE_WORK && !passenger && !fatigued(machine.room, tripMin()) && canAsk())
+                nextEvent(schedule, System.currentTimeMillis())?.let { ev -> arriveBrief(ev, machine.signals.destination, e, arriveSaid, lateAsked, clock.zone)?.let { sp ->
+                    arriveSaid += ev.start; val z = arriveSaid.sorted().takeLast(50).joinToString(","); net.execute { prefs.edit().putString("arrive_said", z).apply() }; say(sp) } }
             // O4: 식당·카페류 목적지로 출발하면 한 번 "몇 분으로 예약할까요?"(업무·쉼 방 상관없이)
             val dn = forcedDest ?: adapters.destName
             if (machine.room.let { it != null && it != Room.PARK } && !passenger && e != null && reservable(dn) && canAsk() &&
@@ -492,8 +497,9 @@ class RoomService : Service() {
             val fv = p.getString("fav_senders", "").orEmpty(); ui.post { favs = parseFavs(fv) }
             val fd = p.getLong("family_day", -1); ui.post { familyDay = fd }
             val wo = p.getBoolean("wake_on", false); val wn = p.getString("wake_name", null)?.takeIf { validName(it) } ?: WAKE_DEFAULT_NAME; ui.post { wakeOn = wo; wakeName = wn }
+            val ab = p.getString("arrive_said", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }
             val sd = p.getBoolean("setup_done", false); val md = p.getString("mode", "ai") ?: "ai"; val bd = p.getLong("brief_day", -1)
-            ui.post { restMin = r; workEndHour = we; inbox = (lt.filter { t -> inbox.none { it.id == t.id } } + inbox).sortedByDescending { it.id }; seen = sn + seen; notifDone = nd + notifDone; cardDone = cd + cardDone; snoozed = sz + snoozed; deferred = df + deferred; forwardOk = forwardOk || fw; setupDone = sd; mode = md; briefDay = bd }
+            ui.post { arriveSaid += ab; restMin = r; workEndHour = we; inbox = (lt.filter { t -> inbox.none { it.id == t.id } } + inbox).sortedByDescending { it.id }; seen = sn + seen; notifDone = nd + notifDone; cardDone = cd + cardDone; snoozed = sz + snoozed; deferred = df + deferred; forwardOk = forwardOk || fw; setupDone = sd; mode = md; briefDay = bd }
         }
         gleo = { ci -> ui.post { if (alive) runIntent(ci) } }
         latch = AlertLatch(Clock.systemDefaultZone())
@@ -546,11 +552,12 @@ class RoomService : Service() {
         net.execute { prefs.edit().putLong("family_day", t).apply(); Log.i("ROOM", "family eta $m -> ${Server.postFamilyEta(m)}") }
     }
 
-    /** H7: 오늘 첫 업무 운전에서 '어제 넘긴 전화 N건' 한 문장. 하루 1회. */
+    /** H7: 오늘 첫 업무 운전에서 '어제 넘긴 전화 N건' + 오늘 남은 일정 한 문장씩. 둘 중 하나라도 말했으면 하루 1회. */
     private fun briefCarryOver() {
         val t = today()
         val c = carryOver(cards(), deferred, seen, t)
-        carrySpeech(c, deferred, t)?.let { briefDay = t; net.execute { prefs.edit().putLong("brief_day", t).apply() }; say(it) }
+        sentences(carrySpeech(c, deferred, t), briefSpeech(schedule, System.currentTimeMillis(), clock.zone)).takeIf { it.isNotEmpty() }
+            ?.let { briefDay = t; net.execute { prefs.edit().putLong("brief_day", t).apply() }; say(it) }
     }
 
     private fun markForwarded() {

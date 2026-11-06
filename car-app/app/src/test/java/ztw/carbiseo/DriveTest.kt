@@ -399,4 +399,32 @@ class DriveTest {
         assertEquals("판교 한정식 예약을 마쳤어요.", reserveResultSpeech("판교 한정식", row("ok")))
         assertEquals("판교 한정식 예약은 직접 확인이 필요해요", reserveResultSpeech("판교 한정식", row("need_manual", "무시되는 요약", "가능")))
     }
+
+    @Test fun 출근_브리핑은_오늘_남은_일정만() {
+        val z = java.time.ZoneOffset.ofHours(9)
+        val at = { d: Int, h: Int, m: Int -> java.time.LocalDateTime.of(2026, 11, d, h, m).toInstant(z).toEpochMilli() }
+        val ev = { d: Int, h: Int, m: Int, t: String -> Event(t, at(d, h, m), "", LatLng(0.0, 0.0)) }
+        val now = at(2, 8, 30)
+        val events = listOf(ev(2, 14, 0, "저녁 식사"), ev(2, 9, 30, "거래처 미팅"), ev(2, 7, 0, "이미 지난 일정"), ev(3, 9, 0, "내일 일정"))
+        assertEquals("오늘 일정 2건이에요. 첫 일정은 오전 9시 30분 거래처 미팅이에요.", briefSpeech(events, now, z))
+        assertEquals("오늘 일정 1건이에요. 첫 일정은 오후 2시 저녁 식사이에요.", briefSpeech(events, at(2, 10, 0), z))
+        assertEquals(null, briefSpeech(events, at(2, 15, 0), z)) // 오늘 일정이 다 지났다
+        assertEquals(null, briefSpeech(emptyList(), now, z))
+        assertEquals(null, briefSpeech(listOf(ev(3, 9, 0, "내일 일정")), now, z))
+    }
+
+    @Test fun 도착_전_브리핑은_10분_이하_일정마다_한번() {
+        val z = java.time.ZoneOffset.ofHours(9)
+        val e = Event("거래처 미팅", java.time.LocalDateTime.of(2026, 11, 2, 14, 0).toInstant(z).toEpochMilli(), "판교역", LatLng(37.3948, 127.1112))
+        val here = LatLng(37.3950, 127.1115); val other = LatLng(37.5663, 126.9779)
+        assertEquals("곧 도착해요. 오후 2시 거래처 미팅이에요.", arriveBrief(e, here, 10, emptySet(), emptySet(), z))
+        assertEquals("곧 도착해요. 오후 2시 거래처 미팅이에요.", arriveBrief(e, here, 3, emptySet(), emptySet(), z))
+        assertEquals(null, arriveBrief(e, here, 11, emptySet(), emptySet(), z))   // 아직 멀다
+        assertEquals(null, arriveBrief(e, here, null, emptySet(), emptySet(), z)) // 남은 시간 모름
+        assertEquals(null, arriveBrief(e, other, 5, emptySet(), emptySet(), z))   // 다른 곳으로 가는 중
+        assertEquals(null, arriveBrief(e, null, 5, emptySet(), emptySet(), z))
+        assertEquals(null, arriveBrief(e, here, 5, setOf(e.start), emptySet(), z)) // 이미 말했다(재시작 뒤에도 prefs로 막는다)
+        assertEquals(null, arriveBrief(e, here, 5, emptySet(), setOf(e.start), z)) // 지각 질문이 나간 일정
+        assertEquals("곧 도착해요. 오후 2시 거래처 미팅이에요.", arriveBrief(e, here, 5, setOf(e.start + 1), setOf(e.start + 2), z)) // 다른 일정 기록은 상관없다
+    }
 }

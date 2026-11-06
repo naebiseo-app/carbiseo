@@ -89,6 +89,19 @@ fun koTime(ms: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()):
 fun nextEventSpeech(e: Event?, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String =
     if (e == null) "다음 일정이 없어요" else "다음 일정은 ${koTime(e.start, zone)} ${e.title}${if (e.place.isNotBlank()) ", ${e.place}" else ""}이에요"
 
+/** 출근 브리핑 일정 한 문장: 오늘(zone 기준) 아직 안 지난 일정이 있으면 건수와 첫 일정, 없으면 null. */
+fun briefSpeech(events: List<Event>, nowMs: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String? {
+    val day = java.time.Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+    val left = events.filter { it.start > nowMs && java.time.Instant.ofEpochMilli(it.start).atZone(zone).toLocalDate() == day }.sortedBy { it.start }
+    val first = left.firstOrNull() ?: return null
+    return "오늘 일정 ${left.size}건이에요. 첫 일정은 ${koTime(first.start, zone)} ${first.title}이에요."
+}
+
+const val ARRIVE_BRIEF_MIN = 10
+/** 도착 전 브리핑: 그 일정 장소로 가는 중이고 남은 시간이 10분 이하이며, 이 일정에 아직 안 말했고 지각 질문도 안 나갔으면 한 문장, 아니면 null. said·lateAsked는 일정 start 집합. */
+fun arriveBrief(e: Event, dest: LatLng?, etaMin: Int?, said: Set<Long>, lateAsked: Set<Long>, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String? =
+    if (etaMin != null && etaMin <= ARRIVE_BRIEF_MIN && headingTo(dest, e) && e.start !in said && e.start !in lateAsked) "곧 도착해요. ${koTime(e.start, zone)} ${e.title}이에요." else null
+
 /** 휴게소를 넣은 뒤 한 문장. 목적지가 없으면 그 휴게소가 곧 목적지. */
 fun restStopSpeech(stop: RestStop, waypoint: Boolean): String {
     val n = if (stop.kind == "졸음쉼터" && "졸음쉼터" !in stop.name) "${stop.name} 졸음쉼터" else stop.name
