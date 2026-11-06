@@ -87,7 +87,7 @@ test("O4_LIVE 없으면 To는 항상 OWNER_NUMBER(카카오 조회도 안 함), 
     assert.equal(c.body.Timeout, 30);
     assert.equal(c.body.StatusCallback, "https://x/clawops/status/cc");
     assert.deepEqual(c.body.CallContext.Variables, {});
-    assert.match(c.body.CallContext.Instruction, /오늘 18시 30분에 4명 예약 가능할까요\? 주차도 되나요\?/);
+    assert.match(c.body.CallContext.Instruction, /오늘 오후 6시 30분에 네 명 예약 가능할까요\? 주차도 되나요\?/);
     const [row] = rows(env);
     assert.equal(row.id, r.id);
     assert.deepEqual([row.kind, row.status, row.call_id, row.from_label, row.summary], ["reserve", "calling", CID, "가명 식당", "18:30 4명 예약 전화 중"]);
@@ -124,10 +124,15 @@ test("발신 실패는 call_failed, inbox 행 없음", async () => {
 test("예약 대본: 4000자 이하, 필수 문구, 주입 문자 제거", () => {
   const s = reserveScript({ owner: "만일", place: "가명 식당", arrive: "18:30", party: 4 });
   assert.ok(s.length <= 4000);
-  for (const t of ["안녕하세요, AI 비서입니다. 만일님 대신 전화드렸어요. 오늘 18시 30분에 4명 예약 가능할까요? 주차도 되나요?", "감사합니다", "직접 연락드리게 전해 드릴게요", "알겠습니다, 끊으셔도 됩니다", "협상하지 않고"])
+  for (const t of ["안녕하세요, AI 비서입니다. 만일님 대신 전화드렸어요. 오늘 오후 6시 30분에 네 명 예약 가능할까요? 주차도 되나요?", "감사합니다", "직접 연락드리게 전해 드릴게요", "알겠습니다, 끊으셔도 됩니다", "협상하지 않고"])
     assert.ok(s.includes(t), t);
-  assert.ok(reserveScript({ place: "x", arrive: "09:00", party: 1 }).includes("오늘 9시에 1명 예약")); // 정각은 분 생략
+  assert.ok(reserveScript({ place: "x", arrive: "09:00", party: 1 }).includes("오늘 오전 9시에 한 명 예약")); // 정각은 분 생략
   assert.ok(reserveScript({ place: "x", arrive: "09:00", party: 1 }).includes("AI 비서입니다. 대신 전화드렸어요."));
+  assert.ok(reserveScript({ place: "x", arrive: "00:05", party: 12 }).includes("오늘 오전 12시 5분에 열두 명"));
+  assert.ok(reserveScript({ place: "x", arrive: "12:00", party: 20 }).includes("오늘 오후 12시에 스무 명"));
+  const named = reserveScript({ owner: "만일", phone: "010-0000-1234", place: "x", arrive: "09:00", party: 1 });
+  assert.ok(named.includes("'만일입니다'") && named.includes("'공, 일, 공, 공, 공, 공, 공, 일, 이, 삼, 사'"));
+  assert.ok(!reserveScript({ place: "x", arrive: "09:00", party: 1 }).includes("연락처를 물으면")); // 번호 없으면 그전처럼 전해 드린다고만
   assert.ok(!reserveScript({ place: "가'\"`{}명", arrive: "09:00", party: 1 }).includes("{"));
   assert.ok(reserveScript({ owner: "만일", place: "가".repeat(40), arrive: "09:00", party: 1 }).length <= 4000);
 });

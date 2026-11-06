@@ -584,7 +584,7 @@ export default {
         const r = await fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls`, {
           method: "POST",
           headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ From: env.CLAWOPS_NUMBER, To: to, AgentId: "cmvszaa6y001i01s6lqi2dm3j", CallContext: { Instruction: reserveScript({ owner, place, arrive, party }), Variables: {} }, StatusCallback: `${new URL(req.url).origin}/clawops/status/${env.CALL_CONTEXT_SECRET}`, Timeout: 30 }),
+          body: JSON.stringify({ From: env.CLAWOPS_NUMBER, To: to, AgentId: "cmvszaa6y001i01s6lqi2dm3j", CallContext: { Instruction: reserveScript({ owner, phone: env.OWNER_NUMBER, place, arrive, party }), Variables: {} }, StatusCallback: `${new URL(req.url).origin}/clawops/status/${env.CALL_CONTEXT_SECRET}`, Timeout: 30 }),
         });
         const j = (await r.json().catch(() => ({}))) as { callId?: string; CallId?: string };
         if (r.ok) callId = String(j.callId ?? j.CallId ?? "");
