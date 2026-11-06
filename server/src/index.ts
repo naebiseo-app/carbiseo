@@ -176,7 +176,7 @@ async function mcp(req: Request, env: Env): Promise<Response> {
   const p = msg.params ?? {};
   if (msg.method === "initialize") return ok({ protocolVersion: p.protocolVersion ?? "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "carbiseo", version: "1.0.0" } });
   if (msg.method === "ping") return ok({});
-  if (msg.method === "tools/list") return ok({ tools: [REPORT_TOOL] });
+  if (msg.method === "tools/list") return ok({ tools: [] }); // 카드는 통화 뒤 받아쓰기로. ClawOps 연결은 PATCH가 막혀 있어 도구 목록을 비운다
   if (msg.method === "tools/call") {
     // ClawOps가 MCP 요청마다 X-ClawOps-Call-Id를 싣는다(docs voice-agent/call-variables) → AI가 옮겨 적은 값보다 우선
     const hdr = req.headers.get("x-clawops-call-id") ?? "";

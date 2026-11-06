@@ -40,8 +40,8 @@ test("MCP: initialize·알림·tools/list, 비밀 틀리면 404, GET 405", async
   assert.deepEqual(i.result.capabilities, { tools: {} });
   assert.equal((await rpc(env, { method: "notifications/initialized" })).status, 202);
   const l = (await (await rpc(env, { id: 2, method: "tools/list" })).json()) as any;
-  assert.deepEqual(l.result.tools.map((t: any) => t.name), ["report_call"]);
-  assert.deepEqual(l.result.tools[0].inputSchema.required, ["call_id"]);
+  assert.deepEqual(l.result.tools, []);
+
   assert.equal((await rpc(env, { id: 1, method: "initialize" }, "/mcp/nope")).status, 404);
   assert.equal((await worker.fetch(new Request("https://x/mcp/cc"), env)).status, 405);
 });
