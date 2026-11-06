@@ -22,10 +22,15 @@ import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.api.Scope
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -42,23 +47,32 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.intl.LocaleList
 import androidx.compose.ui.text.style.LineBreak
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import java.time.ZoneId
@@ -69,6 +83,8 @@ private val Bg = Color(0xFF101215); private val S1 = Color(0xFF1A1D22); private 
 private val Line = Color(0xFF2E333B); private val Tx = Color(0xFFF2F3F5); private val Mute = Color(0xFFA6ACB4)
 private val Brand = Color(0xFFFF7A33); private val OnBrand = Color(0xFF14161A)
 private val WarmBg = Color(0xFF3A1D10); private val WarmTx = Color(0xFFFFD2BA); private val WarmSub = Color(0xFFE8B79C)
+
+private fun ampm(t: Long, z: ZoneId) = java.time.Instant.ofEpochMilli(t).atZone(z).let { "${if (it.hour < 12) "오전" else "오후"} ${if (it.hour % 12 == 0) 12 else it.hour % 12}:${"%02d".format(it.minute)}" }
 
 class MainActivity : ComponentActivity() {
     private var listenerOn by mutableStateOf(false)
@@ -98,6 +114,24 @@ class MainActivity : ComponentActivity() {
     private fun refresh() {
         listenerOn = getSystemService(NotificationManager::class.java).isNotificationListenerAccessGranted(ComponentName(this, Listener::class.java))
         events = Store.events(this); now = System.currentTimeMillis()
+        readParked()
+    }
+
+    // ───────── 하차 정보 ─────────
+    private var parked by mutableStateOf<Parked?>(null)
+    private var parkedHide by mutableStateOf(emptySet<Long>()) // 틱을 누른 일. 서버 응답 전 읽기가 되살리지 못하게 parked와 따로 둔다
+    private var parkedMsg by mutableStateOf("")
+
+    /** 디버그 빌드만: am start --es parked_json '<json>' 이면 서버 대신 그 값을 그린다(화면 확인용). */
+    private fun readParked() {
+        parkedMsg = ""
+        val fake = if (BuildConfig.DEBUG) intent.getStringExtra("parked_json")?.let(::parseParked) else null
+        net.execute { val p = fake ?: Relay.parked(); runOnUiThread { parked = p } }
+    }
+
+    private fun finishParked(id: Long) {
+        parkedHide += id; parkedMsg = ""
+        net.execute { if (!Relay.parkedDone(id)) runOnUiThread { parkedHide -= id; parkedMsg = "끝내지 못했어요. 다시 눌러 주세요" } }
     }
 
     // ───────── 연락처 연결 ─────────
@@ -335,6 +369,7 @@ class MainActivity : ComponentActivity() {
         val b = banner(listenerOn, events, now, z)
         val todays = today(events, now, z)
         LazyColumn(pad, state, contentPad, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            parked?.let { p -> item(key = "parked") { ParkedCard(p, z) } }
             item {
                 val warm = b.tone == Tone.ACTIVE
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(if (warm) WarmBg else S1)
@@ -358,6 +393,84 @@ class MainActivity : ComponentActivity() {
             }
             item { Text("오늘 비서가 한 일", color = Mute, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp, top = 6.dp).semantics { heading() }) }
             item { Timeline(todays, z, "아직 오늘 한 일이 없어요", "메시지 알림이 오면 차로 보내고 여기에 남겨요") }
+        }
+    }
+
+    /** 2a 위치 먼저: 주차 위치 카드(차 화면 링과 같은 조각 링) + 남은 일. 치수는 시안 그대로. */
+    @Composable private fun ParkedCard(p: Parked, z: ZoneId) {
+        val tasks = p.tasks.filter { it.id !in parkedHide }
+        Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+            Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("주차 위치", Modifier.alignByBaseline().semantics { heading() }, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+                if (p.at > 0) Text("${ampm(p.at, z)} 저장", Modifier.alignByBaseline(), color = Mute, fontSize = 13.sp)
+            }
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(S1).padding(18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.size(196.dp), contentAlignment = Alignment.Center) {
+                    SegRing(tasks.size)
+                    Text(p.memo.ifBlank { "메모 없음" }, Modifier.width(150.dp), color = if (p.memo.isBlank()) Mute else Tx, fontSize = 27.sp, lineHeight = 32.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.01).em,
+                        textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis, style = LocalTextStyle.current.copy(lineBreak = LineBreak.Heading))
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (p.address.isNotBlank()) Text(p.address, fontSize = 15.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                    Text("다음 출발 때 지워져요", color = Mute, fontSize = 13.sp, lineHeight = 18.sp)
+                }
+                val src = remember { MutableInteractionSource() }
+                val k by animateFloatAsState(if (src.collectIsPressedAsState().value) 0.97f else 1f, tween(160), label = "press")
+                Row(Modifier.fillMaxWidth().height(48.dp).graphicsLayer { scaleX = k; scaleY = k }.clip(CircleShape).background(Brand)
+                    .clickable(src, LocalIndication.current, role = Role.Button) { open(Intent(Intent.ACTION_VIEW, Uri.parse("geo:${p.lat},${p.lng}?q=${p.lat},${p.lng}"))) },
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
+                    Icon(Ic.pin, null, Modifier.size(20.dp), tint = OnBrand)
+                    Text("지도 열기", color = OnBrand, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                }
+            }
+            if (tasks.isEmpty()) Column(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                ParkedPic()
+                Text("남은 일이 없어요", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                Text("주차 위치만 남겨 둘게요", color = Mute, fontSize = 13.sp)
+            } else {
+                Row(Modifier.padding(top = 20.dp, bottom = 6.dp).semantics(mergeDescendants = true) { heading() }, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("남은 일", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("${tasks.size}", color = Brand, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
+                }
+                if (parkedMsg.isNotEmpty()) Text(parkedMsg, color = WarmSub, fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp))
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(S1).padding(start = 4.dp, end = 12.dp)) {
+                    tasks.forEachIndexed { i, t ->
+                        if (i > 0) HorizontalDivider(Modifier.padding(start = 8.dp), color = Line)
+                        Row(Modifier.fillMaxWidth().heightIn(min = 62.dp).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Box(Modifier.size(44.dp).clip(CircleShape).clickable(role = Role.Button) { finishParked(t.id) }.semantics { contentDescription = "${t.title} 끝냈어요" }, contentAlignment = Alignment.Center) {
+                                Box(Modifier.size(26.dp).border(2.dp, Color(0xFF4A5059), CircleShape))
+                            }
+                            Text(t.title, Modifier.weight(1f), fontSize = 15.5.sp, lineHeight = 21.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            t.number?.let { n ->
+                                Box(Modifier.size(44.dp).clip(CircleShape).background(S2).clickable(role = Role.Button) { open(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$n"))) }, contentAlignment = Alignment.Center) {
+                                    Icon(Ic.phone, "${t.title} 전화 걸기", Modifier.size(20.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** 조각 n개(0이면 온전한 링). 차 화면 SegRing과 같은 각도. */
+    @Composable private fun SegRing(n: Int) = Canvas(Modifier.fillMaxSize()) {
+        val st = 12.dp.toPx(); val o = Offset(8.dp.toPx(), 8.dp.toPx()); val box = Size(size.width - 2 * o.x, size.height - 2 * o.y)
+        drawArc(if (n == 0) Brand else Color(0xFF2A1A12), 0f, 360f, false, o, box, style = Stroke(st))
+        for (k in 0 until n) drawArc(Brand, -90f + k * 360f / n + 8f, 360f / n - 16f, false, o, box, style = Stroke(st, cap = StrokeCap.Round))
+    }
+
+    /** 시안 그림 parked(120 격자): 주차선 안에 세운 차를 위에서 본 모습 + 끝남 표시. */
+    @Composable private fun ParkedPic() = Canvas(Modifier.size(96.dp)) {
+        scale(size.width / 120f, pivot = Offset.Zero) {
+            for (x in listOf(18f, 102f)) drawLine(Color(0xFF4A5059), Offset(x, 14f), Offset(x, 106f), 4f, StrokeCap.Round, PathEffect.dashPathEffect(floatArrayOf(12f, 10f)))
+            drawRoundRect(Tx, Offset(36f, 18f), Size(48f, 84f), CornerRadius(16f), style = Stroke(3.5f))
+            val line = Stroke(3f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            drawPath(PathParser().parsePathString("M44 46c10-6 22-6 32 0l-4 12c-8-3-16-3-24 0z").toPath(), Tx, style = line)
+            drawPath(PathParser().parsePathString("M47 84c8 3 18 3 26 0").toPath(), Tx, style = line)
+            drawCircle(Brand, 20f, Offset(90f, 92f))
+            drawPath(PathParser().parsePathString("M81 92l7 7l12-13").toPath(), OnBrand, style = Stroke(4f, cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
     }
 
@@ -448,6 +561,7 @@ private object Ic {
     private fun v(d: String) = ImageVector.Builder(defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f)
         .addPath(addPathNodes(d), stroke = SolidColor(Color.Black), strokeLineWidth = 1.8f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round).build()
 
+    val pin = v("M9 11a3 3 0 1 0 6 0a3 3 0 0 0-6 0M17.657 16.657l-4.243 4.243a2 2 0 0 1-2.827 0l-4.244-4.243a8 8 0 1 1 11.314 0z")
     val phone = v("M5 4h3.5l1.6 4.2-2.1 1.4a11 11 0 0 0 6.4 6.4l1.4-2.1L20 15.5V19a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z")
     val headset = v("M4 14v-2a8 8 0 0 1 16 0v2" + rr(3.5f, 13.5f, 4f, 6f, 1.5f) + rr(16.5f, 13.5f, 4f, 6f, 1.5f) + "M20 19.5a3 3 0 0 1-3 2.5h-3")
     val car = v("M4 16v-3.5L6 7.5A2 2 0 0 1 7.9 6h8.2A2 2 0 0 1 18 7.5l2 5V16a1 1 0 0 1-1 1h-1.5M4 16a1 1 0 0 0 1 1h1.5M8.5 17h7M4.5 12.5h15" + circ(7.5f, 17f, 1.6f) + circ(16.5f, 17f, 1.6f))
