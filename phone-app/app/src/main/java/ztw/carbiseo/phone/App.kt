@@ -105,9 +105,15 @@ class MainActivity : ComponentActivity() {
     private fun hasContactsPermission() = checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
 
     private fun setContacts(on: Boolean) {
-        if (!on) { set(contactsOn, "contactsOn", false); net.execute { Relay.contacts(emptyList()) } }
+        if (!on) { set(contactsOn, "contactsOn", false); deleteContacts() }
         else if (hasContactsPermission()) { set(contactsOn, "contactsOn", true); sendContacts() }
         else askContacts.launch(Manifest.permission.READ_CONTACTS)
+    }
+
+    /** 서버분을 지운다. 실패하면 표시를 남겨 다음에 앱을 열 때 다시 지운다. */
+    private fun deleteContacts() {
+        prefs.edit().putBoolean("contactsDelete", true).apply()
+        net.execute { if (Relay.contacts(emptyList())) prefs.edit().remove("contactsDelete").apply() }
     }
 
     /** 폰 연락처를 읽어 서버로(이름·번호는 로그에 남기지 않는다). 성공한 시각만 저장해 실패하면 다음에 다시 보낸다. */
@@ -125,7 +131,7 @@ class MainActivity : ComponentActivity() {
 
     /** 켜져 있고 권한이 있으면 앱을 열 때 하루 1번만 다시 보낸다. 권한이 회수됐으면 끄고 서버분도 지운다. */
     private fun syncContactsDaily() {
-        if (!contactsOn.value) return
+        if (!contactsOn.value) { if (prefs.getBoolean("contactsDelete", false)) deleteContacts(); return }
         if (!hasContactsPermission()) { setContacts(false); return }
         if (System.currentTimeMillis() - prefs.getLong("contactsAt", 0L) >= 24 * 3600_000L) sendContacts()
     }
