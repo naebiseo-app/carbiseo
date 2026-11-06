@@ -97,7 +97,7 @@ test("report_call 두 번: 뒤 내용으로 교체(새 id, meta.replaces), 카�
   assert.equal(JSON.parse(now[0].meta).replaces, first.id);
 });
 
-test("transcript.completed: 끝맺음 전 끊긴 통화만 상대 말로 카드, 주인·이미 보고한 통화는 건너뜀", async () => {
+test("transcript.completed: 키 없으면 상대 말 그대로 카드, 주인·이미 카드 있는 통화는 건너뜀", async () => {
   const real = globalThis.fetch; let calls = 0;
   globalThis.fetch = (async () => { calls++; return new Response(JSON.stringify({ segments: [{ speaker: "speaker_0", text: "안녕하세요" }, { speaker: "speaker_1", text: "이지은입니다." }, { speaker: "speaker_0", text: "네" }, { speaker: "speaker_1", text: "계약서 건이요." }] })); }) as unknown as typeof fetch;
   try {
@@ -112,7 +112,7 @@ test("transcript.completed: 끝맺음 전 끊긴 통화만 상대 말로 카드,
     await hook(env, GUEST);
     await hook(env, GUEST); // 재전송돼도 1장
     assert.equal(cards(env).length, 1);
-    assert.equal(cards(env)[0].summary, "끊긴 통화: 이지은입니다. 계약서 건이요.");
+    assert.equal(cards(env)[0].summary, "상대 말: 이지은입니다. 계약서 건이요.");
     const before = calls;
     const env2 = { ...mkEnv(), CLAWOPS_API_KEY: "a", CLAWOPS_ACCOUNT_ID: "b" };
     await ring(env2, GUEST);
@@ -121,6 +121,26 @@ test("transcript.completed: 끝맺음 전 끊긴 통화만 상대 말로 카드,
     assert.equal(cards(env2).length, 1);
     assert.equal(cards(env2)[0].summary, "미팅 변경");
     assert.equal(calls, before);
+  } finally { globalThis.fetch = real; }
+});
+
+test("transcript.completed: 받아쓰기를 AI가 요약한 메모로 카드, 이름표·시각 저장", async () => {
+  const real = globalThis.fetch; let sent = "";
+  globalThis.fetch = (async (u: string, init: any) => {
+    if (String(u).includes("anthropic")) { sent = init.body; return new Response(JSON.stringify({ content: [{ type: "text", text: '{"caller":"이지은","summary":"이지은 님이 계약서 건으로 3시까지 연락을 원합니다.","callback_by":"3시까지"}' }] })); }
+    return new Response(JSON.stringify({ segments: [{ speaker: "speaker_0", text: "안녕하세요" }, { speaker: "speaker_1", text: "이지은입니다. 3시까지요." }] }));
+  }) as unknown as typeof fetch;
+  try {
+    const env = { ...mkEnv(), CLAWOPS_API_KEY: "a", CLAWOPS_ACCOUNT_ID: "b", ANTHROPIC_API_KEY: "k" };
+    const raw = new URLSearchParams({ CallId: CID, From: GUEST, Direction: "inbound", Event: "transcript.completed" }).toString();
+    const mac = await crypto.subtle.sign("HMAC", await crypto.subtle.importKey("raw", new TextEncoder().encode("k"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]), new TextEncoder().encode(signData("https://x/clawops/events", null, raw)));
+    await worker.fetch(new Request("https://x/clawops/events", { method: "POST", headers: { "x-signature": btoa(String.fromCharCode(...new Uint8Array(mac))) }, body: raw }), env);
+    const c = cards(env);
+    assert.equal(c.length, 1);
+    assert.equal(c[0].from_label, "이지은");
+    assert.equal(c[0].summary, "이지은 님이 계약서 건으로 3시까지 연락을 원합니다.");
+    assert.equal(JSON.parse(c[0].meta).callback_by, "3시까지");
+    assert.match(JSON.parse(sent).messages[0].content, /비서: 안녕하세요\n상대: 이지은입니다/);
   } finally { globalThis.fetch = real; }
 });
 
@@ -134,11 +154,8 @@ test("report_call: 주인 통화는 카드 없이 ok(스위치 켜면 손님처�
   assert.equal(cards(env).length, 1);
 });
 
-test("call-context: 손님 대본 끝에 report_call 줄(CallId 포함), 주인·CallId 없음은 제외", async () => {
+test("call-context: 어떤 대본에도 report_call이 없다(카드는 통화 뒤 받아쓰기로)", async () => {
   const env = mkEnv();
-  assert.match((await ring(env, GUEST)).Instruction, new RegExp(`report_call 도구를 말없이 한 번 호출합니다\\(call_id: "${CID}"`));
-  assert.doesNotMatch((await ring(env, GUEST, "")).Instruction, /report_call/);
+  assert.doesNotMatch((await ring(env, GUEST)).Instruction, /report_call/);
   assert.doesNotMatch((await ring(env, OWNER)).Instruction, /report_call/);
-  env.DB.db.prepare("INSERT INTO kv(key,value,updated_at) VALUES('owner_as_guest','true',0)").run();
-  assert.match((await ring(env, OWNER)).Instruction, /report_call/);
 });

@@ -1,4 +1,4 @@
-import { CALL_ID, carChip, callerNumber, cleanMent, cleanName, field, freshCtx, hhmm, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, reportLine, isDirect, sameNumber, type Mode, type Recent } from "./script.ts";
+import { CALL_ID, carChip, callerNumber, cleanMent, cleanName, field, freshCtx, hhmm, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, isDirect, sameNumber, type Mode, type Recent } from "./script.ts";
 import { adminPage, basicOk, demoSchedule, encodeReplay, parseFakeCall, replayScript, type MailRow, type ReplyRow } from "./admin.ts";
 import { FALLBACK, guardText, isBlocked } from "./guard.ts";
 import { parseNotify, parseReply, TAKE_REPLIES_SQL, type Notif } from "./notif.ts";
@@ -96,16 +96,39 @@ async function saveCallCard(db: D1Database, c: Card, extra: object = {}, from = 
 // 도구 결과도 AI가 읽는다: 호출 직후 AI가 통화를 끊은 일이 있어(11-06 실통화) 끊지 말라고 돌려준다
 const AFTER_REPORT = "기록했습니다. 지금은 아무 말도 하지 않습니다. 통화를 끊지 말고 상대가 끊을 때까지 기다립니다. 상대가 말하면 이어서 답합니다.";
 
-// 끝맺음 전에 끊기면 report_call이 없고 summary.completed도 안 온다(11-06 12통 전부 not_requested) → 받아쓰기의 상대 말로 카드
-async function cutoffCard(env: Env, raw: string) {
+const SUMMARY_SYSTEM = "전화 받아쓰기를 운전자가 볼 메모로 정리합니다. 받아쓰기에 있는 내용만 쓰고, 시각은 상대가 말한 그대로 씁니다. '아, 네' 같은 맞장구는 이름이 아니고, 비서가 되읽어 상대가 고친 이름이 있으면 고친 이름을 씁니다. JSON 한 줄만 답합니다: {\"caller\":\"상대 이름·소속, 없으면 빈 문자열\",\"summary\":\"누가 무슨 일로 언제까지 연락을 원하는지와 전해 달라는 내용을 모두 담은 한두 문장\",\"callback_by\":\"연락 희망 시각, 없으면 빈 문자열\"}";
+
+// 받아쓰기 → 메모. 실패는 null(호출한 쪽이 상대 말 그대로 쓴다)
+async function summarizeCall(key: string | undefined, dialog: string): Promise<{ caller?: string; summary?: string; callback_by?: string } | null> {
+  if (!key) return null;
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-haiku-5-5", max_tokens: 300, thinking: { type: "disabled" }, system: SUMMARY_SYSTEM, messages: [{ role: "user", content: dialog }] }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) return null;
+    const d = (await r.json()) as { content?: { type?: string; text?: string }[] };
+    return JSON.parse(d.content?.find((b) => b.type === "text")?.text?.match(/\{[\s\S]*\}/)?.[0] ?? "null");
+  } catch { return null; }
+}
+
+// 손님 통화 카드는 끊은 뒤 받아쓰기로 만든다. 통화 중 도구 호출은 답을 7초 늦추고 말을 두 번 하게 했다(11-06 실통화), summary.completed는 안 온다(12통 전부 not_requested)
+async function transcriptCard(env: Env, raw: string) {
   const f = new URLSearchParams(raw), id = f.get("CallId") ?? "", from = f.get("From") ?? "";
   if (f.get("Event") !== "transcript.completed" || f.get("Direction") !== "inbound" || !env.CLAWOPS_API_KEY) return;
   if (sameNumber(from, env.OWNER_NUMBER) && !(await kvGet(env.DB, "owner_as_guest"))) return;
   if (await env.DB.prepare("SELECT 1 FROM inbox WHERE kind='call' AND call_id=? AND status<>'ringing'").bind(id).first()) return;
   const r = await fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls/${id}/transcript`, { headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}` } });
   const segs = ((await r.json()) as { segments?: { speaker: string; text: string }[] }).segments ?? [];
-  const said = segs.filter((s) => s.speaker !== segs[0].speaker).map((s) => s.text).join(" "); // 첫 화자 = AI 소개
-  await saveCallCard(env.DB, { call_id: id, ...fromCols(from), summary: said ? `끊긴 통화: ${said}` : "말씀 없이 끊긴 전화예요", urgent: isUrgent(said) ? 1 : 0 }, { via: "transcript" }, from);
+  const ai = segs[0]?.speaker; // 첫 화자 = AI 소개
+  const said = segs.filter((s) => s.speaker !== ai).map((s) => s.text).join(" ");
+  const memo = said ? await summarizeCall(env.ANTHROPIC_API_KEY, segs.map((s) => `${s.speaker === ai ? "비서" : "상대"}: ${s.text}`).join("\n")) : null;
+  const summary = memo?.summary || (said ? `상대 말: ${said}` : "말씀 없이 끊긴 전화예요");
+  const cols = fromCols(from), who = String(memo?.caller ?? "").replace(/["'`{}]/g, "").slice(0, 40);
+  await saveCallCard(env.DB, { call_id: id, ...cols, from_label: who || cols.from_label, summary, urgent: isUrgent(`${summary} ${said}`) ? 1 : 0 },
+    { via: "transcript", caller: who, callback_by: String(memo?.callback_by ?? "").slice(0, 50) }, from);
 }
 
 // MCP report_call: AI가 끝맺음 뒤에 요약을 보낸다 → 끊는 순간 카드. 결과 "ok" 또는 오류 문구.
@@ -419,7 +442,6 @@ export default {
       }
       const s = pickScript(room, owner, name, eta, mode, nextEventAt(schedule, now()), cc, clk, ment, known);
       const callId = field(raw, ["callid", "callsid", "call_id"]);
-      const report = mode === "ai" && CALL_ID.test(callId) ? reportLine(callId) : ""; // 안내 멘트(ment·off)는 대화가 없어 생략
       // 멘트·끔: 모델이 끊기를 미루는 일이 있어(장면 9) 멘트 길이만큼 기다렸다가 서버가 통화를 끝낸다. ponytail: 고정 12초, 긴 사용자 멘트면 길이 비례로
       if (mode !== "ai" && CALL_ID.test(callId) && env.CLAWOPS_API_KEY)
         ctx?.waitUntil(new Promise((ok) => setTimeout(ok, HANGUP_MS)).then(() => fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls/${callId}`,
@@ -431,7 +453,7 @@ export default {
         await saveCallCard(env.DB, { call_id: callId, ...fromCols(from), summary: "바로 연결 번호에서 전화가 왔어요", urgent: 1 }, {}, from, "ringing").catch((e) => console.log("direct ring card error", String(e)));
       }
       const dl = direct && mode === "ai" ? ` 이 분은 ${owner ?? "주인"}님이 바로 연결 목록에 넣은 분입니다. 용건만 짧게 듣고 '바로 전해 드리겠습니다'로 끝냅니다.` : ""; // ment·off는 대화가 없어 생략
-      return json({ CallContext: { Instruction: s.instruction + dl + report, Variables: { room: s.room ?? "UNKNOWN", car: carChip(cc, now()), ...(direct ? { direct: "1" } : {}) } } });
+      return json({ CallContext: { Instruction: s.instruction + dl, Variables: { room: s.room ?? "UNKNOWN", car: carChip(cc, now()), ...(direct ? { direct: "1" } : {}) } } });
     }
 
     // ClawOps 에이전트 MCP 연결(report_call). 비밀은 경로에(authType none)
@@ -467,7 +489,7 @@ export default {
           { method: "POST", headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}` } });
         console.log("transcript request", callId, r.status); // 202 접수, 409 이미 요청됨
       }
-      if (sig === "ok") await cutoffCard(env, raw).catch((e) => console.log("cutoff card error", String(e)));
+      if (sig === "ok") await transcriptCard(env, raw).catch((e) => console.log("transcript card error", String(e)));
       const card = sig === "ok" ? summaryCard(raw) : null;
       if (card && sameNumber(new URLSearchParams(raw).get("From") ?? "", env.OWNER_NUMBER) && !(await kvGet(env.DB, "owner_as_guest"))) {
         // 주인 모드 통화 → 할 일 카드(문자 초안 등). 재전송 대비 1장만
