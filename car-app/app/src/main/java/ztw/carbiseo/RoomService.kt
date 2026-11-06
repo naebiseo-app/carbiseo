@@ -76,6 +76,7 @@ class RoomService : Service() {
     private val homeOnce = Once()
     private val restOnce = Once()
     private val fatigueOnce = Once()
+    private val alightOnce = Once() // 정차 한 번당 하차 위치 갱신 한 번(PARK 진입 때 reset)
     private val parkRemind = Once() // M12: 정차마다 1회
     private var greenSaid = false        // 이번 신호에 출발 알림을 했나
     private var quiet = false            // 경고·깜빡이·후진·큰 조향 중
@@ -102,6 +103,7 @@ class RoomService : Service() {
     private var callback: Pair<InboxItem, String>? = null
     private var sending: PendingSend? = null
     private var reserve: Pair<String, String>? = null // 예약 인원을 물은 (목적지 이름, 도착 HH:MM)
+    private val parkWait = mutableSetOf<Long>() // reserveWait 중 주차 문의인 행 id(결과 카드 제목 구분)
     private val reserveWait = mutableMapOf<Long, Pair<String, Long>>() // 전화를 건 예약 서버 행 id -> (가게 이름, 건 시각 elapsedRealtime). 결과를 한 번만 읽고 뺀다. 메인 스레드에서만
     private val arriveSaid = mutableSetOf<Long>() // 도착 전 브리핑을 이미 한 일정(start). prefs arrive_said에 저장
     private var forcedDest: String? = null // 디버그 ROUTE의 --es name (에뮬은 내비가 목적지 이름을 안 줄 수 있어서)
@@ -349,7 +351,7 @@ class RoomService : Service() {
             val (id, code) = Server.reserveParking(n, d.lat, d.lng); Log.i("ROOM", "parking call -> ${id ?: "FAIL $code"}")
             ui.post {
                 if (id == null) { say(when (code) { "no_number" -> PARK_NO_INFO_SPEECH; "daily_limit" -> RESERVE_LIMIT_SPEECH; else -> PARK_CALL_FAIL_SPEECH }); return@post }
-                if (id > 0) reserveWait[id] = n to SystemClock.elapsedRealtime()
+                if (id > 0) { reserveWait[id] = n to SystemClock.elapsedRealtime(); parkWait += id }
                 say(reserveCallSpeech(n))
             }
         }
@@ -401,10 +403,10 @@ class RoomService : Service() {
     private fun onReserveRows(rows: List<InboxItem>) {
         val now = SystemClock.elapsedRealtime()
         reserveWait.filterValues { now - it.second > RESERVE_WAIT_MS }.forEach { (id, w) ->
-            reserveWait.remove(id); addLocalTask(reserveResultTask(w.first, "결과를 받지 못했어요. 직접 확인해 주세요"))
+            reserveWait.remove(id); addLocalTask(reserveResultTask(w.first, "결과를 받지 못했어요. 직접 확인해 주세요", parkWait.remove(id)))
         }
         for (i in rows) if (i.kind == "reserve") reserveWait[i.id]?.let { (place, _) ->
-            reserveResultSpeech(place, i)?.let { reserveWait.remove(i.id); addLocalTask(reserveResultTask(place, i.summary.ifBlank { it })); say(it) }
+            reserveResultSpeech(place, i)?.let { reserveWait.remove(i.id); addLocalTask(reserveResultTask(place, i.summary.ifBlank { it }, parkWait.remove(i.id))); say(it) }
         }
     }
 
@@ -527,6 +529,8 @@ class RoomService : Service() {
                 restOffer = true; if (!restNow) say(fatigueSpeech(machine.signals.gear))
                 if (talk.step != NotifTalk.Step.NONE) { talk.cancel(); askStep = talk.step; listening = false } // 폰 알림 대화는 피로 진입 때 조용히 닫는다(카드는 남음)
             }
+            // 하차(P + 운전석 문 열림): 정차 위치를 그 시점 위치로 한 번 더 갱신. 신호·권한이 없으면 PARK 진입 때 저장한 것이 그대로 남는다.
+            if (alightOnce.fire(machine.room == Room.PARK && gotOff(machine.signals.gear, adapters.forcedDoor ?: adapters.driverDoorPos))) machine.signals.location?.let { Log.i("ROOM", "alight -> park update"); postParked(it) }
             seat.update(adapters.passengerSeat)?.let { passengerOffer = it && !passenger }
             if (passenger) passengerOffer = false
             adapters.telltale.let { t -> if (t != lastTell) { lastTell = t; telltale = t; if (t != null && machine.room != Room.PARK) say(TELLTALE_SPEECH) } }
@@ -600,7 +604,7 @@ class RoomService : Service() {
             room = to.name; choice = null
             val now = clock.millis()
             if (to == Room.PARK) {
-                parkedAt = now; restOffer = false; hold.clear(); parkRemind.reset(); chatHistory.clear()
+                parkedAt = now; alightOnce.reset(); restOffer = false; hold.clear(); parkRemind.reset(); chatHistory.clear()
                 // 정차 요약: 이번 실행에 와서 아직 안 알리고 안 본 알림(쉼 방 비즐겨찾기·피로·동승자 등으로 미룬 것)
                 notifQueue.clear(); talk.cancel(); listening = false; pending = Ask.NONE; reservePlace = null
                 machine.signals.location?.let(::postParked) // 짧은 정차에도 위치는 갱신
@@ -746,7 +750,14 @@ class RoomService : Service() {
         val wakePcm = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { runCatching { java.io.File(filesDir, "wake.pcm").readBytes() }.onSuccess { Log.i("ROOM", "debug wake pcm ${it.size}B active=${wake != null}"); wake?.feedPcm(it) } }
         }
-        for ((rc, action) in listOf(cc to "ztw.carbiseo.CALLCARD", hear to "ztw.carbiseo.HEAR", wakePcm to "ztw.carbiseo.WAKEPCM", say to "ztw.carbiseo.SAY", wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP", loc to "ztw.carbiseo.LOC", tm to "ztw.carbiseo.TIME", soc to "ztw.carbiseo.SOC", sig to "ztw.carbiseo.SIGNAL")) {
+        // adb shell am broadcast -a ztw.carbiseo.DOOR --ei pos 1 (운전석 문 위치값, 0 = 닫힘, -1 = 해제) / -a ztw.carbiseo.WIPER --ez on true
+        val door = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) { adapters.forcedDoor = i.getIntExtra("pos", -1).takeIf { it >= 0 }; Log.i("ROOM", "debug door force=${adapters.forcedDoor}") }
+        }
+        val wiper = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) { val on = i.getBooleanExtra("on", false); adapters.setRain(on); Log.i("ROOM", "debug wiper rain=$on") }
+        }
+        for ((rc, action) in listOf(door to "ztw.carbiseo.DOOR", wiper to "ztw.carbiseo.WIPER", cc to "ztw.carbiseo.CALLCARD", hear to "ztw.carbiseo.HEAR", wakePcm to "ztw.carbiseo.WAKEPCM", say to "ztw.carbiseo.SAY", wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP", loc to "ztw.carbiseo.LOC", tm to "ztw.carbiseo.TIME", soc to "ztw.carbiseo.SOC", sig to "ztw.carbiseo.SIGNAL")) {
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(rc, IntentFilter(action), Context.RECEIVER_EXPORTED) else registerReceiver(rc, IntentFilter(action))
             receivers += rc
         }

@@ -32,6 +32,8 @@ data class Signals(
     val charging: Boolean = false,
     val destination: LatLng? = null,
     val location: LatLng? = null,
+    val rain: Boolean = false,       // 와이퍼 작동(CAR_WINDOWS). 쓰는 곳은 아직 없음
+    val arrived: Boolean = false,    // 내비 onDestinationArrived 이후 ~ 다음 경로 시작까지
 )
 
 fun distanceM(a: LatLng, b: LatLng): Double {

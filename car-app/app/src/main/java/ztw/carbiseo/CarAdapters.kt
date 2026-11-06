@@ -4,7 +4,10 @@ import ai.pleos.playground.navi.constants.NavigationStatus
 import ai.pleos.playground.navi.data.CameraAlert
 import ai.pleos.playground.navi.data.CautionPoint
 import ai.pleos.playground.navi.data.CurrentLocationInfo
+import ai.pleos.playground.navi.data.DestinationArrivedInfo
 import ai.pleos.playground.navi.data.DestinationInfo
+import ai.pleos.playground.navi.data.RouteStartInfo
+import ai.pleos.playground.navi.data.RouteStateInfo
 import ai.pleos.playground.navi.data.WaypointChangedInfo
 import ai.pleos.playground.navi.helper.NaviHelper
 import ai.pleos.playground.navi.helper.listener.NaviHelperEventListener
@@ -12,7 +15,14 @@ import ai.pleos.playground.navi.constants.BookmarkType
 import ai.pleos.playground.navi.data.BookmarkInfo
 import ai.pleos.playground.navi.data.RecentDestinationInfo
 import ai.pleos.playground.vehicle.Vehicle
+import ai.pleos.playground.vehicle.api.model.area.DoorArea
 import ai.pleos.playground.vehicle.api.model.area.SeatArea
+import ai.pleos.playground.vehicle.api.model.area.WindowArea
+import ai.pleos.playground.vehicle.constant.area.DoorValue
+import ai.pleos.playground.vehicle.constant.area.WindowValue
+import ai.pleos.playground.vehicle.constant.control.WiperState
+import ai.pleos.playground.vehicle.listener.DoorPositionListener
+import ai.pleos.playground.vehicle.listener.WiperStateListener
 import ai.pleos.playground.vehicle.constant.area.SeatValue
 import ai.pleos.playground.vehicle.constant.area.TurnSignalValue
 import ai.pleos.playground.vehicle.constant.telltale.TelltaleColor
@@ -63,6 +73,10 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
     var soc: Int? = null; private set
     var passengerSeat: Boolean? = null; private set // 조수석 착석 원값. 에뮬은 콘솔 값과 반대로 온다(26 실측) — 뒤집지 않고 RoomService가 SeatEdge 기준선으로 해석
     var telltale: String? = null; private set // 빨간색·켜짐 경고등 종류
+    var driverDoorPos: Int? = null; private set // 운전석(ROW_1_LEFT) 문 위치값. 0 = 닫힘 가정. null = 모름/권한 없음
+    var forcedDoor: Int? = null // 디버그 브로드캐스트 DOOR로 주입(-1 = 해제)
+    var trafficWorst: String? = null; private set // 경로 정체 중 가장 심한 단계(FAST/MODERATE/SLOW/HEAVY). 지각 판단엔 아직 안 씀
+    var congestionTime: Long? = null; private set // RouteStateInfo.trafficStatus.summary.totalCongestionTime 원값(단위 미확인)
     // 내비 앱은 부팅 후 자기 화면(지도)을 한 번 그리기 전까지 SDK 요청을 전부 버린다("navi not ready", 에뮬 실측). 첫 응답이 오면 준비된 것.
     var naviReady = false; private set
     var forcedLocation: LatLng? = null // 디버그 브로드캐스트 LOC로 주입한 위치(에뮬 위치가 고정이라)
@@ -72,6 +86,8 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
     private fun fail(what: String): (Exception) -> Unit = { e -> Log.w(TAG, "$what FAIL $e") }
 
     private fun set(f: Signals.() -> Signals) { ui.post { m.update(f) } }
+
+    fun setRain(on: Boolean) = set { copy(rain = on) }
 
     fun start() {
         runCatching { initGearAndUx() }.onFailure { Log.w(TAG, "gear/ux init FAIL $it") }
@@ -154,6 +170,24 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
             })
             v.getSeat().getCurrentSeatOccupancy(seat, { onSeat(it) }, fail("seat get"))
         }.onFailure { Log.w(TAG, "seat attach FAIL $it") }
+        runCatching {
+            val door = DoorArea(DoorValue.ROW_1_LEFT) // 좌핸들 = 운전석 왼쪽
+            val onDoor = { p: Int? -> Log.i(TAG, "driverDoor $p"); ui.post { driverDoorPos = p }; Unit }
+            v.getDoor().registerDoorPosition(door, object : DoorPositionListener {
+                override fun onPositionUpdated(p: Int?) { onDoor(p) }
+                override fun onFailed(e: Exception) { fail("door")(e) }
+            })
+            v.getDoor().getCurrentDoorPosition(door, { onDoor(it) }, fail("door get"))
+        }.onFailure { Log.w(TAG, "door attach FAIL $it") }
+        runCatching {
+            val glass = WindowArea(WindowValue.FRONT_WINDSHIELD)
+            val onWiper = { s: WiperState? -> Log.i(TAG, "wiper $s"); setRain(rainByWiper(s?.name)) }
+            v.getWiper().registerWiperState(glass, object : WiperStateListener {
+                override fun onWiperStateUpdated(s: WiperState?) { onWiper(s) }
+                override fun onFailed(e: Exception) { fail("wiper")(e) }
+            })
+            v.getWiper().getCurrentWiperState(glass, { onWiper(it) }, fail("wiper get"))
+        }.onFailure { Log.w(TAG, "wiper attach FAIL $it") }
         // registerTelltales는 PRIVATE_CAR_SAFETY가 필요해 쓰지 않는다. 조회만 30초마다, 실패하면 멈춘다.
         ui.post(object : Runnable {
             override fun run() {
@@ -227,6 +261,17 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
             override fun onRouteCancelled() { Log.i(TAG, "onRouteCancelled"); ui.post { etaMin = null; destName = null }; set { copy(destination = null) } }
             override fun onRouteEnded() { ui.post { etaMin = null; destName = null }; set { copy(destination = null) } }
             override fun onDestinationChanged() { n.getDestinationInfo() }
+            override fun onRouteStarted(i: RouteStartInfo) { set { copy(arrived = false) } }
+            override fun onDestinationArrived(i: DestinationArrivedInfo) { Log.i(TAG, "arrived name=${i.name}"); set { copy(arrived = true) } }
+            // trafficStatus는 enum이 아니라 요약+구간 목록 객체(실물). 단계는 구간 중 가장 심한 것.
+            override fun onRouteStateInfo(i: RouteStateInfo) {
+                runCatching {
+                    val t = i.trafficStatus
+                    val w = t?.congestionItemList?.map { it.trafficCongestionType.name }?.let(::worstTraffic); val c = t?.summary?.totalCongestionTime // trafficStatus는 null 가능(경로 없음)
+                    Log.i(TAG, "traffic worst=$w congestionTime=$c items=${t?.congestionItemList?.size}")
+                    ui.post { trafficWorst = w; congestionTime = c }
+                }.onFailure { Log.w(TAG, "traffic FAIL $it") }
+            }
             override fun onWaypointChanged(i: WaypointChangedInfo) { n.getDestinationInfo() }
             // 0 이하 = 제한속도 모름. 목록이 비면 경고/주의구간 해제로 본다.
             override fun onCurrentRoadSpeedLimit(l: Int) { ui.post { limitKmh = l.takeIf { it > 0 } } }
@@ -256,7 +301,7 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
         })
         n.initialize({
             n.getDestinationInfo(); n.getCurrentLocationInfo(); runCatching { n.getBookmarkInfo() }.onFailure { Log.w(TAG, "bookmark FAIL $it") }
-            ui.post(object : Runnable { override fun run() { navi?.getCurrentLocationInfo(); navi?.getDestinationInfo(); ui.postDelayed(this, 5000) } })
+            ui.post(object : Runnable { override fun run() { navi?.getCurrentLocationInfo(); navi?.getDestinationInfo(); runCatching { navi?.getRouteStateInfo() }; ui.postDelayed(this, 5000) } })
         }, { Log.w(TAG, "navi initialize FAIL $it") })
     }
 

@@ -6,6 +6,8 @@
     <uses-permission android:name="pleos.car.permission.CAR_SEATS" />
     <uses-permission android:name="pleos.car.permission.CAR_ENERGY" />
     <uses-permission android:name="pleos.car.permission.CAR_SAFETY" />
+    <uses-permission android:name="pleos.car.permission.CAR_DOORS" /><!-- 운전석 문 열림(하차 감지) -->
+    <uses-permission android:name="pleos.car.permission.CAR_WINDOWS" /><!-- 와이퍼 작동(비) -->
     <uses-permission android:name="pleos.car.permission.NAVI_ROUTE" />
     <uses-permission android:name="pleos.car.permission.NAVI_ROUTE_SEARCH" />
     <uses-permission android:name="pleos.car.permission.NAVI_CUSTOM_MAP" /><!-- requestNavigationScreen(집 즐겨찾기 추가·휴게소 검색), normal -->

@@ -506,4 +506,21 @@ class DriveTest {
         assertEquals("근처 주차장이 다 찼어요, 가게에 주차 자리 물어볼까요?", parkingSpeech(listOf(full), true)); assertEquals("근처 주차장이 다 찼어요", parkingSpeech(listOf(full), false))
         assertEquals("가게에 주차 자리 물어볼까요?", parkingSpeech(emptyList(), true)); assertEquals("주차 정보를 찾지 못했어요", parkingSpeech(emptyList(), false))
     }
+
+    @Test fun 주차_문의_결과_카드_제목() {
+        assertEquals("식당 주차 문의 / 내용: 가능해요", reserveResultTask("식당", "가능해요", parking = true))
+    }
+
+    @Test fun 하차_비_정체_판단() {
+        assertTrue(gotOff(Gear.PARK, 1))
+        assertFalse(gotOff(Gear.PARK, 0)) // 닫힘
+        assertFalse(gotOff(Gear.PARK, null)) // 신호·권한 없음 -> 지금 동작 유지
+        assertFalse(gotOff(Gear.DRIVE, 1))
+        assertTrue(rainByWiper("ON"))
+        assertFalse(rainByWiper("OFF"))
+        assertFalse(rainByWiper(null))
+        assertEquals("SLOW", worstTraffic(listOf("FAST", "SLOW", "MODERATE", "UNKNOWN")))
+        assertEquals(null, worstTraffic(listOf("UNKNOWN")))
+        assertEquals(null, worstTraffic(emptyList()))
+    }
 }

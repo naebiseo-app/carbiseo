@@ -329,8 +329,15 @@ fun partyOf(said: String?): Int? {
 }
 
 /** O4: 전화를 못 걸었거나 인원을 못 읽었을 때 남기는 예약 문자 초안 = 할 일 카드 본문(taskDraft 형식, 번호는 정차 후 입력). */
+/** 하차: 기어 P + 운전석 문 위치값이 0보다 큼(열림). 값을 모르면 false. ponytail: 열림 > 0은 문서 미확인(에뮬 실측으로 조정) */
+fun gotOff(gear: Gear, driverDoorPos: Int?): Boolean = gear == Gear.PARK && (driverDoorPos ?: 0) > 0
+/** 앞유리 와이퍼가 켜져 있으면 비로 본다(WiperState 이름 "ON"). */
+fun rainByWiper(wiperState: String?): Boolean = wiperState == "ON"
+/** 내비 정체 단계(TrafficCongestionType 이름) 중 가장 심한 것. 모르면 null. */
+private val TRAFFIC_ORDER = listOf("FAST", "MODERATE", "SLOW", "HEAVY")
+fun worstTraffic(types: List<String>): String? = types.filter { it in TRAFFIC_ORDER }.maxByOrNull { TRAFFIC_ORDER.indexOf(it) }
 /** 예약 전화 결과 카드. 할 일로 남겨 정차 때 다시 볼 수 있게 한다. */
-fun reserveResultTask(name: String, result: String) = "$name 예약 / 내용: $result"
+fun reserveResultTask(name: String, result: String, parking: Boolean = false) = "$name ${if (parking) "주차 문의" else "예약"} / 내용: $result"
 fun reserveTask(name: String, hhmm: String) = "$name 예약 / 내용: 안녕하세요, ${hhmm}쯤 도착 예정인데 자리(주차) 가능할까요?"
 /** 유선 가게 전화(카드의 `가게전화: 번호`). 없으면 null. */
 fun shopPhone(text: String): String? = Regex("""가게전화\s*[:：]\s*([0-9-]+)""").find(text)?.groupValues?.get(1)
