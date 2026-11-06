@@ -115,7 +115,7 @@ test("바로 연결: 전화 오는 순간 ringing 카드, 요약이 오면 새 i
   assert.ok(c[0].id > id && JSON.parse(c[0].meta).replaces === id); // 차는 id>since만 받으므로 새 id + 지울 카드 id
   const inbox = (await (await worker.fetch(new Request("https://x/car/inbox?since=0", { headers: { authorization: "Bearer t" } }), env)).json()) as any;
   assert.equal(JSON.parse(inbox.items.find((i: any) => i.call_id === CID).meta).replaces, id); // 응답 items[].meta(JSON 문자열).replaces
-  await report(env, { call_id: CID, summary: "다른 요약" }); // 이미 summarized면 건너뜀
+  await report(env, { call_id: CID, summary: "견적 문의" }); // 같은 내용 재전송은 건너뜀
   assert.equal(cards(env)[0].summary, "견적 문의");
 });
 

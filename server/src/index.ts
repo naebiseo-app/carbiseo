@@ -108,6 +108,8 @@ export async function reportCall(env: Env, a: Record<string, unknown>): Promise<
   const summary = (s("summary", 300) || [s("caller", 100), s("purpose", 200)].filter(Boolean).join(", ")).slice(0, 300);
   // 카드 이름표는 AI가 확인받은 이름(없으면 끝번호) → 아는 번호 확인·"문자 먼저 보낼까요"·낭독이 이름을 쓴다
   const cols = fromCols(from); const who = s("caller", 40).replace(/["'`{}]/g, "");
+  // 끝맺음 뒤 내용이 늘어 다시 호출(같은 내용 재전송은 건너뜀): 앞 카드를 ringing으로 돌려 saveCallCard의 교체(새 id + meta.replaces) 경로를 탄다
+  await env.DB.prepare("UPDATE inbox SET status='ringing' WHERE kind='call' AND call_id=? AND status='summarized' AND summary<>?").bind(id, summary).run();
   await saveCallCard(env.DB, { call_id: id, ...cols, from_label: who || cols.from_label, summary, urgent: a.urgent === true || isUrgent(summary) ? 1 : 0 },
     { via: "mcp", caller: s("caller", 100), purpose: s("purpose", 200), callback_by: s("callback_by", 50) }, from);
   console.log("report_call", id);
@@ -117,15 +119,15 @@ export async function reportCall(env: Env, a: Record<string, unknown>): Promise<
 const STR = { type: "string" };
 const REPORT_TOOL = {
   name: "report_call",
-  description: "끝맺음 말을 마친 뒤 말없이 한 번 호출. 이 통화에서 들은 내용만 보낸다(지어내지 않음).",
+  description: "끝맺음 말을 마친 뒤 말없이 호출. 그 뒤 전할 내용이 늘면 전체를 합쳐 다시 호출. 이 통화에서 들은 내용만 보낸다(지어내지 않음).",
   inputSchema: {
     type: "object", required: ["call_id"],
     properties: {
       call_id: { ...STR, description: "대본에 적힌 이 통화의 call_id" },
-      caller: { ...STR, description: "이름·소속 한 줄" }, purpose: { ...STR, description: "용건" },
+      caller: { ...STR, description: "통화에서 되읽은 이름·소속 그대로. '아, 네' 같은 맞장구는 넣지 않는다" }, purpose: { ...STR, description: "용건" },
       urgent: { type: "boolean", description: "급하다고 했으면 true" },
-      callback_by: { ...STR, description: "회신 희망 시각, 없으면 빈 문자열" },
-      summary: { ...STR, description: "한두 문장 한국어 요약" },
+      callback_by: { ...STR, description: "상대가 말한 회신 시각 그대로, 없으면 빈 문자열" },
+      summary: { ...STR, description: "이름·용건·상대가 말한 시각을 들은 그대로 담은 한두 문장 한국어 요약" },
     },
   },
 };

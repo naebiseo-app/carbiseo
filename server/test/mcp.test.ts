@@ -61,7 +61,7 @@ test("report_call → 카드 1장, 뒤에 온 summary.completed는 건너뜀", a
   const r = await report(env, { call_id: CID, caller: "한빛물산 김민수", purpose: "견적", urgent: false, callback_by: "", summary: "한빛물산 김민수, 견적 회신 급히 요청" });
   assert.equal(r.result.isError, false);
   assert.match(r.result.content[0].text, /통화를 끊지 말고/);
-  await report(env, { call_id: CID, summary: "다시" }); // 두 번 불러도 1장
+  await report(env, { call_id: CID, summary: "한빛물산 김민수, 견적 회신 급히 요청" }); // 같은 내용 재전송은 1장 그대로
   const raw = new URLSearchParams({ CallId: CID, From: GUEST, Direction: "inbound", Event: "summary.completed", SummaryJson: JSON.stringify({ coreSummary: "나중 요약" }) }).toString();
   const mac = await crypto.subtle.sign("HMAC", await crypto.subtle.importKey("raw", new TextEncoder().encode("k"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]),
     new TextEncoder().encode(signData("https://x/clawops/events", null, raw)));
@@ -82,6 +82,19 @@ test("report_call: X-ClawOps-Call-Id 헤더가 있으면 AI가 적은 call_id보
     body: JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "report_call", arguments: { call_id: "CA틀림", summary: "견적 문의" } } }) }), env);
   assert.equal(((await r.json()) as any).result.isError, false);
   assert.equal(cards(env)[0].call_id, CID);
+});
+
+test("report_call 두 번: 뒤 내용으로 교체(새 id, meta.replaces), 카드는 1장", async () => {
+  const env = mkEnv();
+  await ring(env, GUEST);
+  await report(env, { call_id: CID, caller: "김민수", summary: "미팅 변경" });
+  const first = cards(env).filter((c) => c.status === "summarized")[0];
+  await report(env, { call_id: CID, caller: "김민수", summary: "미팅 변경, 자료도 요청" });
+  const now = cards(env).filter((c) => c.call_id === CID);
+  assert.equal(now.length, 1);
+  assert.equal(now[0].summary, "미팅 변경, 자료도 요청");
+  assert.equal(now[0].status, "summarized");
+  assert.equal(JSON.parse(now[0].meta).replaces, first.id);
 });
 
 test("report_call: 주인 통화는 카드 없이 ok(스위치 켜면 손님처럼)", async () => {
