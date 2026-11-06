@@ -297,7 +297,7 @@ export function transcriptTarget(raw: string) {
 // since=0(차 첫 폴링·재시작): 최신 INBOX_PAGE건 — 오래된 것부터 주면 옛 카드가 새 전화처럼 읽힌다.
 export const INBOX_PAGE = 50;
 export const INBOX_SQL =
-  "SELECT * FROM inbox WHERE id>?1 AND id < COALESCE((SELECT MIN(id) FROM inbox WHERE id>?1 AND created_at>?2), 9e18) ORDER BY CASE WHEN ?1=0 THEN -id ELSE id END LIMIT 51";
+  "SELECT * FROM inbox WHERE id>?1 AND (?1>0 OR IFNULL(kind,'')<>'event') AND id < COALESCE((SELECT MIN(id) FROM inbox WHERE id>?1 AND created_at>?2), 9e18) ORDER BY CASE WHEN ?1=0 THEN -id ELSE id END LIMIT 51";
 
 // 폰 알림 1건 → inbox kind='notif'. 방은 받을 때의 차 방(카드 칩·판단 참고용)
 async function saveNotif(db: D1Database, n: Notif) {

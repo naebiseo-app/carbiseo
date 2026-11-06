@@ -151,3 +151,12 @@ test("/car/inbox: since>0은 오래된 순 50건 + more, 이어 받으면 유실
   const z = await poll(0);
   assert.deepEqual([z.items.length, z.items[0].id, z.items[49].id, z.more], [50, 60, 11, false]);
 });
+
+test("/car/inbox: 처음 받을 때 웹훅 event 행이 통화 카드를 밀어내지 않는다", async () => {
+  const env = mkEnv();
+  const t = Date.now() - 1000;
+  env.DB.db.prepare("INSERT INTO inbox(kind,created_at) VALUES('call',?)").run(t);
+  for (let i = 0; i < 60; i++) env.DB.db.prepare("INSERT INTO inbox(kind,created_at) VALUES('event',?)").run(t);
+  const r = (await (await worker.fetch(new Request("https://x/car/inbox?since=0", { headers: { authorization: "Bearer t" } }), env)).json()) as any;
+  assert.deepEqual(r.items.map((i: any) => i.kind), ["call"]);
+});
