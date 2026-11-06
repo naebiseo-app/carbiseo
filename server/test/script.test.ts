@@ -149,3 +149,7 @@ test("지어내기 금지·소속 한 글자 되읽기·아는 번호 이름 확
   assert.match(pickScript(null, "김도윤", undefined, null, "ai", null, null, WED_19, undefined, "이지은").instruction, /지난번 "이지은"/);
   assert.doesNotMatch(pickScript("PARK", "김도윤", undefined, null, "ment", null, null, WED_19, "자리 비움", "이지은").instruction, /지난번/);
 });
+
+test("한 마디 안내: 기본·직접 쓴 멘트 모두 녹음 고지를 말한다", () => {
+  for (const m of [undefined, "회의 중이에요."]) assert.match(pickScript("DRIVE_WORK", "도윤", undefined, 5, "ment", null, null, Date.now(), m).instruction, /이 통화는 녹음됩니다\.'라고만 말하고/);
+});

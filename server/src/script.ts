@@ -73,7 +73,7 @@ export const parseMode = (v: unknown): Mode | null => (["ai", "ment", "off"].inc
 const arrive = (eta?: number | null) => (eta != null ? `약 ${eta}분 뒤 도착하시면 연락드리겠습니다.` : "정차하시면 연락드리겠습니다.");
 const mentScript = (eta?: number | null, ment?: string) => {
   const line = ment ? (eta != null ? `${ment} ${arrive(eta)}` : ment) : `{owner}님이 지금 운전 중이라 전화를 받을 수 없습니다. ${arrive(eta)}`;
-  return `전화가 연결되면 인사 없이 첫 마디로 '${line}'라고만 말하고, 말을 마치면 상대 대답을 기다리지 않고 즉시 통화를 종료합니다. 다른 말에는 답하지 않습니다.`;
+  return `전화가 연결되면 인사 없이 첫 마디로 '${line} 이 통화는 녹음됩니다.'라고만 말하고, 말을 마치면 상대 대답을 기다리지 않고 즉시 통화를 종료합니다. 다른 말에는 답하지 않습니다.`;
 };
 
 // 방을 모르면(차 상태 없음·10분 넘게 갱신 없음) 위치·도착 시각·운전 여부를 말하지 않는 중립 대본.

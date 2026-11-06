@@ -104,7 +104,7 @@ test("ment_text: 저장·따옴표 괄호 제거·ment 대본 반영·빈 값이
   const r = (await (await settings(env, { ment_text: " 지금 회의 중이에요. '곧' (연락) 드릴게요! " })).json()) as any;
   assert.equal(r.settings.ment_text, "지금 회의 중이에요. 곧 연락 드릴게요!");
   const ins = (await ring(env, OTHER)).Instruction;
-  assert.ok(ins.includes("'지금 회의 중이에요. 곧 연락 드릴게요!'라고만 말하고, 말을 마치면 상대 대답을 기다리지 않고 즉시 통화를 종료합니다."));
+  assert.ok(ins.includes("'지금 회의 중이에요. 곧 연락 드릴게요! 이 통화는 녹음됩니다.'라고만 말하고, 말을 마치면 상대 대답을 기다리지 않고 즉시 통화를 종료합니다."));
   assert.ok(!ins.includes("운전 중이라"));
   for (const bad of ["가".repeat(61), "()", "a\nb", "a; b", "a:b", 5, "a<b>"])
     assert.equal((await settings(env, { ment_text: bad })).status, 400);
