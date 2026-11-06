@@ -1,4 +1,4 @@
-import { CALL_ID, carChip, callerNumber, cleanMent, cleanName, field, freshCtx, hhmm, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, isDirect, reserveScript, sameNumber, type Mode, type Recent } from "./script.ts";
+import { CALL_ID, carChip, callerNumber, cleanMent, cleanName, field, freshCtx, hhmm, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, isDirect, parkingScript, reserveScript, sameNumber, type Mode, type Recent } from "./script.ts";
 import { adminPage, basicOk, demoSchedule, encodeReplay, parseFakeCall, replayScript, type MailRow, type ReplyRow } from "./admin.ts";
 import { FALLBACK, guardText, isBlocked } from "./guard.ts";
 import { parseNotify, parseReply, TAKE_REPLIES_SQL, type Notif } from "./notif.ts";
@@ -17,6 +17,7 @@ interface Env {
   SMS_RELAY_SECRET?: string;
   ANTHROPIC_API_KEY?: string; // 말동무 대화(/car/chat). 없으면 no_key 고정 문구
   KAKAO_REST_KEY?: string; // 카카오 로컬 키워드 검색(가게 번호). 없으면 place-phone은 no_key
+  PARKING_API_KEY?: string; // 공공 실시간 주차(/car/parking). 없으면 no_key. 실제 호출은 아직 없음
   O4_LIVE?: string; // "1"일 때만 예약 전화가 실제 가게 번호로 간다. 아니면 항상 OWNER_NUMBER
 }
 
@@ -30,6 +31,10 @@ const RESERVE_DAILY_MAX = 5; // 예약 전화 하루(KST) 상한: 오발신·반
 async function kvGet(db: D1Database, key: string) {
   const r = await db.prepare("SELECT value FROM kv WHERE key=?").bind(key).first<{ value: string }>();
   return r ? JSON.parse(r.value) : null;
+}
+
+async function kvPut(db: D1Database, key: string, value: unknown) {
+  await db.prepare("INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at").bind(key, JSON.stringify(value), now()).run();
 }
 
 async function saveInbox(db: D1Database, kind: string, status: string, room: string | null, raw: string, meta: object) {
@@ -100,6 +105,8 @@ const SUMMARY_SYSTEM = "전화 받아쓰기를 운전자가 볼 메모로 정리
 
 const RESERVE_SYSTEM = "AI 비서가 식당·가게에 건 예약 문의 전화 받아쓰기를 운전자가 볼 결과로 정리합니다. 받아쓰기에 있는 내용만 쓰고 없는 내용은 지어내지 않습니다. status는 가게가 예약을 확정했다고 분명히 말했을 때만 ok이고(예약 질문에 '그러세요'·'오세요'로 답한 것도 확정입니다), 안 된다·모르겠다·나중에·직접 연락 같은 말이거나 확정이 불분명하면 need_manual입니다. parking은 가게가 주차 가능이라고 하면 가능, 안 된다고 하면 불가, 말이 없거나 불분명하면 모름입니다. summary는 존댓말 한 문장이고 전화번호는 쓰지 않습니다. JSON 한 줄만 답합니다: {\"status\":\"ok|need_manual\",\"summary\":\"예: 18:30 4명 예약이 확정됐어요. 주차는 가능하대요.\",\"parking\":\"가능|불가|모름\"}";
 
+const PARKING_SYSTEM = "AI 비서가 가게·주차장에 건 주차 문의 전화 받아쓰기를 운전자가 볼 결과로 정리합니다. 받아쓰기에 있는 내용만 쓰고 없는 내용은 지어내지 않습니다. status는 지금 주차 자리가 있다고 분명히 답했을 때만 ok이고, 자리가 없다거나 말이 불분명하면 need_manual입니다. parking은 주차 가능이라고 하면 가능, 안 된다고 하면 불가, 말이 없거나 불분명하면 모름입니다. summary는 존댓말 한 문장이고 전화번호는 쓰지 않습니다. JSON 한 줄만 답합니다: {\"status\":\"ok|need_manual\",\"summary\":\"예: 지금 주차 자리가 있고 한 시간에 삼천 원이래요.\",\"parking\":\"가능|불가|모름\"}";
+
 const TASK_SYSTEM = `주인이 비서에게 건 전화 받아쓰기에서 주인이 시킨 일만 뽑습니다. 받아쓰기에 있는 내용만 씁니다. JSON 한 줄만 답합니다: {"tasks":["일 한 건","일 한 건"],"sends":[{"to":"이지은","body":"3시에 도착합니다."}]}. sends에는 주인이 문자를 보내라고 했고, 비서가 받는 사람과 내용을 되읽었고, 그 뒤 주인이 취소하거나 고치지 않은 문자만 넣습니다(고쳤으면 고친 내용으로). sends에 넣은 문자는 tasks에 넣지 않습니다. 비서가 되읽기 전에 끊겼으면 sends에 넣지 않고 tasks에 '이지은에게 문자 / 내용: 3시에 도착합니다.'처럼 넣습니다. 메일과 그 밖의 일은 tasks에 넣습니다. 메일은 '메일: 받는사람 / 제목 / 내용', 그 밖의 일은 '내일 오전 박도윤 님께 견적서 보내기'처럼 짧게 씁니다. 일정이나 전화 내용을 묻기만 한 통화는 {"tasks":[]}로 답합니다.`;
 
 // 받아쓰기 → 메모. 실패는 null(호출한 쪽이 상대 말 그대로 쓴다)
@@ -160,7 +167,8 @@ async function reserveResult(env: Env, id: string) {
   let memo: Awaited<ReturnType<typeof summarizeCall>> = null;
   try {
     const { said, dialog } = await loadDialog(env, id, "AI 비서");
-    memo = said ? await summarizeCall(env.ANTHROPIC_API_KEY, RESERVE_SYSTEM, dialog) : null;
+    const pk = (await env.DB.prepare("SELECT json_extract(meta,'$.purpose') AS p FROM inbox WHERE kind='reserve' AND call_id=?").bind(id).first<{ p: string | null }>())?.p === "parking";
+    memo = said ? await summarizeCall(env.ANTHROPIC_API_KEY, pk ? PARKING_SYSTEM : RESERVE_SYSTEM, dialog) : null;
   } catch (e) { console.log("reserve transcript error", String(e)); }
   const parking = ["가능", "불가", "모름"].includes(memo?.parking ?? "") ? memo!.parking! : "모름";
   const summary = memo?.summary ? guardText("summary", String(memo.summary)) : "직접 확인이 필요해요";
@@ -344,6 +352,17 @@ export async function placePhone(key: string | undefined, name: string, lat: str
     if (!d || digits.length < 8) return none("not_found");
     return { phone: d.phone!.trim(), kind: /^01\d{8,9}$/.test(digits) ? "mobile" : "landline", name: d.place_name ?? name };
   } catch { return none("upstream"); }
+}
+
+/** 좌표 -> 도로명 또는 지번 주소(카카오 coord2address). 키 없음·실패는 빈 문자열. 좌표는 로그에 남기지 않는다. */
+export async function coordAddress(key: string | undefined, lat: number, lng: number): Promise<string> {
+  if (!key) return "";
+  try {
+    const r = await fetch(`https://dapi.kakao.com/v2/local/geo/coord2address.json?x=${lng}&y=${lat}`, { headers: { Authorization: `KakaoAK ${key}` } });
+    if (!r.ok) return "";
+    const d = ((await r.json()) as { documents?: { road_address?: { address_name?: string } | null; address?: { address_name?: string } | null }[] }).documents?.[0];
+    return d?.road_address?.address_name || d?.address?.address_name || "";
+  } catch { return ""; }
 }
 
 /** 차 현재 좌표 근처 가까운 순 최대 15곳(카카오 카테고리 검색, 반경 5km). 지나온 곳을 거르는 건 차가 한다. category는 FD6 식당·CE7 카페·OL7 주유소·CS2 충전소만. 좌표·결과는 저장·로그하지 않는다. */
@@ -599,12 +618,13 @@ export default {
       const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
       const place = typeof b.place === "string" ? b.place.trim() : "";
       const arrive = typeof b.arrive === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(b.arrive) ? b.arrive : "";
+      const pk = b.purpose === "parking"; // 주차 문의: 시간·인원 없이. 하루 상한(아래 reserve 행 수)·O4_LIVE 규칙은 예약과 같다
       const party = b.party;
       const geo = (v: unknown) => (v === undefined ? "" : typeof v === "number" || typeof v === "string" ? String(v) : null);
       const lat = geo(b.lat), lng = geo(b.lng);
       if (place.length < 1 || place.length > 40) return json({ error: "bad place" }, 400);
-      if (!arrive) return json({ error: "bad arrive" }, 400);
-      if (typeof party !== "number" || !Number.isInteger(party) || party < 1 || party > 20) return json({ error: "bad party" }, 400);
+      if (!pk && !arrive) return json({ error: "bad arrive" }, 400);
+      if (!pk && (typeof party !== "number" || !Number.isInteger(party) || party < 1 || party > 20)) return json({ error: "bad party" }, 400);
       if (lat === null || lng === null || (lat !== "" && !Number.isFinite(Number(lat))) || (lng !== "" && !Number.isFinite(Number(lng)))) return json({ error: "bad lat/lng" }, 400);
       const day0 = Math.floor((now() + 9 * 3_600_000) / 86_400_000) * 86_400_000 - 9 * 3_600_000; // 오늘 0시(KST)
       const used = await env.DB.prepare("SELECT COUNT(*) AS n FROM inbox WHERE kind='reserve' AND created_at>=?").bind(day0).first<{ n: number }>();
@@ -618,15 +638,41 @@ export default {
         const r = await fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls`, {
           method: "POST",
           headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ From: env.CLAWOPS_NUMBER, To: to, AgentId: "cmw4rd0fb002i01s6grhclc21", CallContext: { Instruction: reserveScript({ owner, phone: env.OWNER_NUMBER, place, arrive, party }), Variables: {} }, StatusCallback: `${new URL(req.url).origin}/clawops/status/${env.CALL_CONTEXT_SECRET}`, Timeout: 30 }),
+          body: JSON.stringify({ From: env.CLAWOPS_NUMBER, To: to, AgentId: "cmw4rd0fb002i01s6grhclc21", CallContext: { Instruction: pk ? parkingScript({ owner, place }) : reserveScript({ owner, phone: env.OWNER_NUMBER, place, arrive, party: party as number }), Variables: {} }, StatusCallback: `${new URL(req.url).origin}/clawops/status/${env.CALL_CONTEXT_SECRET}`, Timeout: 30 }),
         });
         const j = (await r.json().catch(() => ({}))) as { callId?: string; CallId?: string };
         if (r.ok) callId = String(j.callId ?? j.CallId ?? "");
       } catch (e) { console.log("reserve call error", String(e)); }
       if (!callId) return json({ ok: false, code: "call_failed" });
       const r = await env.DB.prepare("INSERT INTO inbox(kind,status,call_id,from_label,summary,created_at,meta) VALUES('reserve','calling',?,?,?,?,?)")
-        .bind(callId, place, `${arrive} ${party}명 예약 전화 중`, now(), JSON.stringify({ party, arrive })).run();
+        .bind(callId, place, pk ? "주차 문의 전화 중" : `${arrive} ${party}명 예약 전화 중`, now(), JSON.stringify(pk ? { purpose: "parking" } : { party, arrive })).run();
       return json({ ok: true, id: r.meta.last_row_id });
+    }
+
+    // 하차 정보: 마지막 1건만(kv 'parked'). 좌표·주소는 로그에 남기지 않는다
+    if (m === "POST" && pathname === "/car/parked") {
+      if (!authed) return json({ error: "unauthorized" }, 401);
+      const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+      if (b.clear === true) { await env.DB.prepare("DELETE FROM kv WHERE key='parked'").run(); return json({ ok: true }); }
+      const num = (v: unknown) => (typeof v === "number" || (typeof v === "string" && v.trim() !== "") ? Number(v) : NaN);
+      const lat = num(b.lat), lng = num(b.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return json({ ok: false }, 400);
+      const memo = typeof b.memo === "string" ? b.memo.slice(0, 40) : "";
+      const tasks = (Array.isArray(b.tasks) ? b.tasks : []).filter((t): t is string => typeof t === "string" && t.trim() !== "").slice(0, 3).map((t) => t.slice(0, 80));
+      await kvPut(env.DB, "parked", { lat, lng, address: await coordAddress(env.KAKAO_REST_KEY, lat, lng), memo, tasks, at: now() });
+      return json({ ok: true });
+    }
+
+    // 폰이 하차 정보를 가져간다(/phone/replies와 같은 인증)
+    if (m === "GET" && pathname === "/phone/parked") {
+      if (!authed) return json({ error: "unauthorized" }, 401);
+      return json({ parked: (await kvGet(env.DB, "parked")) ?? null });
+    }
+
+    // 공공 실시간 주차 뼈대: 키를 받아 응답 필드를 확인한 뒤 실제 호출을 붙인다
+    if (m === "GET" && pathname === "/car/parking") {
+      if (!authed) return json({ error: "unauthorized" }, 401);
+      return json({ reason: env.PARKING_API_KEY ? "not_implemented" : "no_key" });
     }
 
     // 데모 메일함(설계 O2): 실제 메일은 보내지 않고 inbox kind='sent'(channel=mail)에 저장

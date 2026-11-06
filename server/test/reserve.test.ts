@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import worker, { signData } from "../src/index.ts";
-import { reserveScript } from "../src/script.ts";
+import { parkingScript, reserveScript } from "../src/script.ts";
 
 // D1 흉내: 실제 schema.sql을 메모리 SQLite에
 function d1() {
@@ -313,4 +313,71 @@ test("예약 전화 하루 5통 상한: 오늘(KST) 5건이면 발신 없이 dai
     assert.deepEqual(await (await reserve(env, OK)).json(), { ok: false, code: "daily_limit" });
     assert.equal(f.calls.length, 0);
   } finally { f.restore(); }
+});
+
+// --- 주차 문의 전화(purpose=parking) ---
+const PK = { place: "가명 주차장", purpose: "parking" };
+
+test("주차 문의: 시간·인원 없이 통과, 대사는 자리·주차비만, 예약 문장 없음, 행 meta.purpose", async () => {
+  const f = fake();
+  try {
+    const env = mkEnv();
+    const r = (await (await reserve(env, PK)).json()) as any;
+    assert.equal(r.ok, true);
+    const ins = to(f, "/calls")[0].body.CallContext.Instruction as string;
+    assert.match(ins, /지금 주차 자리가 있을까요\? 주차비는 얼마인가요\?/);
+    assert.ok(!ins.includes("예약 가능할까요") && !ins.includes("몇 명"));
+    assert.ok(ins.includes("AI 비서입니다"));
+    const [row] = rows(env);
+    assert.deepEqual([row.kind, row.status, row.summary], ["reserve", "calling", "주차 문의 전화 중"]);
+    assert.deepEqual(JSON.parse(row.meta), { purpose: "parking" });
+    assert.equal((await reserve(env, { ...PK, place: "" })).status, 400); // 장소 검증은 그대로
+    assert.equal((await reserve(env, { ...OK, purpose: "x" })).status, 200); // 모르는 purpose = 예약
+    assert.equal((await reserve(env, { place: "가명 식당", purpose: "x" })).status, 400);
+  } finally { f.restore(); }
+});
+
+test("주차 문의도 하루 상한에 합산, O4_LIVE 없으면 OWNER_NUMBER로만", async () => {
+  const f = fake({ kakao: [{ phone: SHOP, place_name: "가명 주차장" }] });
+  try {
+    const env = mkEnv({ KAKAO_REST_KEY: "kk" });
+    for (let i = 0; i < 3; i++) assert.equal(((await (await reserve(env, PK)).json()) as any).ok, true);
+    for (let i = 0; i < 2; i++) assert.equal(((await (await reserve(env, OK)).json()) as any).ok, true);
+    assert.deepEqual(await (await reserve(env, PK)).json(), { ok: false, code: "daily_limit" });
+    assert.deepEqual(await (await reserve(env, OK)).json(), { ok: false, code: "daily_limit" });
+    assert.equal(to(f, "kakao").length, 0);
+    assert.ok(to(f, "/calls").every((c) => c.body.To === OWNER));
+    assert.equal(to(f, "/calls").length, 5);
+  } finally { f.restore(); }
+});
+
+test("주차 문의 결과: PARKING_SYSTEM으로 요약(예약 시스템 문장 아님), 예약 행은 RESERVE_SYSTEM 그대로", async () => {
+  let f = fake({ memo: { status: "ok", summary: "지금 주차 자리가 있고 한 시간에 삼천 원이래요.", parking: "가능" } });
+  try {
+    const env = mkEnv();
+    await reserve(env, PK);
+    await hook(env, CID, "outbound");
+    const [row] = rows(env);
+    assert.deepEqual([row.status, row.summary], ["ok", "지금 주차 자리가 있고 한 시간에 삼천 원이래요."]);
+    assert.deepEqual(JSON.parse(row.meta), { purpose: "parking", parking: "가능" });
+    const sys = to(f, "anthropic")[0].body.system as string;
+    assert.ok(sys.includes("지금 주차 자리가 있다고 분명히 답했을 때만 ok"));
+    assert.ok(!sys.includes("예약을 확정했다고"));
+  } finally { f.restore(); }
+  f = fake({ memo: { status: "ok", summary: "예약됐어요.", parking: "가능" } });
+  try {
+    const env = mkEnv();
+    await place(env);
+    await hook(env, CID, "outbound");
+    const sys = to(f, "anthropic")[0].body.system as string;
+    assert.ok(sys.includes("status는 가게가 예약을 확정했다고") && !sys.includes("주차 문의"));
+  } finally { f.restore(); }
+});
+
+test("예약 대본은 그대로, 주차 대본은 별개 함수", () => {
+  const s = reserveScript({ owner: "만일", place: "가명 식당", arrive: "18:30", party: 4 });
+  assert.ok(s.includes("오늘 오후 6시 30분에 네 명 예약 가능할까요? 주차도 되나요?"));
+  assert.ok(s.includes("알아낼 것은 오늘 오후 6시 30분에 네 명 예약이 되는지, 주차가 되는지 두 가지입니다."));
+  const p = parkingScript({ owner: "만일", place: "가'\"`{}명" });
+  assert.ok(p.includes("만일님 대신 전화드렸어요. 지금 주차 자리가 있을까요?") && !p.includes("{") && p.length <= 4000);
 });
