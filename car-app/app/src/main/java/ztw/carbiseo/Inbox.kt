@@ -157,6 +157,16 @@ fun itemLine(i: InboxItem, zone: ZoneId = ZoneId.systemDefault()): String {
 fun todayCalls(items: List<InboxItem>, today: java.time.LocalDate, zone: ZoneId = ZoneId.systemDefault(), offsetMs: Long = 0): Int =
     items.count { it.kind == "call" && Instant.ofEpochMilli(it.createdAt + offsetMs).atZone(zone).toLocalDate() == today }
 
+/** 이번 주(월요일 00시~일요일, zone·offsetMs는 todayCalls와 같은 기준) 받은 통화 수 -> (전체, 그중 쉼 방 DRIVE_REST에서 받아 넘긴 수).
+ *  ponytail: 차 메모리의 카드(최근 50건)만 센다 — 한 주에 카드가 50건을 넘으면 적게 나온다. 정확히 하려면 서버 집계. */
+fun weekCalls(items: List<InboxItem>, today: java.time.LocalDate, zone: ZoneId = ZoneId.systemDefault(), offsetMs: Long = 0): Pair<Int, Int> {
+    val monday = today.minusDays(today.dayOfWeek.value - 1L)
+    val week = items.filter { i ->
+        i.kind == "call" && Instant.ofEpochMilli(i.createdAt + offsetMs).atZone(zone).toLocalDate().let { it >= monday && it < monday.plusDays(7) }
+    }
+    return week.size to week.count { it.room == Room.DRIVE_REST.name }
+}
+
 /** 주차 화면 순서: 급한 카드 먼저, 그 안에서 최신순. */
 fun parkOrder(items: List<InboxItem>): List<InboxItem> = items.sortedWith(compareByDescending<InboxItem> { it.urgent }.thenByDescending { it.id })
 

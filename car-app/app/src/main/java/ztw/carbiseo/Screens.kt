@@ -387,6 +387,8 @@ private fun Rail(items: List<InboxItem>, today: Long, a: Float) {
                 Text("통", Modifier.padding(start = 6.dp, bottom = 18.dp), color = DTx, fontSize = 44.sp, fontWeight = FontWeight.Bold)
             }
             Text(if (calls > 0) "오늘 비서가 대신 받은 전화예요" else "오늘은 대신 받은 전화가 없어요", Modifier.padding(top = 8.dp), color = DMute, fontSize = 24.sp)
+            val (week, weekRest) = weekCalls(RoomService.inbox, day, RoomService.clock.zone, RoomService.clock.offsetMs)
+            Text("이번 주 ${week}통 · 퇴근 뒤 넘긴 전화 ${weekRest}통", Modifier.padding(top = 4.dp), color = DMute, fontSize = 24.sp)
         }
         Column {
             HorizontalDivider(color = DLine)

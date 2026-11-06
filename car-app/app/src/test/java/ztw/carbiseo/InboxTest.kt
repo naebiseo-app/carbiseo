@@ -229,4 +229,30 @@ class InboxTest {
         assertEquals("한빛물산 일정 지연 알림 — 30분 늦습니다.", cardText(t))
         assertEquals("2026-11-01 회의", cardText(t.copy(summary = "2026-11-01 회의")))
     }
+
+    @Test fun 이번_주_통화는_월요일부터_세고_쉼_방에서_받은_건_따로() {
+        val z = ZoneOffset.ofHours(9)
+        val at = { d: Int, h: Int -> java.time.LocalDateTime.of(2026, 11, d, h, 0).toInstant(z).toEpochMilli() } // 2026-11-02는 월요일
+        val c = { id: Long, d: Int, h: Int, room: String, kind: String -> InboxItem(id, "", "", false, at(d, h), "", kind = kind, room = room) }
+        val items = listOf(
+            c(1, 1, 23, "PARK", "call"),            // 지난주 일요일
+            c(2, 2, 0, "DRIVE_WORK", "call"),       // 월요일 00시 = 이번 주
+            c(3, 4, 20, "DRIVE_REST", "call"),
+            c(4, 6, 19, "DRIVE_REST", "call"),
+            c(5, 8, 23, "", "call"),                 // 일요일 밤, room 없음
+            c(6, 9, 1, "DRIVE_REST", "call"),        // 다음 주 월요일
+            c(7, 4, 20, "DRIVE_REST", "event"),      // 통화 아님
+            c(8, 5, 9, "DRIVE_REST", "notif"),
+        )
+        val wed = java.time.LocalDate.of(2026, 11, 4)
+        assertEquals(4 to 2, weekCalls(items, wed, z))
+        assertEquals(4 to 2, weekCalls(items, java.time.LocalDate.of(2026, 11, 2), z)) // 월요일 당일
+        assertEquals(4 to 2, weekCalls(items, java.time.LocalDate.of(2026, 11, 8), z)) // 일요일 당일
+        assertEquals(1 to 0, weekCalls(items, java.time.LocalDate.of(2026, 11, 1), z)) // 지난주 일요일 -> 지난주(10-26~11-01)는 1건
+        assertEquals(0 to 0, weekCalls(emptyList(), wed, z))
+        // 앱 시계를 하루 앞으로 밀면(시연 TIME) 카드 시각도 같이 밀린다: 11-09(월) 기준 이번 주는 일요일 밤 카드(5)와 월요일 카드(6)
+        val nextMon = java.time.LocalDate.of(2026, 11, 9)
+        assertEquals(1 to 1, weekCalls(items, nextMon, z))
+        assertEquals(2 to 1, weekCalls(items, nextMon, z, offsetMs = 24 * 3_600_000L))
+    }
 }
