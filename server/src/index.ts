@@ -346,6 +346,20 @@ export async function placePhone(key: string | undefined, name: string, lat: str
   } catch { return none("upstream"); }
 }
 
+/** 차 현재 좌표 근처 가장 가까운 1곳(카카오 카테고리 검색, 반경 5km). category는 FD6 식당·CE7 카페·OL7 주유소만. 좌표·결과는 저장·로그하지 않는다. */
+export async function nearby(key: string | undefined, category: string, lat: string, lng: string): Promise<{ name: string; lat: number; lng: number; distance: number } | { reason: string }> {
+  if (!key) return { reason: "no_key" };
+  if (!["FD6", "CE7", "OL7"].includes(category) || lat.trim() === "" || lng.trim() === "" || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return { reason: "bad_request" };
+  try {
+    const r = await fetch(`https://dapi.kakao.com/v2/local/search/category.json?category_group_code=${category}&x=${lng}&y=${lat}&radius=5000&sort=distance`, { headers: { Authorization: `KakaoAK ${key}` } });
+    if (!r.ok) return { reason: "upstream" };
+    const d = ((await r.json()) as { documents?: { place_name?: string; y?: string; x?: string; distance?: string }[] }).documents?.[0];
+    const out = d && { name: d.place_name ?? "", lat: Number(d.y), lng: Number(d.x), distance: Number(d.distance) };
+    if (!out || !out.name || !Number.isFinite(out.lat) || !Number.isFinite(out.lng) || !Number.isFinite(out.distance)) return { reason: "not_found" };
+    return out;
+  } catch { return { reason: "upstream" }; }
+}
+
 const CHAT_SYSTEM = "당신은 운전자의 말동무 '내비서'입니다. 운전 중이므로 존댓말로 두 문장 이내, 60자 안으로 짧게 답합니다. 사용자가 '졸려', '피곤해'처럼 말하면 물음표가 붙어도 운전자 본인 이야기입니다. 당신이 졸린지 묻는 말로 받지 말고, 가까운 휴게소에서 쉬어 가시라고 권합니다. 편안한 잡담을 이어 가고 가끔 짧은 질문을 던져 운전자가 깨어 있게 돕습니다. 화면을 보라는 말, 목록, 이모지, 기호는 쓰지 않습니다. 의학·법률·투자 조언은 하지 않습니다. 추월·속도·차선 같은 운전 조작은 권하지 않습니다. 식당 찾기, 날씨 확인처럼 할 수 없는 일을 해 주겠다고 말하지 않습니다. 졸리다, 피곤하다는 말에는 가까운 휴게소에서 쉬기를 권합니다.";
 
 const DROWSY = /졸려|졸리|졸음|피곤|잠와|잠온/;
@@ -710,6 +724,12 @@ export default {
       if (!authed) return json({ error: "unauthorized" }, 401);
       const q = new URL(req.url).searchParams;
       return json(await placePhone(env.KAKAO_REST_KEY, q.get("name") ?? "", q.get("lat") ?? "", q.get("lng") ?? ""));
+    }
+
+    if (m === "GET" && pathname === "/car/nearby") {
+      if (!authed) return json({ error: "unauthorized" }, 401);
+      const q = new URL(req.url).searchParams;
+      return json(await nearby(env.KAKAO_REST_KEY, q.get("category") ?? "", q.get("lat") ?? "", q.get("lng") ?? ""));
     }
 
     if (m === "POST" && pathname === "/car/chat") {
