@@ -1,5 +1,5 @@
 """공공 실시간 주차 id와 시설정보(이름·입구 좌표)를 맞춰 src/parking_lots.json([[id,이름,위도,경도],...])을 만든다.
-키는 server/.dev.vars의 PARKING_API_KEY(포털의 인코딩 키)에서 읽는다. 출력·예외에 URL·키를 내지 않는다.
+키는 server/.dev.vars의 PARKING_API_KEY(포털의 디코딩 키, 코드가 인코딩한다)에서 읽는다. 출력·예외에 URL·키를 내지 않는다.
 실행: python server/scripts/parking_index.py  (시설정보 약 170만 행을 5000행씩 넘기므로 수 분 걸린다)"""
 import json
 import sys
@@ -20,7 +20,7 @@ def read_key():
                 return v.strip().strip("\"'")
     except OSError:
         pass
-    sys.exit("server/.dev.vars에 PARKING_API_KEY=<인코딩 키> 를 넣고 다시 실행하세요.")
+    sys.exit("server/.dev.vars에 PARKING_API_KEY=<디코딩 키> 를 넣고 다시 실행하세요.")
 
 
 def get(key, path, page):
