@@ -5,6 +5,7 @@ import json
 import sys
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 BASE = "https://apis.data.go.kr/B553881/Parking_v1"
@@ -36,22 +37,29 @@ def main():
     ids = {r["prk_center_id"] for r in get(key, "PrkRealtimeInfo_v1", 1).get("PrkRealtimeInfo", [])}
     print(f"실시간 {len(ids)}곳")
     found = {}
-    page = 1
-    while len(found) < len(ids):
-        j = get(key, "PrkSttusInfo_v1", page)
-        rows = j.get("PrkSttusInfo", [])
-        for r in rows:
+    out = root / "src" / "parking_lots.json"
+    save = lambda: out.write_text(json.dumps(list(found.values()), ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+
+    def take(j):
+        for r in j.get("PrkSttusInfo", []):
             i = r.get("prk_center_id")
             if i in ids and i not in found:
                 try:
                     found[i] = [i, r["prk_plce_nm"], float(r["prk_plce_entrc_la"]), float(r["prk_plce_entrc_lo"])]
                 except (KeyError, ValueError, TypeError):
                     pass  # 좌표 없는 곳은 근처 검색에 쓸 수 없다
-        print(f"페이지 {page} 일치 {len(found)}/{len(ids)}")
-        if len(rows) < ROWS or page * ROWS >= int(j.get("totalCount", 0)):
-            break
-        page += 1
-    (root / "src" / "parking_lots.json").write_text(json.dumps(list(found.values()), ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+
+    first = get(key, "PrkSttusInfo_v1", 1)
+    take(first)
+    pages = -(-int(first.get("totalCount", 0)) // ROWS)
+    print(f"시설 {pages}페이지")
+    with ThreadPoolExecutor(4) as ex:  # 한 페이지 약 37초(실측)
+        for n, j in enumerate(ex.map(lambda p: get(key, "PrkSttusInfo_v1", p), range(2, pages + 1)), 2):
+            take(j)
+            if n % 20 == 0:
+                save()
+                print(f"페이지 {n}/{pages} 일치 {len(found)}/{len(ids)}")
+    save()
     print(f"저장 {len(found)}곳")
 
 
