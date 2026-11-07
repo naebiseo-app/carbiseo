@@ -3,6 +3,7 @@
 실행: python server/scripts/parking_index.py  (시설정보 약 170만 행을 5000행씩 넘기므로 수 분 걸린다)"""
 import json
 import sys
+import time
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -25,11 +26,14 @@ def read_key():
 
 
 def get(key, path, page):
-    try:
-        with urllib.request.urlopen(f"{BASE}/{path}?serviceKey={urllib.parse.quote(key, safe='')}&pageNo={page}&numOfRows={ROWS}&format=2", timeout=60) as r:
-            return json.load(r)
-    except Exception:  # 메시지에 URL·키가 들어 있을 수 있어 버린다
-        sys.exit(f"{path} {page}페이지 요청에 실패했어요(키·네트워크 확인).")
+    for wait in (30, 60, 0):
+        try:
+            with urllib.request.urlopen(f"{BASE}/{path}?serviceKey={urllib.parse.quote(key, safe='')}&pageNo={page}&numOfRows={ROWS}&format=2", timeout=180) as r:
+                return json.load(r)
+        except Exception:  # 메시지에 URL·키가 들어 있을 수 있어 버린다
+            time.sleep(wait)
+    print(f"{path} {page}페이지 건너뜀(키·네트워크 확인).")
+    return {}
 
 
 def main():
