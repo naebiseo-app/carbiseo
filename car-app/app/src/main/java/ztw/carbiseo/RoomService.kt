@@ -570,7 +570,7 @@ class RoomService : Service() {
             // 바뀌면 10초에 한 번까지, 안 바뀌어도 5분마다 하트비트(서버는 10분 넘게 갱신이 없으면 방을 모른다고 본다)
             val ago = System.currentTimeMillis() - ctxAt
             if ((carCtx().toString() != ctxSent && ago >= 10_000) || ago >= HEARTBEAT_MS) machine.room?.let { sendState(it.name, ++stateGen, false) }
-            if (parkRemind.fire(machine.room == Room.PARK && parkedAt?.let { clock.millis() - it >= PARK_REMIND_MS } == true) && !passenger) parkReminder(cards(), seen)?.let(::say)
+            if (parkRemind.fire(machine.room == Room.PARK && canAsk() && parkedAt?.let { clock.millis() - it >= PARK_REMIND_MS } == true) && !passenger) parkReminder(cards(), seen)?.let(::say)
             // F4: 업무 운전 중 도착 예상이 다음 일정 시작보다 늦으면 일정마다 한 번 묻는다
             if (machine.room == Room.DRIVE_WORK && !passenger && canAsk()) System.currentTimeMillis().let { now ->
                 nextEvent(schedule, now)?.takeIf { it.start !in lateAsked && headingTo(machine.signals.destination, it) }?.let { ev ->
