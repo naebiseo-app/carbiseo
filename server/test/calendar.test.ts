@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import worker from "../src/index.ts";
-import { toEvents } from "../src/calendar.ts";
+import { placeCoord, toEvents } from "../src/calendar.ts";
 
 function d1() {
   const db = new DatabaseSync(":memory:");
@@ -58,6 +58,52 @@ test("toEvents: 제목·장소·시작, 종일은 KST 자정, 취소 제외, 제
   assert.equal(r.length, 2);
   assert.deepEqual([r[0].title, r[0].place, r[0].start, r[0].contact], ["거래처 미팅", "판교역", Date.parse("2026-11-08T01:00:00Z"), ""]);
   assert.deepEqual([r[1].title, r[1].start], ["일정", Date.parse("2026-11-08T15:00:00Z")]);
+});
+
+test("toEvents: 장소는 대한민국·쉼표 뒤 주소를 떼고, 연락처는 나 아닌 첫 참석자", () => {
+  const [e] = toEvents([{ summary: "미팅", location: "판교역, 대한민국 경기도 성남시", start: { date: "2026-11-09" }, attendees: [{ self: true, displayName: "나" }, { email: "a@b" }, { displayName: "김민수" }] }]);
+  assert.deepEqual([e.place, e.contact], ["판교역", "김민수"]);
+});
+
+// 카카오 가짜: 검색어별 좌표. 없는 말은 빈 결과
+function kakao(places: Record<string, [string, string]>, kinds: Record<string, string> = {}) {
+  const calls: string[] = [];
+  const g = globalThis.fetch;
+  globalThis.fetch = (async (url: any, init: any) => {
+    const u = new URL(String(url));
+    if (u.hostname !== "dapi.kakao.com") return g(url, init);
+    const q = u.searchParams.get("query")!; calls.push(q);
+    const hit = places[q] && (!kinds[q] || u.pathname.includes(kinds[q]));
+    return { ok: true, status: 200, json: async () => ({ documents: hit ? [{ y: places[q][0], x: places[q][1] }] : [] }) };
+  }) as unknown as typeof fetch;
+  return calls;
+}
+
+test("placeCoord: 키워드 없으면 주소 검색, 못 찾거나 모호한 장소·키 없음은 null", async () => {
+  const calls = kakao({ "판교역": ["37.39", "127.11"], "판교역로 160": ["37.4", "127.1"] }, { "판교역로 160": "address" });
+  assert.deepEqual(await placeCoord("k", "판교역"), { lat: 37.39, lng: 127.11 });
+  assert.deepEqual(await placeCoord("k", "판교역로 160"), { lat: 37.4, lng: 127.1 });
+  assert.equal(await placeCoord("k", "없는곳"), null);
+  const n = calls.length;
+  for (const v of ["집", "회사", "Zoom", "https://meet.google.com/a", ""]) assert.equal(await placeCoord("k", v), null);
+  assert.equal(await placeCoord(undefined, "판교역"), null);
+  assert.equal(calls.length, n);
+});
+
+test("동기화: 좌표·참석자 번호를 채우고, 다음 동기화는 찾은 장소를 다시 검색하지 않는다", async () => {
+  google({ events: { status: 200, items: [{ summary: "미팅", location: "판교역", start: { dateTime: "2026-11-08T10:00:00+09:00" }, attendees: [{ displayName: "김민수" }] }, { summary: "재택", location: "집", start: { date: "2026-11-09" } }] } });
+  const calls = kakao({ "판교역": ["37.39", "127.11"] });
+  const env = mkEnv({ KAKAO_REST_KEY: "k" });
+  await env.DB.prepare("INSERT INTO kv(key,value,updated_at) VALUES('contacts',?,0)").bind(JSON.stringify({ "김민수": "01012345678" })).run();
+  await call(env, "POST", "/phone/google", { code: "abc" });
+  const s = await kv(env, "schedule");
+  assert.deepEqual([s[0].lat, s[0].lng, s[0].contact, s[0].contact_number], [37.39, 127.11, "김민수", "01012345678"]);
+  assert.deepEqual([s[1].lat, s[1].contact_number], [0, ""]);
+  assert.equal(calls.length, 1);
+  await stale(env);
+  await call(env, "GET", "/car/schedule");
+  assert.equal(calls.length, 1);
+  assert.equal((await kv(env, "schedule"))[0].lat, 37.39);
 });
 
 test("연결: 코드 교환 후 refresh_token 저장, 즉시 동기화, 토큰은 응답에 없다", async () => {
