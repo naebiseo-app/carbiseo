@@ -57,3 +57,8 @@ test("GET /car/parking: 401, 좌표 오류 400, 키 없음 no_key, 키 있으면
   assert.deepEqual(await (await get("?lat=37.4&lng=127.1", env())).json(), { reason: "no_key" });
   assert.deepEqual(await (await get("?lat=37.4&lng=127.1", env({ PARKING_API_KEY: "k" }))).json(), { reason: "none" });
 });
+
+test("mergeRealtime: 빈자리가 전체보다 많은 잘못된 값은 뺀다", () => {
+  const near = [{ id: "a", name: "가명", lat: 0, lng: 0, dist_m: 1 }];
+  assert.deepEqual(mergeRealtime(near, [{ prk_center_id: "a", pkfc_ParkingLots_total: "10", pkfc_Available_ParkingLots_total: "12" }]), []);
+});

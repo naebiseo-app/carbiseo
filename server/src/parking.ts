@@ -17,13 +17,13 @@ export function nearbyLots(lots: Lot[], lat: number, lng: number, radius = 1000,
     .filter((p) => p.dist_m <= radius).sort((a, b) => a.dist_m - b.dist_m).slice(0, max);
 }
 
-/** 근처 곳에 실시간 면수를 붙인다. 실시간 행이 없거나 전체 면수가 0인 곳은 뺀다(값은 문자열로 온다). */
+/** 근처 곳에 실시간 면수를 붙인다. 실시간 행이 없거나 전체 면수가 0이거나 빈자리가 전체보다 많은 곳은 뺀다(값은 문자열로 온다). */
 export function mergeRealtime(near: Near[], rows: Realtime[]): ParkItem[] {
   const by = new Map(rows.map((r) => [r.prk_center_id, r]));
   return near.flatMap((n) => {
     const r = by.get(n.id);
     const total = Number(r?.pkfc_ParkingLots_total), available = Number(r?.pkfc_Available_ParkingLots_total);
-    return total > 0 && Number.isFinite(available) ? [{ name: n.name, available: Math.max(0, available), total, dist_m: n.dist_m, lat: n.lat, lng: n.lng }] : [];
+    return total > 0 && available <= total ? [{ name: n.name, available: Math.max(0, available), total, dist_m: n.dist_m, lat: n.lat, lng: n.lng }] : [];
   });
 }
 
