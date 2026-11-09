@@ -596,7 +596,7 @@ class RoomService : Service() {
                 val soc = forcedSoc ?: adapters.soc; val word = mealWord(LocalTime.now(clock))
                 if (soc != null && soc <= CHARGE_OFFER_SOC && offerDue(proactive, lastChargeOffer, now)) { lastChargeOffer = now; nearKind = NearKind.CHARGE; askVoice(chargeOffer(soc), Ask.NEAR_FIND) }
                 else if (word != null && (tripMin() ?: 0) >= MEAL_OFFER_DRIVE_MIN && !reservable(dn) && offerDue(proactive, lastMealOffer, now)) { lastMealOffer = now; nearKind = NearKind.FOOD; askVoice(mealOffer(word), Ask.NEAR_FIND) }
-                else nextEvent(schedule, System.currentTimeMillis())?.takeIf { machine.room == Room.DRIVE_WORK && headingTo(machine.signals.destination, it) && trafficOfferDue(proactive, forcedTraffic ?: adapters.trafficWorst, it, lateAsked, lastTrafficOffer, now, e?.let { m -> System.currentTimeMillis() + m * 60_000L }) }?.let { ev ->
+                else nextEvent(schedule, System.currentTimeMillis())?.takeIf { machine.room == Room.DRIVE_WORK && headingTo(machine.signals.destination, it) && trafficOfferDue(proactive, forcedTraffic ?: adapters.trafficWorst, it, lateAsked, lastTrafficOffer, now, (forcedTripEta ?: e)?.let { m -> System.currentTimeMillis() + m * 60_000L }) }?.let { ev ->
                     // 대답 '응'은 기존 LATE 경로(answerYn)로 간다. 지각 분은 아는 만큼만(lateBy), 모르면 분 수 없이
                     lastTrafficOffer = now; lateAsked += ev.start; lateEvent = ev to lateBy(System.currentTimeMillis(), e, ev.start); askVoice(TRAFFIC_OFFER_SPEECH, Ask.LATE)
                 }
@@ -820,7 +820,7 @@ class RoomService : Service() {
             val traf = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) { forcedTraffic = i.getStringExtra("worst")?.takeIf { it.isNotBlank() }; Log.i("ROOM", "debug traffic force=$forcedTraffic") } }
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(traf, IntentFilter("ztw.carbiseo.TRAFFIC"), Context.RECEIVER_EXPORTED) else registerReceiver(traf, IntentFilter("ztw.carbiseo.TRAFFIC"))
             receivers += traf
-            // adb shell am broadcast -a ztw.carbiseo.TRIPETA --ei min 120 (extra 없으면 해제). 지금 가도 늦는 장면 확인용
+            // adb shell am broadcast -a ztw.carbiseo.TRIPETA --ei min 120 (extra 없으면 해제). 지금 가도 늦는 장면·정체 먼저 말 걸기(도착 예상 대신) 확인용
             val tripEta = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) { forcedTripEta = i.getIntExtra("min", -1).takeIf { it >= 0 }; Log.i("ROOM", "debug tripEta force=$forcedTripEta") } }
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(tripEta, IntentFilter("ztw.carbiseo.TRIPETA"), Context.RECEIVER_EXPORTED) else registerReceiver(tripEta, IntentFilter("ztw.carbiseo.TRIPETA"))
             receivers += tripEta
