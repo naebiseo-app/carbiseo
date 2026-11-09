@@ -155,7 +155,7 @@ fun parkingSpeech(lots: List<ParkLot>, canCall: Boolean): String {
 
 /** F5 차 음성 입구: [말하기]로 한 마디 듣고 키워드로만 가른다(LLM 없음). 급해·화장실(Q3) > 아까 전화 > 예약(인원은 partyOf로 따로 읽는다) > 일정 > 주차 메모 > 주차 자리 문의 > 근처 찾기. */
 enum class CarIntent { RECENT_CALLS, URGENT, NEXT_EVENT, RESERVE, PARK_MEMO, PARKING, NEARBY, UNKNOWN }
-private val RECENT_CALL_WORDS = Regex("아까전화|전화뭐|누구전화")
+private val RECENT_CALL_WORDS = Regex("아까전화|전화뭐|누구전화|최근전화|최근통화|부재중|전화온거|전화왔")
 fun carIntent(said: String?): CarIntent {
     val n = said.orEmpty().replace(Regex("""\s"""), "")
     return when { urgentNeed(said) -> CarIntent.URGENT; RECENT_CALL_WORDS.containsMatchIn(n) -> CarIntent.RECENT_CALLS; "일정" in n -> CarIntent.NEXT_EVENT; "예약" in n -> CarIntent.RESERVE; parkMemo(said) != null -> CarIntent.PARK_MEMO; parkingWish(said) -> CarIntent.PARKING; nearWish(said) != null -> CarIntent.NEARBY; else -> CarIntent.UNKNOWN }

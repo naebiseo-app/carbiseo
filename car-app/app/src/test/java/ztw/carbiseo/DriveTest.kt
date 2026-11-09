@@ -395,7 +395,7 @@ class DriveTest {
     }
 
     @Test fun 차_음성_입구_의도는_키워드로만_가른다() {
-        for (s in listOf("아까 전화 뭐 왔어", "아까전화 누구였지", "전화 뭐 왔어?", "누구 전화 왔어")) assertEquals(s, CarIntent.RECENT_CALLS, carIntent(s))
+        for (s in listOf("아까 전화 뭐 왔어", "아까전화 누구였지", "전화 뭐 왔어?", "누구 전화 왔어", "최근 전화 알려줘", "부재중 있어?", "전화 온 거 있어?")) assertEquals(s, CarIntent.RECENT_CALLS, carIntent(s))
         for (s in listOf("급해요", "화장실 가고 싶어", "나 급해")) assertEquals(s, CarIntent.URGENT, carIntent(s))
         for (s in listOf("다음 일정 알려줘", "일정이 뭐야", "오늘 일정")) assertEquals(s, CarIntent.NEXT_EVENT, carIntent(s))
         for (s in listOf("날씨 어때", "", "안녕", "전화 걸어줘")) assertEquals(s, CarIntent.UNKNOWN, carIntent(s))

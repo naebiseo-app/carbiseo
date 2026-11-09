@@ -789,6 +789,10 @@ class RoomService : Service() {
             }
         }
         // adb shell am broadcast -a ztw.carbiseo.HEAR (앱 files/hear.pcm을 다음 듣기 때 STT 엔진에 넣기, run-as로 복사, 실측용)
+        // adb shell am broadcast -a ztw.carbiseo.CLEARLOCAL (차 안에서 만든 할 일 카드를 비운다. 촬영 전 시험 찌꺼기 정리용)
+        val clearLocal = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) { inbox = inbox.filter { it.id < LOCAL_ID_BASE }; prefs.edit().remove("local_tasks").apply(); Log.i("ROOM", "debug clear local") }
+        }
         val hear = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { runCatching { java.io.File(filesDir, "hear.pcm").readBytes() }.onSuccess { Log.i("ROOM", "debug hear ${it.size}B"); voice.armed = it } }
         }
@@ -803,7 +807,7 @@ class RoomService : Service() {
         val wiper = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { val on = i.getBooleanExtra("on", false); adapters.setRain(on); Log.i("ROOM", "debug wiper rain=$on") }
         }
-        for ((rc, action) in listOf(door to "ztw.carbiseo.DOOR", wiper to "ztw.carbiseo.WIPER", cc to "ztw.carbiseo.CALLCARD", hear to "ztw.carbiseo.HEAR", wakePcm to "ztw.carbiseo.WAKEPCM", say to "ztw.carbiseo.SAY", wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP", loc to "ztw.carbiseo.LOC", tm to "ztw.carbiseo.TIME", soc to "ztw.carbiseo.SOC", sig to "ztw.carbiseo.SIGNAL")) {
+        for ((rc, action) in listOf(door to "ztw.carbiseo.DOOR", wiper to "ztw.carbiseo.WIPER", cc to "ztw.carbiseo.CALLCARD", hear to "ztw.carbiseo.HEAR", clearLocal to "ztw.carbiseo.CLEARLOCAL", wakePcm to "ztw.carbiseo.WAKEPCM", say to "ztw.carbiseo.SAY", wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP", loc to "ztw.carbiseo.LOC", tm to "ztw.carbiseo.TIME", soc to "ztw.carbiseo.SOC", sig to "ztw.carbiseo.SIGNAL")) {
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(rc, IntentFilter(action), Context.RECEIVER_EXPORTED) else registerReceiver(rc, IntentFilter(action))
             receivers += rc
         }

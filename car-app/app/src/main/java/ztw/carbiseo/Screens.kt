@@ -174,8 +174,8 @@ fun App() {
     Box(Modifier.weight(1f)) {
         Crossfade(room, animationSpec = tween(200), label = "room") { r -> RoomScreen(r, room, bg(r), ver) { settings = true } }
         AlertFrame(RoomService.alert)
-        AskBar(Modifier.align(Alignment.BottomCenter))
     }
+    AskBar(Modifier) // 2택·대답 띠도 화면을 밀어 올린다(덮으면 말하기가 잘림, 11-09 대표님 선택)
     ReplayBar() // 통화 중 띠는 화면을 밀어 올린다(덮으면 다음 일정·말하기가 가려짐)
     }
 }
