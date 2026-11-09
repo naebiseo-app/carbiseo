@@ -177,7 +177,7 @@ npm run deploy
 권한: `STT_SERVICE`, `RECORD_AUDIO`, `CAR_DRIVE`, `CAR_LIGHTS`, `CAR_SEATS`, `CAR_ENERGY`, `CAR_SAFETY`, `CAR_DOORS`(운전석 문), `CAR_WINDOWS`(와이퍼), `NAVI_ROUTE`, `NAVI_ROUTE_SEARCH`, `NAVI_CUSTOM_MAP`, `TTS_SERVICE`, `CAR_SPEED`, 포그라운드 서비스, 알림, 부팅 완료, 인터넷.
 
 ## 알려진 제약
-- **주행 중 화면 가림**: 에뮬레이터는 기어 D에서 앱 화면을 가린다(주행 제한). 그래서 휴식 제안 버튼은 주행 중 음성 안내까지만 확인했고, 버튼 탭은 에뮬에서 직접 누르지 못했다.
+- **주행 중 화면 가림**: 지금 에뮬레이터 이미지는 기어 D에서도 앱 화면을 가리지 않는다(2026-11-06 디버그·release 모두 실측). 실차는 주행 제한(CarUxRestrictions)에 따라 가릴 수 있어, 주행 중 기능은 음성만으로 끝나게 만들었다.
 - **트립 주행시간 미지원**: 에뮬에서 `getTrip*DrivingTime` 3종이 모두 `ERROR_NOT_SUPPORTED_PROPERTY`. 앱이 잰 연속 운전 시간으로 대신하고, 실차에서 SDK 값이 오면 그것을 우선 쓴다(단위는 실차에서 확정).
 - **경고등**: 코드는 `CAR_SAFETY` 권한으로 `getTelltalesInfo`를 30초마다 조회하려 하지만, 에뮬에서는 `PRIVATE_CAR_SAFETY` 권한이 없어 SecurityException으로 실패하고 조회를 멈춘다. 그래서 경고등 안내는 실측하지 못했다.
 - **음성 인식**: SpeechToText는 기기 안(ON_DEVICE) 모드만 쓴다(서버 모드는 콘솔 '준비 중'). 로캘을 `ko`로 주면 엔진이 거절해 `ko_KR`(Locale.KOREA)로 준다(TTS도 같이 바꿔 에뮬 엔진 오류가 사라짐). 에뮬에서는 녹음된 음성 파일을 넣어 "읽어줘" 인식을 확인했지만 결과가 불안정했고(4번 중 1번), 10-31 재시험에서는 결과가 오지 않았다. 실제 마이크 음성은 확인하지 못했다. 대화 흐름은 인식 결과를 디버그로 넣어(`SAY`) 확인했고, 시연 영상에도 그렇게 표기한다.
