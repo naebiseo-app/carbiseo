@@ -160,3 +160,13 @@ test("/car/inbox: 처음 받을 때 웹훅 event 행이 통화 카드를 밀어�
   const r = (await (await worker.fetch(new Request("https://x/car/inbox?since=0", { headers: { authorization: "Bearer t" } }), env)).json()) as any;
   assert.deepEqual(r.items.map((i: any) => i.kind), ["call"]);
 });
+
+test("웹훅 서명이 없거나 틀리면 401, 아무것도 저장 안 함", async () => {
+  const env = mkEnv();
+  const raw = new URLSearchParams({ CallId: CID, From: OTHER, Event: "summary.completed" }).toString();
+  for (const h of [{}, { "x-signature": "AAAA" }]) {
+    const r = await worker.fetch(new Request("https://x/clawops/events", { method: "POST", headers: h, body: raw }), env);
+    assert.equal(r.status, 401);
+  }
+  assert.equal(env.DB.db.prepare("SELECT count(*) n FROM inbox").get().n, 0);
+});

@@ -61,7 +61,7 @@ export function signData(url: string, ct: string | null, raw: string): string {
   return url + params.map(([k, v]) => k + v).join("");
 }
 
-// 결과 = ok | fail | nokey | nosig. ponytail: 아직 기록만 하고 거절하지 않음 — 실제 이벤트로 ok 확인 후 fail을 401로.
+// 결과 = ok | fail | nokey | nosig. ok가 아니면 /clawops/events가 401로 거절한다.
 async function checkSig(env: Env, url: string, ct: string | null, raw: string, sig: string | null) {
   if (!env.CLAWOPS_SIGNING_KEY) return "nokey";
   if (!sig) return "nosig";
@@ -589,6 +589,7 @@ export default {
       const raw = await req.text();
       const sig = await checkSig(env, req.url, req.headers.get("content-type"), raw, req.headers.get("x-signature"));
       console.log("clawops webhook sig=" + sig, "ct=" + req.headers.get("content-type"));
+      if (sig !== "ok") return json({ error: "bad_signature" }, 401); // 11-06 실통화 이벤트가 ok로 카드까지 간 것 확인 뒤 거절로 전환
       await saveInbox(env.DB, "event", "received", null, raw, { ct: req.headers.get("content-type"), sig, sig_header: req.headers.get("x-signature") });
       // 계정 '통화 받아쓰기'가 꺼져 있어 통화가 끝나면 받아쓰기를 직접 요청한다 → transcript.completed → summary.completed(아래 카드)
       const callId = sig === "ok" ? transcriptTarget(raw) : null;
