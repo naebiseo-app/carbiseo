@@ -397,6 +397,9 @@ const CHAT_SYSTEM = "당신은 운전자의 말동무 '내비서'입니다. 운�
 const DROWSY = /졸려|졸리|졸음|피곤|잠와|잠온/;
 const DROWSY_REPLY = "졸리시면 위험해요. 가까운 휴게소나 졸음쉼터에서 잠깐 쉬어 가세요.";
 
+/** 정차 중(PARK)엔 "운전 중" 전제를 빼고 그 말을 하지 않게 한다(회귀 11-09: P에서 "운전 중이시니" 답). */
+export const chatSystemParked = () => CHAT_SYSTEM.replace("운전 중이므로", "지금은 차를 세워 둔 상태입니다. 운전 중이라는 말은 하지 말고") ;
+
 /** 말동무 답이 길면 문장 단위로 110자 안까지만 남긴다(가드 120자에 걸려 고정 문구로 바뀌지 않게). */
 export function chatCut(t: string): string {
   let out = "";
@@ -405,7 +408,7 @@ export function chatCut(t: string): string {
 }
 
 /** 말동무 대화. 대화 내용은 저장·로그하지 않는다. 키 없음 no_key, 실패·금칙어는 고정 문구 fallback. */
-export async function carChat(key: string | undefined, text: string, history: { role: "user" | "assistant"; text: string }[]): Promise<{ reply: string; source: "llm" | "fallback" | "no_key" }> {
+export async function carChat(key: string | undefined, text: string, history: { role: "user" | "assistant"; text: string }[], parked = false): Promise<{ reply: string; source: "llm" | "fallback" | "no_key" }> {
   if (DROWSY.test(text.replace(/\s/g, ""))) return { reply: DROWSY_REPLY, source: "fallback" }; // 안전 문구는 AI 답에 맡기지 않는다("저는 졸리지 않아요" 실측)
   if (!key) return { reply: FALLBACK.chat, source: "no_key" };
   const fb = { reply: FALLBACK.chat, source: "fallback" as const };
@@ -415,7 +418,7 @@ export async function carChat(key: string | undefined, text: string, history: { 
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model: "claude-haiku-5-5", max_tokens: 200, thinking: { type: "disabled" }, system: CHAT_SYSTEM, messages }),
+      body: JSON.stringify({ model: "claude-haiku-5-5", max_tokens: 200, thinking: { type: "disabled" }, system: parked ? chatSystemParked() : CHAT_SYSTEM, messages }),
       signal: AbortSignal.timeout(6000),
     });
     if (!r.ok) return fb;
@@ -832,7 +835,7 @@ export default {
       const history = (Array.isArray(b.history) ? b.history : []).slice(-6)
         .filter((h): h is { role: "user" | "assistant"; text: string } => !!h && (h.role === "user" || h.role === "assistant") && typeof h.text === "string")
         .map((h) => ({ role: h.role, text: h.text.slice(0, 200) }));
-      return json(await carChat(env.ANTHROPIC_API_KEY, text, history));
+      return json(await carChat(env.ANTHROPIC_API_KEY, text, history, (await kvGet(env.DB, "car_context").catch(() => null))?.room === "PARK"));
     }
 
     // 구글 캘린더 연결: 폰이 받은 인증 코드를 서버가 토큰으로 바꾼다(토큰은 폰·응답에 안 나간다)

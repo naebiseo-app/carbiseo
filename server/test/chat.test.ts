@@ -87,3 +87,10 @@ test("완성 문장 없이 잘린 답은 fallback", async () => {
   globalThis.fetch = (async () => ({ ok: true, json: async () => ({ stop_reason: "max_tokens", content: [{ type: "thinking" }, { type: "text", text: "운전 중에 많" }] }) })) as unknown as typeof fetch;
   assert.deepEqual(await (await call(env("k"), { text: "안녕" })).json(), { reply: FALLBACK.chat, source: "fallback" });
 });
+
+test("정차 중 말동무는 운전 중 전제를 빼고 그 말을 금한다", async () => {
+  const { chatSystemParked } = await import("../src/index.ts");
+  const s = chatSystemParked();
+  assert.ok(!s.includes("운전 중이므로"));
+  assert.ok(s.includes("운전 중이라는 말은 하지 말고"));
+});
