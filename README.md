@@ -11,6 +11,8 @@
 | 운전 중 폰 메시지 알림을 볼 수 없다 | 차가 방·운전 상황으로 **언제·무엇을 읽을지** 정해 "카톡 3건, 김민수님 외 2명. 읽어드릴까요?"로 묻고, "읽어줘"·"답장, ○○라고 해 줘"·"나중에"로 답한다 |
 | 퇴근 뒤에도 업무가 따라온다 | 퇴근길엔 급한 전화·바로 연결 번호만 알리고, 나머지와 "내일 아침에"로 미룬 카드는 다음 첫 업무 운전에 "어제 넘긴 전화 N건"으로 묶어 알린다 |
 | 오래 운전하면 지친다 | 연속 운전 2시간이면 전화를 소리 없이 보관하고 업무 말은 "쉬고 나서"로 미룬다. 휴식 제안 때 앞쪽 졸음쉼터·휴게소를 내비 경유지로 넣는다 |
+| 운전 중엔 끼니·충전·주유를 챙기기 어렵다 | 비서가 먼저 묻고("점심 시간이에요. 근처 식당 찾아드릴까요?", 배터리 20% 이하면 충전소), "배고파"라고만 해도 앞쪽 가게를 찾아 경유지로 넣고 식당·카페면 예약 인원을 물어 AI가 가게에 전화한다 |
+| 차에서 내리면 남은 일과 주차 위치를 잊는다 | P로 바꾸면 하차 카드(남은 일 + 주차 위치·메모)를 띄우고 폰 앱에서도 같은 카드를 본다. "주차 지하 2층 B구역"이라고 말하면 메모로 남긴다. 도착 전 "주차 자리 있어?"면 실시간 정보가 있는 공영주차장의 빈자리 수를 읽는다 |
 
 AI 비서는 첫 마디에 AI임과 내용을 기록해 전한다는 점을 밝히고, 약속 확정·회신 날짜·금액·운전자 위치는 말하지 않는다(서버 대본에 고정).
 
@@ -50,7 +52,9 @@ flowchart LR
 | Vehicle `getSteeringWheel().registerSteeringWheelAngle` | 큰 조향 중 음성 미루기 | `CarAdapters.kt`, `Drive.kt` |
 | Vehicle `getOdometer().getTrip{Current,Cumulative,SinceRefill}DrivingTime` + register | 피로 모드(장시간 운전이면 낭독 보관 + 휴게소 버튼), 응대 대본 "N시간 운전" | `CarAdapters.kt`, `Drive.kt`(TripDelta) |
 | Vehicle `getSeat().registerSeatOccupancy` / `getCurrentSeatOccupancy` (조수석) | 동승자 감지 시 "동승자 모드로 바꿀까요?" 확인 | `CarAdapters.kt`, `Drive.kt`(SeatEdge) |
-| Vehicle `getEvBattery().registerEvBatteryStateOfCharge` / `getEvBatteryStateOfCharge` | 서버로 보내는 차량 맥락(soc) | `CarAdapters.kt` |
+| Vehicle `getEvBattery().registerEvBatteryStateOfCharge` / `getEvBatteryStateOfCharge` | 서버로 보내는 차량 맥락(soc), 20% 이하면 충전소 먼저 제안 | `CarAdapters.kt`, `RoomService.kt` |
+| Vehicle `getDoor().registerDoorPosition` / `getCurrentDoorPosition` (운전석 `ROW_1_LEFT`) | 기어 P + 운전석 문 열림 = 하차 → 주차 위치를 서버에 한 번 더 올림 | `CarAdapters.kt`, `Drive.kt`(gotOff) |
+| Vehicle `getWiper().registerWiperState` / `getCurrentWiperState` (앞유리) | 와이퍼가 켜져 있으면 비 → 지각 음성·문자에 "비가 와서" | `CarAdapters.kt`, `Drive.kt`(rainByWiper·lateSpeech) |
 | Vehicle `getSafety().getTelltalesInfo` | 빨간 경고등 안내(CAR_SAFETY로 30초마다 조회 시도. 에뮬은 PRIVATE_CAR_SAFETY가 없어 실패 → 조회 중단, 미실측) | `CarAdapters.kt`, `RoomService.kt` |
 | NaviHelper `getDestinationInfo` / `onDestinationInfo`(좌표·이름·`remainTime`) | 목적지가 집·회사인지, 도착 예정 분 → 응대 대본·지각 예측·집 도착 5분 전 안내, 목적지 이름이 식당·주차장류면 예약 문자 초안 제안 | `CarAdapters.kt`, `Drive.kt`(homeSoon·lateBy·reservable) |
 | NaviHelper `onCurrentLocationInfo` / `getCurrentLocationInfo` | 현재 위치(앞쪽 휴게소 고르기). FusedLocation은 쓰지 않는다 | `CarAdapters.kt`, `Drive.kt` |
@@ -58,7 +62,8 @@ flowchart LR
 | NaviHelper `getBookmarkInfo` / `onBookmarkInfo` (HOME·OFFICE) | 집·회사 좌표 자동 설정(회사가 목적지면 저녁에도 업무) | `CarAdapters.kt` |
 | NaviHelper `getRecentDestinationInfo` / `onRecentDestinationInfo` | 집 즐겨찾기가 없을 때 이름이 "집"인 최근 목적지 | `CarAdapters.kt` |
 | NaviHelper `requestRoute(RouteInfo)` | 정차 화면 일정 카드 "출발" → 그 장소로 경로 | `RoomService.kt` |
-| NaviHelper `addWaypoint(RequestWaypointInfo)` | 휴식 제안(음성 "응" 또는 버튼)·"급해요" → 앞쪽 졸음쉼터·휴게소를 첫 경유지로 | `RoomService.kt` |
+| NaviHelper `addWaypoint(RequestWaypointInfo)` | 휴식 제안(음성 "응" 또는 버튼)·"급해요" → 앞쪽 졸음쉼터·휴게소를 첫 경유지로. 근처 찾기·주차 빈자리의 "들를게"도 첫 경유지로(목적지가 없으면 `requestRoute`) | `RoomService.kt` |
+| NaviHelper `requestTrip` → `onTripInfo`, `RouteStateInfo` 정체 단계 | 일정 장소로 안 가는 중에도 "지금 가면 늦는지"(2시간 안 일정, 5분마다), 경로가 크게 막히면 먼저 말 걸기 | `CarAdapters.kt`, `Drive.kt`(tripCheckDue·trafficOfferDue) |
 | NaviHelper `requestNavigationScreen(SearchPlace / AddHomeFavorite)` | 앞쪽 휴게소를 모를 때 내비 검색, 설정의 "내비 즐겨찾기에 집 추가" | `RoomService.kt` |
 | NaviHelper `onCurrentRoadSpeedLimit` / `onCameraAlert` / `onCautionPointInfo` | 과속·주의 경고 테두리, 경고 중 음성 보류 | `CarAdapters.kt`, `Alert.kt` |
 | TextToSpeech `Mode.ON_DEVICE` `speak` | 방 전환 안내, 부재중 한 줄 낭독, 휴식·집 문턱 안내, 폰 알림 묶음·낭독 (실패 시 Android TTS로 대체) | `Speaker.kt` |
@@ -90,6 +95,21 @@ flowchart LR
 
 폰 알림: 업무 운전 = 광고((광고) 표기·이름에 '광고') 외 전부 묻기, 업무 시간 밖 = 설정의 즐겨찾기 보낸이만, 나머지는 세울 때 묶어서. 깜빡이·후진·큰 조향·경고·블루투스 통화·피로(2시간) 중이면 미뤘다가 풀리면 한 번에. 알림은 `phone-app/`(안드로이드 '내비서 연결', 알림 접근 권한)이 서버로 넘기고 답장도 그 알림의 답장 버튼으로 보낸다. 시연용으로 관리 페이지 '시험 알림 보내기'가 같은 경로에 넣는다.
 
+## 11-07 이후 추가 기능
+문구는 코드의 TTS 문자열 그대로다(`Drive.kt`).
+
+| 기능 | 동작 | 확인 |
+|---|---|---|
+| 먼저 말 걸기 | 설정 '먼저 말 걸기' 끄기 / 필요할 때만(기본, 운전 1번에 종류별 1번) / 자주(같은 종류 2시간마다). ①배터리 20% 이하 "배터리가 N퍼센트 남았어요. 근처 충전소 찾아드릴까요?" ②점심 11:30~13:30·저녁 17:30~19:30에 60분 넘게 운전 중이고 목적지가 식당류가 아니면 "점심 시간이에요. 근처 식당 찾아드릴까요?" ③업무 운전 중 다음 일정 장소로 가는데 경로 정체가 최고 단계(HEAVY)이고 일정에 상대가 있으면 "앞이 많이 막혀요. 다음 일정 상대에게 늦을 수 있다고 알릴까요?" | ①② 에뮬 실측(값은 디버그 주입). ③ 정체 단계 수신만 에뮬 실측 |
+| 근처 찾기 | "배고파·출출해·뭐 먹지"(식당), "커피 마시고 싶다"(카페), "기름 떨어졌어"(주유소), "충전해야 돼·배터리 부족"(충전소) → "근처 ○○ 찾아드릴까요?" → "응"이면 차 좌표를 서버로 1번 보내 카카오 장소 검색(반경 5km) → 목적지 방향 앞쪽에서 가장 가까운 곳 "○○, N미터예요, 들를까요?" → "응"이면 첫 경유지. 주유소·충전소는 "경로에 넣었어요", 식당·카페는 "○○에 HH:MM쯤 도착해요. 몇 분으로 예약할까요?" → 인원을 말하면 AI 예약 전화 | 실서버 실측(11-07). 식당 경유지 뒤 예약 질문 연결은 에뮬 미실측 |
+| 하차 카드 | 주행 → P 전환 때 "남은 일"(할 일·회신할 전화 최대 8건 + "외 N건")과 주차 위치(주소, 메모, "다음 출발 때 지워져요"). 기어 P에서 운전석 문이 열리면 위치를 서버에 한 번 더 올린다. 폰 앱 '내비서 연결'에서도 같은 카드를 보고 할 일을 끝낼 수 있다(`/phone/parked`) | 차 화면 에뮬 실측, 폰 화면 캡처 확인, 차→서버→폰 연동 미실측 |
+| 주차 메모 | 말 속 "주차 지하 2층 B구역" → 층·구역만 저장, "주차 위치를 적어 뒀어요". 하차 카드 [메모 남기기] → "어디에 세우셨어요?" 뒤 한 마디(40자) | 에뮬 실측 |
+| 주차 빈자리 | "주차 자리 있어?" → 목적지(없으면 현재 위치) 1km 안 최대 3곳의 공공데이터 실시간 값 → "○○에 N자리 남았고 N미터예요, 경유지로 넣을까요?" / "근처 주차장이 다 찼어요" / 정보가 없으면 "가게에 주차 자리 물어볼까요?" → "응"이면 AI가 가게에 주차 가능 여부만 묻는 전화(예약 전화와 같은 `O4_LIVE`·하루 5통 규칙) | 서버 단위 테스트. 범위는 아래 '알려진 제약' |
+| 구글 캘린더 | 폰 앱에서 구글 로그인(`calendar.events.readonly`) → 서버가 인증 코드를 토큰으로 바꿔 보관(폰·차로 안 내보냄) → `/car/schedule` 조회 때 5분 넘게 지났으면 다시 가져옴. 일정 장소는 카카오 검색으로 좌표를 붙여 지각 계산에 쓰고, 집·회사·온라인처럼 모호한 장소는 찾지 않는다. 연결 전·끊은 뒤는 데모 일정 | 시험 계정으로 연결·일정 수신 실측(좌표 변환 전 버전). 좌표 변환은 배포 뒤 재측정 필요 |
+| 비 오는 날 지각 | 와이퍼가 켜져 있으면 "비가 와서 다음 일정에 약 N분 늦을 것 같아요. 늦는다고 문자 보낼까요?", 문자 초안 "운전 중인데 비가 와서 약 N분 늦을 것 같습니다. 죄송합니다." | 에뮬 실측(도착 시간은 디버그로 늘림) |
+| 이름 호출 | "내비서"와 "네비서"를 같은 이름으로 받고, 인식기가 잘못 받아 적는 꼴(예: "네미서")도 받는다 | 녹음 음성 주입 3/3(11-09), 실차 마이크 미확인 |
+| 공휴일 | 법정 공휴일(2027년까지 표, 임시공휴일 없음)을 주말처럼 쉬는 날로 판정 | 단위 테스트 |
+
 ## 실행 방법
 ### 1. 에뮬레이터
 - Pleos Connect SDK Emulator(Android API 34 Pleos 이미지)를 실행한다.
@@ -110,7 +130,7 @@ cd car-app
 - 이름 호출 음성 모델(약 132MB)은 파일 크기 때문에 저장소에 넣지 않았다. 없어도 빌드되고 이름 호출만 동작하지 않는다. 넣으려면 [모델 압축 파일](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-korean-2024-06-16.tar.bz2)을 풀어 `encoder-epoch-99-avg-1.int8.onnx`·`decoder-epoch-99-avg-1.int8.onnx`·`joiner-epoch-99-avg-1.int8.onnx`·`tokens.txt`를 `car-app/app/src/main/assets/sherpa-ko/`에 복사한다. 제출 APK에는 모델이 들어 있다.
 - minify(R8)는 끈다. Pleos SDK가 kotlin-reflect로 클래스 메타데이터를 읽기 때문이다.
 - Gleo 연결: `app/src/main/assets/schema.json`에 함수 3개(`READ_RECENT_CALLS`·`READ_NEXT_SCHEDULE`·`ADD_REST_STOP`). 에뮬은 `adb emu avd hostmicon`으로 마이크를 켠 뒤 `adb shell cmd voiceinteraction show`로 듣기를 시작하고 "내비서 일정 읽어줘"라고 말하면 된다. 이름 호출을 켜 두면 Gleo가 버튼을 무시하므로 끄고 시험한다.
-- 디버그 빌드에만 시연용 브로드캐스트(`ztw.carbiseo.ALERT·TRIP·LOC·TIME·ROUTE·WP·SAY·HEAR·SIGNAL·SCREEN` 등)가 등록된다. release에서는 등록되지 않는다(`FLAG_DEBUGGABLE` 검사).
+- 디버그 빌드에만 시연용 브로드캐스트(`ztw.carbiseo.ALERT·TRIP·LOC·TIME·ROUTE·WP·SAY·HEAR·SIGNAL·SCREEN·SOC·TRAFFIC·DOOR·WIPER·WAKEPCM` 등)가 등록된다. release에서는 등록되지 않는다(`FLAG_DEBUGGABLE` 검사).
 
 ### 2-1. 휴대폰 연결 앱 (phone-app, 안드로이드 폰)
 ```
@@ -128,7 +148,8 @@ npx wrangler@4 d1 execute carbiseo --remote --file=schema.sql   # 최초 1회
 npm run deploy
 ```
 - 배포 주소: `https://carbiseo-api.<계정>.workers.dev`(심사용 주소는 제출 메일에 별도 기재) · 데모 관리 페이지 `/admin`(Basic 인증)
-- 비밀값(`wrangler secret put`): `CAR_TOKEN`, `ADMIN_TOKEN`, `CALL_CONTEXT_SECRET`, `OWNER_NUMBER`, `CLAWOPS_ACCOUNT_ID`, `CLAWOPS_API_KEY`, `CLAWOPS_NUMBER`, `CLAWOPS_SIGNING_KEY`, `SMS_RELAY_URL`, `SMS_RELAY_SECRET`
+- 비밀값(`wrangler secret put`): `CAR_TOKEN`, `ADMIN_TOKEN`, `CALL_CONTEXT_SECRET`, `OWNER_NUMBER`, `CLAWOPS_ACCOUNT_ID`, `CLAWOPS_API_KEY`, `CLAWOPS_NUMBER`, `CLAWOPS_SIGNING_KEY`, `SMS_RELAY_URL`, `SMS_RELAY_SECRET`, `ANTHROPIC_API_KEY`(말동무), `KAKAO_REST_KEY`(근처 찾기·가게 번호·주소·일정 장소 좌표), `PARKING_API_KEY`(공공데이터 주차정보), `GOOGLE_CLIENT_SECRET`(구글 캘린더). 키가 없으면 그 기능만 `no_key`·`no_secret`으로 꺼진다. `O4_LIVE=1`일 때만 예약·주차 문의 전화가 실제 가게로 간다(기본은 `OWNER_NUMBER`)
+- 주차장 좌표 표 `server/src/parking_lots.json`(지금 677곳)은 `server/scripts/parking_index.py`가 공공데이터 시설정보에서 만든다. 다시 만든 뒤 배포해야 반영된다
 - 예약 작업: 매일 03시(KST) 보관 정책 실행.
 
 ### 4. 문자 중계 (Vercel, 서울 icn1)
@@ -137,20 +158,23 @@ npm run deploy
 ## 테스트
 | 대상 | 명령 | 현재 |
 |---|---|---|
-| 차 앱 단위 테스트(방 판정·부재중·주행 기능·피로·지각·경고·도착 예정·배경·폰 알림·재현 통화) | `cd car-app && ./gradlew testDebugUnitTest --max-workers=2` | 154개 (11-06 전체 통과) |
-| 서버(대본·서명 검증·관리자·보관 정책·요약·주인 통화·재현·중계·스위치·폰 알림·바로 연결·가족 문자·AI 문장 가드·카드 동작) | `cd server && npm test` | 136개 (11-06 전체 통과) |
-| 휴대폰 연결 앱(메시지 알림 거르기·화면 로직) | `cd phone-app && ./gradlew testDebugUnitTest --max-workers=2` | 10개 (11-06 전체 통과) |
+| 차 앱 단위 테스트(방 판정·부재중·주행 기능·피로·지각·경고·도착 예정·배경·폰 알림·재현 통화) | `cd car-app && ./gradlew testDebugUnitTest --max-workers=2` | 172개 (11-09 기록 전체 통과) |
+| 서버(대본·서명 검증·관리자·보관 정책·요약·주인 통화·재현·중계·스위치·폰 알림·바로 연결·가족 문자·AI 문장 가드·카드 동작·예약 전화·근처 찾기·하차 정보·구글 캘린더·주차) | `cd server && npm test` | 177개 (11-09 실행 전체 통과) |
+| 휴대폰 연결 앱(메시지 알림 거르기·화면 로직) | `cd phone-app && ./gradlew testDebugUnitTest --max-workers=2` | 18개 (11-09 집계) |
 
 ## 개인정보
 - 음성은 우리 서버에 저장하지 않는다. 통화 엔진이 보낸 원문 기록은 7일 뒤 비우고, 요약 카드는 30일 뒤 삭제한다.
 - 차 화면에는 발신 번호 끝 4자리와 요약만 보인다. 문자 중계 응답에서도 번호를 가린다.
 - AI가 만든 요약·할 일 문장은 저장 전에 120자·금칙어·전화번호 검사를 거치고, 걸리면 고정 문구로 바꾼다(`server/src/guard.ts`). 사용자가 확인한 문자·메일 본문은 금칙어가 있으면 보내지 않는다.
 - 통화 엔진(ClawOps) 쪽에는 통화 녹음이 남는다. 녹음 끄기 설정이 없고, 통화 뒤 자동 삭제는 아직 연결하지 않았다.
+- 근처 찾기 좌표는 운전자가 "응"이라고 답한 뒤에만 서버를 거쳐 카카오 장소 검색에 1번 보낸다. 서버는 그 좌표·결과와 주차 빈자리 조회 좌표를 저장하거나 로그에 남기지 않고, 말동무 AI에도 보내지 않는다.
+- 하차 정보(위치·주소·메모·남은 일 목록)는 서버에 마지막 1건만 두고(`kv` 'parked'), 2분 넘게 세운 뒤 다시 출발하면 차가 지운다. 좌표·주소는 로그에 남기지 않는다. 폰에 줄 때 번호는 그때그때 보관함에서 찾고 저장하지 않는다.
+- 구글 캘린더는 읽기 전용 권한만 받는다. 토큰은 서버에만 두고 폰·차로 내보내지 않으며, 연결을 끊으면 토큰을 폐기 요청하고 데모 일정으로 되돌린다. 일정 장소 이름은 좌표를 찾으려고 카카오 검색에 보낸다.
 
 ## APK
 `apk/내비서_내비서_release.apk` (release 빌드, minSdk 28 / targetSdk 34, applicationId `ztw.carbiseo`)
 
-권한: `STT_SERVICE`, `RECORD_AUDIO`, `CAR_DRIVE`, `CAR_LIGHTS`, `CAR_SEATS`, `CAR_ENERGY`, `CAR_SAFETY`, `NAVI_ROUTE`, `NAVI_ROUTE_SEARCH`, `NAVI_CUSTOM_MAP`, `TTS_SERVICE`, `CAR_SPEED`, 포그라운드 서비스, 알림, 부팅 완료, 인터넷.
+권한: `STT_SERVICE`, `RECORD_AUDIO`, `CAR_DRIVE`, `CAR_LIGHTS`, `CAR_SEATS`, `CAR_ENERGY`, `CAR_SAFETY`, `CAR_DOORS`(운전석 문), `CAR_WINDOWS`(와이퍼), `NAVI_ROUTE`, `NAVI_ROUTE_SEARCH`, `NAVI_CUSTOM_MAP`, `TTS_SERVICE`, `CAR_SPEED`, 포그라운드 서비스, 알림, 부팅 완료, 인터넷.
 
 ## 알려진 제약
 - **주행 중 화면 가림**: 에뮬레이터는 기어 D에서 앱 화면을 가린다(주행 제한). 그래서 휴식 제안 버튼은 주행 중 음성 안내까지만 확인했고, 버튼 탭은 에뮬에서 직접 누르지 못했다.
@@ -162,14 +186,20 @@ npm run deploy
 - **충전 중 판정**: SDK에 충전 중 읽기 API가 없어 기어 P로만 판단한다.
 - **동승자 감지**: 에뮬의 조수석 착석 값이 반대로 오는 것으로 보여, 자동 전환 대신 확인 버튼 1번을 거친다.
 - **착신 전환**: 010 무응답 → 서비스 070 착신 실통화(통신사 조건부 착신전환)와 발신번호 전달은 검증하지 못했다(2차에서 시연). 서비스 070으로 직접 건 통화는 실통화로 확인했다.
-- **AI 예약 전화**: 실제 가게로는 걸지 않는다. `O4_LIVE`가 꺼진 동안 수신 번호는 시험 번호(`OWNER_NUMBER`)로 고정되고, 통화 시험은 개발자 휴대폰을 가게 역할로 했다.
-- **2차 예정**: 실통화 중 도움 카드(지금은 관리 페이지 재현 통화), 회전 직전 음성 미루기(`onTBTInfo`), 실제 캘린더 연결(지금은 데모 일정).
+- **AI 예약 전화**: 실제 가게로는 걸지 않는다. `O4_LIVE`가 꺼진 동안 수신 번호는 시험 번호(`OWNER_NUMBER`)로 고정되고, 통화 시험은 개발자 휴대폰을 가게 역할로 했다. AI 주차 문의 전화도 같은 규칙이다.
+- **주차 빈자리 범위**: 공공데이터 실시간 항목 4,634곳 중 좌표를 붙인 곳은 677곳이고, 그중 값이 실제로 바뀌는 곳은 측정 때마다 수십 곳(11-08 36곳, 11-09 14시 10분 간격 16곳)이다. 값이 멈춘 곳은 숫자가 맞지 않을 수 있고, '0'이 만차인지 미보고인지는 가리지 못했다. 대부분의 목적지에서는 "가게에 주차 자리 물어볼까요?"(AI 전화)로 넘어간다. 배포본에서 차가 조회한 실측은 아직이다.
+- **구글 캘린더**: 구글 앱이 시험(Testing) 단계라 등록한 시험 사용자만 로그인되고 토큰이 7일 뒤 만료된다. 심사 환경에서는 데모 일정으로 동작한다. 일정 장소 좌표는 차 위치 없이 전국 검색이라 체인점 이름("스타벅스" 등)은 다른 지점이 잡힐 수 있다.
+- **하차 감지**: 운전석 문 위치값 0 = 닫힘, 0보다 크면 열림으로 가정했다(에뮬 콘솔에서 1 수신). `CAR_DOORS`·`CAR_WINDOWS` 권한은 공개 문서끼리 설명이 달라 실차 확인이 필요하다. 와이퍼는 간헐 모드를 비로 보는지 확인하지 못했다.
+- **2차 예정**: 실통화 중 도움 카드(지금은 관리 페이지 재현 통화), 회전 직전 음성 미루기(`onTBTInfo`).
 - **블루투스 통화 중 낭독 보류**: `AudioManager` 모드로 판단하며 실차에서 확인하지 않았다.
 
 ## 데이터·오픈소스 출처
 - 졸음쉼터: 한국도로공사 전국졸음쉼터표준데이터 (data.go.kr 15028203, 데이터기준일자 2026-02-25, 이용허락범위 제한 없음)
 - 고속도로 휴게소 이름: 한국도로공사 휴게소 현황 (data.go.kr 15164198, 2026-08-28)
 - 휴게소 좌표: © OpenStreetMap contributors, Open Database License(ODbL) — https://www.openstreetmap.org/copyright
+- 주차장 빈자리: 한국교통안전공단 주차정보 API(data.go.kr 15099883, 실시간 정보·시설 정보)
+- 근처 장소·가게 번호·주소·일정 장소 좌표: 카카오 로컬 API(서버에서 호출)
+- 일정: Google Calendar API(읽기 전용, 사용자가 연결했을 때만)
 - 차량·내비·음성 기능: Pleos SDK(현대자동차그룹) — 공모전 제공 SDK 약관에 따름
 - 이름 호출 음성 인식: sherpa-onnx(k2-fsa) — Apache License 2.0 / 한국어 모델 `sherpa-onnx-streaming-zipformer-korean-2024-06-16`, 원본 [icefall KsponSpeech 모델](https://huggingface.co/johnBamma/icefall-asr-ksponspeech-pruned-transducer-stateless7-streaming-2024-06-12) — Apache License 2.0. 이 음성 모델은 한국지능정보사회진흥원의 사업결과인 AI Hub 「한국어 음성」(KsponSpeech) 데이터로 학습됨(AI Hub 이용정책에 따른 출처 표기)
 - 주요 라이브러리(Gradle 의존성): Jetpack Compose(BOM 2024.09.03)·Material3·Activity Compose 1.9.3·Kotlin 1.9.25 — Apache License 2.0 / JUnit 4.13.2(테스트 전용) — Eclipse Public License 1.0
