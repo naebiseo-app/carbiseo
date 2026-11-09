@@ -282,6 +282,8 @@ export function parseSend(b: Record<string, unknown>) {
 // 문자 발송: Workers는 국외 IP라 ClawOps가 막는다 → 서울 중계로 {to, body}. 중계는 ClawOps 응답을 그대로 돌려준다.
 // 결과 code = ClawOps status(queued 등) | ClawOps code | 중계 error(unauthorized·bad_request) | http_xxx | relay_unreachable
 export async function relaySend(env: Pick<Env, "SMS_RELAY_URL" | "SMS_RELAY_SECRET">, to: string, body: string, f: typeof fetch = fetch) {
+  // 데모 일정 연락처(010-0000-000x, 개통되지 않는 번호대)는 실제로 보내지 않고 보낸 것으로만 기록한다(시연 촬영용)
+  if (/^0100000000\d$/.test(to.replace(/\D/g, ""))) return { ok: true, http: 200, code: "demo", message_id: null };
   try {
     const r = await f(env.SMS_RELAY_URL ?? "", {
       method: "POST",

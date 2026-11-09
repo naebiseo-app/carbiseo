@@ -22,3 +22,9 @@ test("문자 중계 실패: 비밀 틀림 401·ClawOps 오류 코드·중계 다
   const down = (async () => { throw new Error("net"); }) as unknown as typeof fetch;
   assert.deepEqual(await relaySend(env, "01012345678", "x", down), { ok: false, http: 0, code: "relay_unreachable", message_id: null });
 });
+
+test("문자 중계: 데모 번호(010-0000-000x)는 보내지 않고 demo로 ok", async () => {
+  const seen: any[] = [];
+  assert.deepEqual(await relaySend(env, "010-0000-0001", "x", mock(200, {}, seen)), { ok: true, http: 200, code: "demo", message_id: null });
+  assert.equal(seen.length, 0);
+});
