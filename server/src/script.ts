@@ -198,13 +198,11 @@ export function carChip(cc: Partial<CarCtx> & { eta_min?: number | null } | null
   ].filter(Boolean).join(" · ");
 }
 
-// SDK 값이 응대를 바꾼다: 오래 운전 중이면 급한 건도 메모로만(운전자에게 안 넘김).
+// SDK 값이 응대를 바꾼다. 운전 시간은 상대에게 말하지 않는다(11-10 촬영: AI가 피로 안내를 상대에게 하고 "지금 말씀드릴까요"를 상대에게 물음). 피로 판단은 차 쪽 안내만.
 // 동승자가 있으면 요약이 차 스피커로 들릴 수 있으니 짧게 받고, 동승자·{owner}님 개인정보는 말하지 않는다.
 export function ctxLine(cc: Partial<CarCtx> | null, room: Room): string {
   if (room === "PARK" || !cc) return "";
-  return ((cc.trip_min ?? 0) >= FATIGUE_MIN
-    ? " {owner}님이 두 시간 넘게 운전 중이셔서, 급한 건이라도 메모로 받아 두고 쉬실 때 연락드리도록 전해 드린다고 안내합니다."
-    : "") + (cc.passenger
+  return (cc.passenger
     ? " 지금 차에 동승자가 있어 전해 드리는 내용이 차 스피커로 들릴 수 있습니다. '지금 동승하신 분이 있어 용건은 짧게 남겨 주시면 따로 연락드리겠습니다'라고 안내하고, 민감한 내용은 자세히 묻지 않습니다. 동승자가 누구인지, {owner}님의 개인정보는 말하지 않습니다."
     : "");
 }

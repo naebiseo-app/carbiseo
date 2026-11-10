@@ -31,10 +31,10 @@ test("쓴 차량 데이터 칩", () => {
   assert.equal(carChip(null, nowMs), "");
 });
 
-test("두 시간 넘게 운전 중이면 대본이 바뀐다(주행 방만)", () => {
+test("운전 시간은 상대에게 말하지 않는다", () => {
   const base = pickScript("DRIVE_WORK", "주인").instruction;
   assert.equal(pickScript("DRIVE_WORK", "주인", undefined, null, "ai", null, { trip_min: 119 }).instruction, base);
-  assert.match(pickScript("DRIVE_WORK", "주인", undefined, null, "ai", null, { trip_min: 120 }).instruction, /두 시간 넘게 운전 중이셔서, 급한 건이라도 메모로/);
+  assert.doesNotMatch(pickScript("DRIVE_WORK", "주인", undefined, null, "ai", null, { trip_min: 120 }).instruction, /두 시간|운전 시간/);
   assert.doesNotMatch(pickScript("PARK", "주인", undefined, null, "ai", null, { trip_min: 300 }).instruction, /두 시간/);
 });
 
@@ -57,7 +57,7 @@ test("동승자가 있으면 짧게 받고 개인정보는 말하지 않는다(�
   assert.match(s, /동승하신 분이 있어 용건은 짧게/);
   assert.match(s, /김민수님의 개인정보는 말하지 않습니다/);
   assert.match(s, /약 12분 뒤 도착/);
-  assert.match(pickScript("DRIVE_WORK", "주인", undefined, null, "ai", null, { passenger: true, trip_min: 130 }).instruction, /두 시간.*동승/);
+  assert.match(pickScript("DRIVE_WORK", "주인", undefined, null, "ai", null, { passenger: true, trip_min: 130 }).instruction, /동승/);
   assert.doesNotMatch(pickScript("DRIVE_WORK", "주인", undefined, null, "ai", null, { passenger: false }).instruction, /동승/);
   assert.doesNotMatch(pickScript("PARK", "주인", undefined, null, "ai", null, { passenger: true }).instruction, /동승/);
   assert.doesNotMatch(pickScript("DRIVE_WORK", undefined, undefined, null, "ai", null, { passenger: true }).instruction, /\{owner\}/);
