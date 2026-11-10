@@ -196,7 +196,7 @@ async function transcriptCard(env: Env, raw: string) {
 // 지난 카드의 from_label은 넣지 않는다(틀린 이름이 다시 굳는다).
 export function namesFrom(contacts: unknown, schedule: unknown): string[] {
   const c = contacts && typeof contacts === "object" ? Object.keys(contacts) : [];
-  const ev = Array.isArray(schedule) ? schedule.flatMap((e: any) => [e?.title, e?.place]) : [];
+  const ev = Array.isArray(schedule) ? schedule.flatMap((e: any) => [e?.title, e?.place, e?.contact]) : [];
   return [...new Set([...c, ...ev].filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim().slice(0, 30)))].slice(0, 40);
 }
 async function hintNames(env: Env) {
