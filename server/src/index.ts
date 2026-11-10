@@ -3,6 +3,7 @@ import { adminPage, basicOk, demoSchedule, encodeReplay, parseFakeCall, replaySc
 import { FALLBACK, guardText, isBlocked } from "./guard.ts";
 import { connectGoogle, disconnectGoogle, googleStatus, syncCalendar, syncIfStale } from "./calendar.ts";
 import { parkingNear, type Lot } from "./parking.ts";
+import { syncDict } from "./sttdict.ts";
 import parkingLots from "./parking_lots.json" with { type: "json" };
 import { parseNotify, parseReply, TAKE_REPLIES_SQL, type Notif } from "./notif.ts";
 
@@ -820,6 +821,7 @@ export default {
       else if (!map.size) return json({ error: "no valid contacts" }, 400);
       else await env.DB.prepare("INSERT INTO kv(key,value,updated_at) VALUES('contacts',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
         .bind(JSON.stringify(Object.fromEntries(map)), now()).run();
+      ctx?.waitUntil(syncDict(env).catch(() => ""));
       return json({ ok: true, count: map.size });
     }
 
@@ -930,6 +932,8 @@ export default {
         await env.DB.prepare("INSERT OR REPLACE INTO kv(key,value,updated_at) VALUES('owner_as_guest',?,?)").bind(JSON.stringify(on), now()).run();
         return html(on ? "주인 번호를 손님으로 취급합니다(켜짐)" : "주인 번호는 주인 모드입니다(꺼짐)");
       }
+      // 받아쓰기 핫워드 사전을 지금 일정·연락처로 맞춘다(평소엔 매일 03시·연락처 올릴 때)
+      if (m === "POST" && pathname === "/admin/stt-dict") return html(`받아쓰기 사전 ${await syncDict(env)}`);
       // 품질 시험: 받아쓰기 대화문을 실제 요약 경로(참고 이름+자모 교정)에 넣어 결과만 돌려준다. 저장 안 함
       if (m === "POST" && pathname === "/admin/resummarize") {
         const fd = await req.formData(), dialog = String(fd.get("dialog") ?? "").slice(0, 4000);
@@ -977,6 +981,7 @@ export default {
   // 보관 정책: 웹훅 원문(raw)은 7일 뒤 비우고, 행 전체는 30일 뒤 삭제 (wrangler.toml crons, 매일 1회)
   async scheduled(_e: unknown, env: Env) {
     await syncCalendar(env, now()).catch(() => {});
+    console.log("stt dict", await syncDict(env).catch((e) => String(e)));
     for (const [sql, cut] of retention(now())) await env.DB.prepare(sql).bind(cut).run();
   },
 };
