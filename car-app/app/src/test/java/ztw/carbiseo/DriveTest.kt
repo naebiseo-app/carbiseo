@@ -266,6 +266,12 @@ class DriveTest {
         assertTrue(fatigued(Room.DRIVE_WORK, 120)); assertFalse(fatigued(Room.DRIVE_WORK, 119)); assertFalse(fatigued(Room.PARK, 300))
     }
 
+    @Test fun 직접_지정한_집_위치는_한_줄로_저장하고_읽는다() {
+        val l = LatLng(37.123456, 127.654321)
+        assertEquals(l, parseHome(homeText(l)))
+        assertEquals(null, parseHome(null)); assertEquals(null, parseHome("")); assertEquals(null, parseHome("37.1")); assertEquals(null, parseHome("a,b")); assertEquals(null, parseHome("1,2,3"))
+    }
+
     @Test fun 졸음_위험_경계값() {
         assertFalse(drowsyRisk(null, 3)); assertFalse(drowsyRisk(59, 3)); assertTrue(drowsyRisk(60, 3)); assertTrue(drowsyRisk(119, 3)) // 새벽엔 60분부터
         assertFalse(drowsyRisk(119, 10)); assertTrue(drowsyRisk(120, 10)); assertTrue(drowsyRisk(300, 20)) // 낮·저녁엔 120분부터

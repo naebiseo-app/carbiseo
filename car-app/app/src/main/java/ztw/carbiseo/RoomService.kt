@@ -644,6 +644,7 @@ class RoomService : Service() {
             val cd = p.getString("card_done", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
             val df = decodeDeferred(p.getString("deferred", "")); val fw = p.getBoolean("forward_ok", false)
             val fv = p.getString("fav_senders", "").orEmpty(); ui.post { favs = parseFavs(fv) }
+            val hm = parseHome(p.getString("home", null)); ui.post { if (hm != null && homeSrc.startsWith("기본값")) { machine.settings = machine.settings.copy(home = hm); homeSrc = "직접 지정" } } // 내비가 먼저 집을 줬으면 그쪽이 우선
             val fd = p.getLong("family_day", -1); ui.post { familyDay = fd }
             val pa = runCatching { Proactive.valueOf(p.getString("proactive", null) ?: "") }.getOrDefault(Proactive.NORMAL); ui.post { proactive = pa }
             val wo = p.getBoolean("wake_on", false); val wn = p.getString("wake_name", null)?.takeIf { validName(it) } ?: WAKE_DEFAULT_NAME; ui.post { wakeOn = wo; wakeName = wn }
@@ -688,6 +689,7 @@ class RoomService : Service() {
         }
         machine.onClockBack = { b -> driveStart = driveStart?.minus(b); parkedAt = parkedAt?.minus(b); Log.i("ROOM", "clock back ${b / 1000}s") } // 짧은 정차·trip_min이 음수가 되지 않게
         adapters = CarAdapters(applicationContext, machine).also { it.start() }
+        setHomeHere = { c -> machine.signals.location?.let { l -> machine.settings = machine.settings.copy(home = l); homeSrc = "직접 지정"; save(c) { putString("home", homeText(l)) }; true } ?: false }
         addHomeFavorite = { runCatching { adapters.navi?.requestNavigationScreen(NavigationScreenRequest.AddHomeFavorite) }.onFailure { Log.w("ROOM", "add home FAIL $it") } }
         searchInNavi = { q -> runCatching { adapters.navi?.requestNavigationScreen(NavigationScreenRequest.SearchPlace(q)) }.onFailure { Log.w("ROOM", "navi search FAIL $it") } }
         adapters.onNaviReady = { pendingRoute?.let { pendingRoute = null; Log.i("ROOM", "navi ready -> route"); it() } }
@@ -995,6 +997,7 @@ class RoomService : Service() {
         var passengerOffer by mutableStateOf(false) // C⑤ 조수석 착석 감지 → "동승자 모드로 바꿀까요?"
         var telltale by mutableStateOf<String?>(null); private set // C⑦ 빨간 경고등
         var homeSrc by mutableStateOf("기본값(내비 즐겨찾기 없음)") // C① 집 좌표 출처(설정 화면 표시)
+        var setHomeHere: ((Context) -> Boolean)? = null // 설정 [지금 위치를 집으로] → 현재 위치를 집으로(위치를 모르면 false). 서비스가 살아 있을 때만 있다
         var addHomeFavorite: (() -> Unit)? = null // C① 설정 화면 버튼 → 내비 '집 즐겨찾기 추가' 화면
         var searchInNavi: ((String) -> Unit)? = null // O4: 가게 번호를 못 찾은 예약 카드 → 내비 장소 검색 화면(내비 상세에서 바로 전화)
         // 폰 알림(35): 쉼 방에도 바로 알릴 발신자(설정, 기본 빈 목록), 대답 대기 단계·듣는 중·화면 버튼 허용(P·저속)·음성 경로

@@ -1108,6 +1108,7 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
         }
         Text("집 위치: ${RoomService.homeSrc}", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         OutlinedButton({ RoomService.addHomeFavorite?.invoke() }, Tall) { Text("내비 즐겨찾기에 집 추가", color = ParkInk, fontSize = 18.sp) }
+        OutlinedButton({ toast(ctx, if (RoomService.setHomeHere?.invoke(ctx) == true) "지금 위치를 집으로 저장했어요" else "위치를 아직 못 받았어요") }, Tall) { Text("지금 위치를 집으로", color = ParkInk, fontSize = 18.sp) }
         var favText by rememberSaveable { mutableStateOf(RoomService.favs.joinToString(", ")) }
         OutlinedTextField(favText, { favText = it.take(100); RoomService.favs = parseFavs(favText); prefs.edit().putString("fav_senders", favText).apply() },
             Modifier.fillMaxWidth(), singleLine = true, label = { Text("업무 시간 밖에도 바로 읽을 알림 보낸이", fontSize = 18.sp) },

@@ -462,6 +462,10 @@ class DrowsyCheck {
 
 const val TELLTALE_SPEECH = "계기판에 빨간 경고등이 켜졌어요. 안전한 곳에 세운 뒤 확인해 주세요"
 
+/** 설정 "지금 위치를 집으로": prefs에는 "위도,경도" 한 줄로 저장. 모양이 틀리면 null. */
+fun homeText(l: LatLng) = "${l.lat},${l.lng}"
+fun parseHome(t: String?): LatLng? = t?.split(",")?.takeIf { it.size == 2 }?.let { (a, b) -> a.toDoubleOrNull()?.let { la -> b.toDoubleOrNull()?.let { lo -> LatLng(la, lo) } } }
+
 /** C① 내비 즐겨찾기 '집'이 없을 때: 최근 목적지 중 이름이 '집'·'우리집'·'home'인 곳(꽃집·옷집 같은 가게는 제외). */
 private val HOME_NAME = Regex("""^\s*((우리\s*)?집|(my\s*)?home)\s*$""", RegexOption.IGNORE_CASE)
 fun homeFromRecent(recents: List<Pair<String?, LatLng>>): LatLng? = recents.firstOrNull { HOME_NAME.matches(it.first.orEmpty()) }?.second
