@@ -284,8 +284,8 @@ class DriveTest {
         val d = DrowsyCheck()
         assertFalse(d.due(0)) // 아직 확인한 적 없음 = 여는 말(mark) 전엔 때가 아님
         d.mark(0); assertFalse(d.due(DROWSY_CHECK_MS - 1)); assertTrue(d.due(DROWSY_CHECK_MS))
-        assertEquals(Drowsy.FINE, d.result(4_000)) // 4.0초는 정상
-        assertEquals(Drowsy.WATCH, d.result(4_100)) // 4.1초는 느림 1번
+        assertEquals(Drowsy.FINE, d.result(6_000)) // 6.0초는 정상
+        assertEquals(Drowsy.WATCH, d.result(6_100)) // 6.1초는 느림 1번
         assertEquals(Drowsy.FINE, d.result(1_000)) // 정상이면 카운터 0
         assertEquals(Drowsy.WATCH, d.result(null)); assertEquals(Drowsy.ALERT, d.result(9_000)) // 무응답 + 느림 = 연속 2번
         d.mark(0); assertFalse(d.due(DROWSY_RETRY_MS - 1)); assertTrue(d.due(DROWSY_RETRY_MS)) // 의심이면 5분 간격

@@ -432,7 +432,7 @@ fun fatigued(room: Room?, tripMin: Int?): Boolean = room != null && room != Room
  */
 const val DROWSY_CHECK_MS = 15 * 60_000L
 const val DROWSY_RETRY_MS = 5 * 60_000L // 졸음 의심이면 5분마다 다시
-const val DROWSY_SLOW_MS = 4_000L // 이보다 늦게 대답하면 '느림'
+const val DROWSY_SLOW_MS = 6_000L // 듣기 시작~인식 결과까지(말하는 시간·인식 지연 약 2초 포함) 이보다 늦으면 '느림'
 fun drowsyRisk(tripMin: Int?, hour: Int): Boolean = tripMin != null && (tripMin >= FATIGUE_MIN || tripMin >= 60 && (hour in 2..5 || hour in 14..15))
 const val DROWSY_OPEN_SPEECH = "운전이 길어졌어요. 졸리면 말 걸어 주세요, 이야기 상대 해 드릴게요."
 const val DROWSY_ASK = "졸리진 않으세요? 한 마디만 대답해 주세요."

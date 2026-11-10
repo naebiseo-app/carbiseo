@@ -596,7 +596,7 @@ class RoomService : Service() {
                 } }
             }
             // 도착 10분 전: 그 일정 장소로 가는 중이면 일정마다 한 번 "곧 도착해요". 동승자·피로 모드에선 말하지 않는다. 지각 질문이 나간 일정은 건너뜀(arriveBrief)
-            if (machine.room == Room.DRIVE_WORK && !passenger && !fatigued(machine.room, tripMin()) && canAsk())
+            if (machine.room == Room.DRIVE_WORK && !passenger && canAsk())
                 nextEvent(schedule, System.currentTimeMillis())?.let { ev -> arriveBrief(ev, machine.signals.destination, e, arriveSaid, lateAsked, clock.zone)?.let { sp ->
                     arriveSaid += ev.start; val z = arriveSaid.sorted().takeLast(50).joinToString(","); net.execute { prefs.edit().putString("arrive_said", z).apply() }; say(sp) } }
             // O4: 식당·카페류 목적지로 출발하면 한 번 "몇 분으로 예약할까요?"(업무·쉼 방 상관없이)
@@ -644,7 +644,7 @@ class RoomService : Service() {
             val cd = p.getString("card_done", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
             val df = decodeDeferred(p.getString("deferred", "")); val fw = p.getBoolean("forward_ok", false)
             val fv = p.getString("fav_senders", "").orEmpty(); ui.post { favs = parseFavs(fv) }
-            val hm = parseHome(p.getString("home", null)); ui.post { if (hm != null && homeSrc.startsWith("기본값")) { machine.settings = machine.settings.copy(home = hm); homeSrc = "직접 지정" } } // 내비가 먼저 집을 줬으면 그쪽이 우선
+            val hm = parseHome(p.getString("home", null)); ui.post { if (hm != null) { machine.settings = machine.settings.copy(home = hm); homeSrc = "직접 지정" } } // 직접 지정한 집이 내비 즐겨찾기보다 우선
             val fd = p.getLong("family_day", -1); ui.post { familyDay = fd }
             val pa = runCatching { Proactive.valueOf(p.getString("proactive", null) ?: "") }.getOrDefault(Proactive.NORMAL); ui.post { proactive = pa }
             val wo = p.getBoolean("wake_on", false); val wn = p.getString("wake_name", null)?.takeIf { validName(it) } ?: WAKE_DEFAULT_NAME; ui.post { wakeOn = wo; wakeName = wn }

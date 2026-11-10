@@ -293,15 +293,16 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
                 val o = ok.firstOrNull { it.category == BookmarkType.OFFICE }
                 Log.i(TAG, "bookmarks n=${l.size} ${l.map { it.category }} home=${h != null} office=${o != null}")
                 ui.post {
-                    m.settings = m.settings.copy(home = h?.let { LatLng(it.latitude, it.longitude) } ?: m.settings.home, office = o?.let { LatLng(it.latitude, it.longitude) })
-                    if (h != null) RoomService.homeSrc = "내비 즐겨찾기 '집'"
+                    val mine = RoomService.homeSrc == "직접 지정" // 운전자가 설정에서 고른 집이 내비·최근 목적지보다 우선
+                    m.settings = m.settings.copy(home = h?.takeUnless { mine }?.let { LatLng(it.latitude, it.longitude) } ?: m.settings.home, office = o?.let { LatLng(it.latitude, it.longitude) })
+                    if (h != null && !mine) RoomService.homeSrc = "내비 즐겨찾기 '집'"
                 }
                 if (h == null) runCatching { n.getRecentDestinationInfo() }.onFailure { Log.w(TAG, "recent FAIL $it") }
             }
             override fun onRecentDestinationInfo(l: List<RecentDestinationInfo>) {
                 val h = homeFromRecent(l.map { it.name to LatLng(it.latitude, it.longitude) })
                 Log.i(TAG, "recent n=${l.size} home=${h != null}")
-                if (h != null) ui.post { m.settings = m.settings.copy(home = h); RoomService.homeSrc = "최근 목적지 '집'" }
+                if (h != null) ui.post { if (RoomService.homeSrc != "직접 지정") { m.settings = m.settings.copy(home = h); RoomService.homeSrc = "최근 목적지 '집'" } }
             }
             override fun onTripInfo(i: TripInfo) { Log.i(TAG, "trip eta=${i.eta} dist=${i.distance}"); ui.post { tripEta = i.eta / 60 } }
             override fun onBookMarkChanged() { n.getBookmarkInfo() }
