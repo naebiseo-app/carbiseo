@@ -49,3 +49,9 @@ test("상태 통지: 끝난 통화만 받아쓰기 대상(폼·JSON)", () => {
   assert.equal(statusDone("CallStatus=answered&CallId=CAe210942f21a47ab8e7eb36072fff5480"), null);
   assert.equal(statusDone("CallStatus=completed&CallId=../x"), null);
 });
+
+test("요약 참고 이름: 연락처·일정 제목·장소만, 중복·빈 값 제외", async () => {
+  const { namesFrom } = await import("../src/index.ts");
+  assert.deepEqual(namesFrom({ 이지은: "x", "우리딸 ❤": "y" }, [{ title: "한빛물산 미팅", place: "한빛물산" }, { title: "한빛물산 미팅" }, { title: " " }]), ["이지은", "우리딸 ❤", "한빛물산 미팅", "한빛물산"]);
+  assert.deepEqual(namesFrom(null, null), []);
+});

@@ -105,7 +105,7 @@ async function saveCallCard(db: D1Database, c: Card, extra: object = {}, from = 
   if (ringId) await db.prepare("DELETE FROM inbox WHERE id=?").bind(ringId).run();
 }
 
-const SUMMARY_SYSTEM = "전화 받아쓰기를 운전자가 볼 메모로 정리합니다. 받아쓰기에 있는 내용만 쓰고, 상대가 말하지 않은 것은 없다고도 쓰지 않습니다. 연락 시각을 말했으면 summary에 반드시 넣습니다. '아, 네' 같은 맞장구는 이름이 아니고, 비서가 되읽어 상대가 고친 이름이 있으면 고친 이름을 씁니다. JSON 한 줄만 답합니다: {\"caller\":\"상대 이름·소속, 없으면 빈 문자열\",\"summary\":\"존댓말 한두 문장. 예: 김민수 님이 미팅 변경 건으로 전화하셨고 3시까지 연락을 부탁하셨어요. 자료도 보내 달라고 하셨어요.\",\"callback_by\":\"상대가 말한 연락 시각 표현 그대로(예: 3시까지), 없으면 빈 문자열\"}";
+const SUMMARY_SYSTEM = "전화 받아쓰기를 운전자가 볼 메모로 정리합니다. 받아쓰기에 있는 내용만 쓰고, 상대가 말하지 않은 것은 없다고도 쓰지 않습니다. 연락 시각을 말했으면 summary에 반드시 넣습니다. '아, 네' 같은 맞장구는 이름이 아니고, 비서가 되읽어 상대가 고친 이름이 있으면 고친 이름을 씁니다. 전화 받아쓰기는 상호·이름을 비슷한 소리의 다른 말로 자주 틀립니다. 맨 끝 [참고 이름 목록]에 발음이 비슷한 이름이 있으면 그 이름으로 고쳐 쓰고(예: 받아쓰기 '한비 물산' → 목록 '한빛물산'), 비슷한 것이 없으면 받아쓰기 그대로 씁니다. 같은 식으로 문맥상 어색한 용건 낱말은 발음이 비슷한 흔한 업무 낱말로 고칩니다(예: '공적 사건' → '견적 건'). JSON 한 줄만 답합니다: {\"caller\":\"상대 이름·소속, 없으면 빈 문자열\",\"summary\":\"존댓말 한두 문장. 예: 김민수 님이 미팅 변경 건으로 전화하셨고 3시까지 연락을 부탁하셨어요. 자료도 보내 달라고 하셨어요.\",\"callback_by\":\"상대가 말한 연락 시각 표현 그대로(예: 3시까지), 없으면 빈 문자열\"}";
 
 const RESERVE_SYSTEM = "AI 비서가 식당·가게에 건 예약 문의 전화 받아쓰기를 운전자가 볼 결과로 정리합니다. 받아쓰기에 있는 내용만 쓰고 없는 내용은 지어내지 않습니다. status는 가게가 예약을 확정했다고 분명히 말했을 때만 ok이고(예약 질문에 '그러세요'·'오세요'로 답한 것도 확정입니다), 안 된다·모르겠다·나중에·직접 연락 같은 말이거나 확정이 불분명하면 need_manual입니다. parking은 가게가 주차 가능이라고 하면 가능, 안 된다고 하면 불가, 말이 없거나 불분명하면 모름입니다. summary는 존댓말 한 문장이고 전화번호는 쓰지 않습니다. JSON 한 줄만 답합니다: {\"status\":\"ok|need_manual\",\"summary\":\"예: 18:30 4명 예약이 확정됐어요. 주차는 가능하대요.\",\"parking\":\"가능|불가|모름\"}";
 
@@ -192,6 +192,17 @@ async function transcriptCard(env: Env, raw: string) {
   } catch (e) { console.log("recording delete error", String(e)); }
 }
 
+// 전화 받아쓰기는 낯선 상호를 자주 틀린다(11-10 '한빛물산'류 상호 → '세금 상사'). 주인 연락처·일정에 있는 이름을 요약 단계에 참고로 준다.
+// 지난 카드의 from_label은 넣지 않는다(틀린 이름이 다시 굳는다).
+export function namesFrom(contacts: unknown, schedule: unknown): string[] {
+  const c = contacts && typeof contacts === "object" ? Object.keys(contacts) : [];
+  const ev = Array.isArray(schedule) ? schedule.flatMap((e: any) => [e?.title, e?.place]) : [];
+  return [...new Set([...c, ...ev].filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim().slice(0, 30)))].slice(0, 40);
+}
+async function hintNames(env: Env) {
+  return namesFrom(await kvGet(env.DB, "contacts"), await kvGet(env.DB, "schedule"));
+}
+
 // 요약을 저장했으면 true(이미 처리된 재전송·무관한 이벤트·요약 실패는 false)
 async function transcriptWork(env: Env, raw: string): Promise<boolean> {
   const f = new URLSearchParams(raw), id = f.get("CallId") ?? "", from = f.get("From") ?? "";
@@ -223,7 +234,10 @@ async function transcriptWork(env: Env, raw: string): Promise<boolean> {
         .bind(parseRoom(cc?.room) ?? null, id, guardText("summary", String(t)), now()).run();
     return true;
   }
-  const memo = said ? await summarizeCall(env.ANTHROPIC_API_KEY, SUMMARY_SYSTEM, dialog) : null;
+  const names = await hintNames(env);
+  const memo = said ? await summarizeCall(env.ANTHROPIC_API_KEY, SUMMARY_SYSTEM, names.length ? `${dialog}
+
+[참고 이름 목록] ${names.join(", ")}` : dialog) : null;
   const summary = memo?.summary || (said ? `상대 말: ${said}` : "말씀 없이 끊긴 전화예요");
   const cols = fromCols(from), who = String(memo?.caller ?? "").replace(/["'`{}]/g, "").slice(0, 40);
   await saveCallCard(env.DB, { call_id: id, ...cols, from_label: who || cols.from_label, summary, urgent: isUrgent(`${summary} ${said}`) ? 1 : 0 },
