@@ -83,7 +83,7 @@ fun voiceCmd(said: String?): Cmd {
     if ("답장" in s) return REPLY.find(s)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }?.let { Cmd.Reply(it) } ?: Cmd.Unknown
     val n = s.replace(Regex("""[\s.,!?]"""), "")
     return when {
-        listOf("아니", "취소", "하지마", "보내지마", "됐어", "닫").any { it in n } -> Cmd.No
+        listOf("아니", "취소", "하지마", "보내지마", "됐어", "닫", "그만").any { it in n } -> Cmd.No
         "나중" in n || "이따" in n -> Cmd.Later
         "읽어" in n -> Cmd.Read
         listOf("응", "네", "예", "그래", "좋아", "보내", "오케이").any { n.startsWith(it) } -> Cmd.Yes

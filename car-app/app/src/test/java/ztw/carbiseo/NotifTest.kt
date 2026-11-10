@@ -37,6 +37,7 @@ class NotifTest {
         assertEquals(Cmd.Read, voiceCmd("읽어줘"))
         assertEquals(Cmd.Read, voiceCmd("응 읽어 줘"))
         assertEquals(Cmd.Later, voiceCmd("나중에"))
+        assertEquals(Cmd.No, voiceCmd("그만"))
         assertEquals(Cmd.Later, voiceCmd("이따 봐"))
         assertEquals(Cmd.Yes, voiceCmd("응"))
         assertEquals(Cmd.Yes, voiceCmd("네, 보내 주세요"))
