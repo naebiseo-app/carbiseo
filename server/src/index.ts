@@ -199,6 +199,25 @@ export function namesFrom(contacts: unknown, schedule: unknown): string[] {
   const ev = Array.isArray(schedule) ? schedule.flatMap((e: any) => [e?.title, e?.place, e?.contact]) : [];
   return [...new Set([...c, ...ev].filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim().slice(0, 30)))].slice(0, 40);
 }
+// 요약 AI가 고치지 못한 상호를 글자 모양(자모)으로 한 번 더 맞춘다. 11-10 실측: '황빛물산'→한빛물산(0.83), '세금 상사'→새봄상사(0.75).
+// ponytail: 4글자 이상 한글 이름만, 같은 길이 창만 본다. 사람 이름(3글자)은 오교정 위험이 커서 뺀다.
+function jamo(ch: string) { const i = ch.charCodeAt(0) - 0xac00; return i < 0 || i > 11171 ? [ch, "", ""] : [String(i / 588 | 0), String(i % 588 / 28 | 0), String(i % 28)]; }
+export function fixNames(text: string, names: string[]): string {
+  const cands = [...new Set(names.flatMap((n) => n.split(/\s+/)).filter((w) => /^[가-힣]{4,}$/.test(w)))];
+  for (const name of cands) {
+    const n = name.length, re = new RegExp(`^[가-힣](?:\\s?[가-힣]){${n - 1}}`);
+    let out = "";
+    for (let i = 0; i < text.length;) { // 한 글자씩 밀며 본다(창이 겹쳐도 놓치지 않게)
+      const win = re.exec(text.slice(i))?.[0];
+      const w = win?.replace(/\s/g, "") ?? "";
+      let hit = 0;
+      if (win) for (let k = 0; k < n; k++) { const x = jamo(w[k]), y = jamo(name[k]); hit += +(x[0] === y[0]) + +(x[1] === y[1]) + +(x[2] === y[2]); }
+      if (win && hit / (3 * n) >= 0.75) { out += name; i += win.length; } else { out += text[i]; i++; }
+    }
+    text = out;
+  }
+  return text;
+}
 async function hintNames(env: Env) {
   return namesFrom(await kvGet(env.DB, "contacts"), await kvGet(env.DB, "schedule"));
 }
@@ -238,8 +257,8 @@ async function transcriptWork(env: Env, raw: string): Promise<boolean> {
   const memo = said ? await summarizeCall(env.ANTHROPIC_API_KEY, SUMMARY_SYSTEM, names.length ? `${dialog}
 
 [참고 이름 목록] ${names.join(", ")}` : dialog) : null;
-  const summary = memo?.summary || (said ? `상대 말: ${said}` : "말씀 없이 끊긴 전화예요");
-  const cols = fromCols(from), who = String(memo?.caller ?? "").replace(/["'`{}]/g, "").slice(0, 40);
+  const summary = fixNames(memo?.summary || (said ? `상대 말: ${said}` : "말씀 없이 끊긴 전화예요"), names);
+  const cols = fromCols(from), who = fixNames(String(memo?.caller ?? ""), names).replace(/["'`{}]/g, "").slice(0, 40);
   await saveCallCard(env.DB, { call_id: id, ...cols, from_label: who || cols.from_label, summary, urgent: isUrgent(`${summary} ${said}`) ? 1 : 0 },
     { via: "transcript", caller: who, callback_by: String(memo?.callback_by ?? "").slice(0, 50) }, from);
   return !said || !!memo; // 요약 실패면 녹음을 남긴다

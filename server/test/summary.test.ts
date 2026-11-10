@@ -55,3 +55,13 @@ test("요약 참고 이름: 연락처·일정 제목·장소만, 중복·빈 값
   assert.deepEqual(namesFrom({ 이지은: "x", "우리딸 ❤": "y" }, [{ title: "한빛물산 미팅", place: "한빛물산" }, { title: "한빛물산 미팅" }, { title: " " }]), ["이지은", "우리딸 ❤", "한빛물산 미팅", "한빛물산"]);
   assert.deepEqual(namesFrom(null, null), []);
 });
+
+test("상호 자모 교정: 11-10 실측 오인식만 고치고 다른 말은 그대로", async () => {
+  const { fixNames } = await import("../src/index.ts");
+  const names = ["한빛물산 납품 미팅", "새봄상사 견적 상담", "김민수 과장", "판교역"];
+  assert.equal(fixNames("황빛물산에서 급한 건으로 연락 주셨어요.", names), "한빛물산에서 급한 건으로 연락 주셨어요.");
+  assert.equal(fixNames("세금 상사에서 전화하셨어요.", names), "새봄상사에서 전화하셨어요.");
+  assert.equal(fixNames("새봄 상사에서 전화하셨어요.", names), "새봄상사에서 전화하셨어요.");
+  assert.equal(fixNames("대한상사 박도윤 님이 회의 시간을 물으셨어요.", names), "대한상사 박도윤 님이 회의 시간을 물으셨어요.");
+  assert.equal(fixNames("오늘 중으로 다시 받아 보고 싶다고 하셨어요.", names), "오늘 중으로 다시 받아 보고 싶다고 하셨어요.");
+});
