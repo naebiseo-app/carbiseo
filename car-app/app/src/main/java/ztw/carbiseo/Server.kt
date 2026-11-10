@@ -74,7 +74,7 @@ object Server {
 
     /** H1 집 문턱: 가족에게 도착 예상 문자(서버가 번호 없으면 skipped). 결과 문자열은 로그용. */
     fun postFamilyEta(etaMin: Int): String =
-        postJson("/car/family-eta", JSONObject().put("eta_min", etaMin))?.let { if (it.optBoolean("skipped")) "skipped" else if (it.optBoolean("ok")) "ok" else it.str("code").ifEmpty { it.str("error") } } ?: "FAIL"
+        postJson("/car/family-eta", JSONObject().put("eta_min", etaMin))?.let { if (it.has("skipped")) "skipped:${it.str("skipped")}" else if (it.optBoolean("ok")) "ok" else it.str("code").ifEmpty { it.str("error") } } ?: "FAIL"
 
     /** O2 확인된 메일 발송. 결과는 send와 같은 규칙("ok" 또는 코드, 네트워크 실패면 null). */
     fun mail(to: String, subject: String, body: String): String? =
