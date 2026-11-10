@@ -261,13 +261,8 @@ class DriveTest {
         assertEquals("가장 가까운 기흥휴게소로 길 안내를 시작해요", restStopSpeech(stop, false))
     }
 
-    // S1: 피로 중 [말하기]는 급해·화장실만 통과. 피로가 아니면 전부 통과.
-    @Test fun 피로_중_업무_말은_거절_급해요와_잡담은_통과() {
-        for (said in listOf("아까 전화 뭐 왔어", "다음 일정 알려줘")) assertEquals(FATIGUE_BLOCK_SPEECH, fatigueGate(carIntent(said), true))
-        for (said in listOf("문자 보내줘", "심심한데 얘기하자", "음", null)) assertEquals(null, fatigueGate(carIntent(said), true)) // 잡담(UNKNOWN)은 졸음 방지용으로 통과
-        assertEquals(null, fatigueGate(carIntent("급해요"), true)); assertEquals(null, fatigueGate(carIntent("화장실 어디야"), true))
-        for (said in listOf("아까 전화 뭐 왔어", "다음 일정 알려줘", "음")) assertEquals(null, fatigueGate(carIntent(said), false))
-        assertEquals("업무는 쉬고 나서 하고, 급하면 '화장실'이나 '급해'라고 말씀하세요.", FATIGUE_BLOCK_SPEECH)
+    // 피로 모드는 전화·업무 말을 막지 않는다(fatigueGate 삭제). 기준 판정만 남김.
+    @Test fun 피로_기준은_주행_중_120분() {
         assertTrue(fatigued(Room.DRIVE_WORK, 120)); assertFalse(fatigued(Room.DRIVE_WORK, 119)); assertFalse(fatigued(Room.PARK, 300))
     }
 
@@ -281,7 +276,6 @@ class DriveTest {
         assertEquals(listOf("FD6", "CE7", "OL7", "CS2"), NearKind.values().map { it.code })
         assertEquals(CarIntent.NEARBY, carIntent("배고파")); assertEquals(CarIntent.RESERVE, carIntent("두 명 예약해 줘")); assertEquals(CarIntent.NEXT_EVENT, carIntent("오늘 일정"))
         assertEquals("근처 식당 찾아드릴까요?", nearAskSpeech(NearKind.FOOD)); assertEquals("근처 카페 찾아드릴까요?", nearAskSpeech(NearKind.CAFE)); assertEquals("근처 주유소 찾아드릴까요?", nearAskSpeech(NearKind.GAS))
-        assertEquals(null, fatigueGate(CarIntent.NEARBY, true))
     }
 
     @Test fun 점심_저녁_시간대는_양_끝_포함() {
@@ -305,7 +299,7 @@ class DriveTest {
         assertEquals("3층", parkMemo("3층에 주차했어")); assertEquals("A구역", parkMemo("주차는 A구역"))
         assertEquals(null, parkMemo("2층")); assertEquals(null, parkMemo("주차했어")); assertEquals(null, parkMemo("답장 주차 2층이라고 해줘")); assertEquals(null, parkMemo(null))
         assertEquals(CarIntent.PARK_MEMO, carIntent("주차 지하 2층 C구역")); assertEquals(CarIntent.UNKNOWN, carIntent("2층"))
-        assertEquals(CarIntent.NEARBY, carIntent("배고파")); assertEquals(null, fatigueGate(CarIntent.PARK_MEMO, false))
+        assertEquals(CarIntent.NEARBY, carIntent("배고파"))
     }
 
     @Test fun 근처_찾은_가게_문장은_미터와_킬로미터로_읽는다() {
@@ -322,11 +316,6 @@ class DriveTest {
         assertEquals(null, pickNear(listOf(behind), loc, dest))
         assertEquals(behind, pickNear(listOf(far, behind, front), loc, null)) // 목적지를 모르면 가장 가까운 곳
         assertEquals(null, pickNear(emptyList(), loc, null))
-    }
-
-    @Test fun 피로_중에도_못_알아들은_말_UNKNOWN은_막지_않는다() {
-        assertEquals(null, fatigueGate(CarIntent.UNKNOWN, true))
-        assertEquals(FATIGUE_BLOCK_SPEECH, fatigueGate(CarIntent.RECENT_CALLS, true)); assertEquals(FATIGUE_BLOCK_SPEECH, fatigueGate(CarIntent.NEXT_EVENT, true))
     }
 
     @Test fun 휴식_제안_아니라고_하면_30분_쉰다() {
@@ -478,7 +467,6 @@ class DriveTest {
         for (s in listOf("두 명 예약해 줘", "예약해 줘", "저녁 예약 좀")) assertEquals(s, CarIntent.RESERVE, carIntent(s))
         assertEquals(CarIntent.URGENT, carIntent("급해요 예약은 나중에")); assertEquals(CarIntent.RECENT_CALLS, carIntent("아까 전화 예약 건이야"))
         assertEquals(CarIntent.NEXT_EVENT, carIntent("다음 일정 알려줘"))
-        assertEquals(FATIGUE_BLOCK_SPEECH, fatigueGate(CarIntent.RESERVE, true)); assertEquals(null, fatigueGate(CarIntent.RESERVE, false))
     }
 
     @Test fun 예약_전화_문구와_결과_음성() {
@@ -534,8 +522,6 @@ class DriveTest {
         for (t in listOf("주차 자리 있어?", "주차장 어디야", "주차장 3층 자리 있어?")) assertEquals(t, null, parkMemo(t))
         for (t in listOf("주차 지하 2층 C구역", "주차했어", "2층", "답장 주차 돼냐고 해줘", "")) assertFalse(t, parkingWish(t))
         assertEquals(CarIntent.RESERVE, carIntent("주차 가능한 식당 예약해 줘")); assertEquals(CarIntent.UNKNOWN, carIntent("답장 주차 돼냐고 해줘")); assertEquals(CarIntent.NEARBY, carIntent("배고파"))
-        // 피로 모드: 예약·일정 같은 업무 말과 같이 한 문장 거절, 켜지지 않았으면 통과
-        assertEquals(FATIGUE_BLOCK_SPEECH, fatigueGate(CarIntent.PARKING, true)); assertEquals(null, fatigueGate(CarIntent.PARKING, false))
     }
 
     @Test fun 주차_결과는_한_문장으로_말한다() {

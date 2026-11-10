@@ -419,16 +419,12 @@ fun busyManeuver(turn: Boolean, gear: Gear, steerDeg: Float?): Boolean =
 fun greenSoon(left: Int, gear: Gear, speedKmh: Float?, busy: Boolean): Boolean =
     left in 0..5 && gear == Gear.DRIVE && (speedKmh ?: 0f) < 1f && !busy
 
-/** C② 피로 모드: 트립 주행시간이 기준 이상이면 전화 알림은 전부 보관(음성 없음). */
+/** C② 피로 모드: 트립 주행시간이 기준 이상이면 휴게소 안내만 더한다(전화·업무 말은 막지 않는다 — 말을 계속 하는 게 졸음 방지). */
 const val FATIGUE_MIN = 120
 // H10: D에선 시스템이 앱 화면을 가려 버튼이 안 보인다 → 주행 중엔 누르라고 하지 않는다. 버튼 안내는 P에서만.
 fun fatigueSpeech(gear: Gear): String =
     if (gear == Gear.PARK) "두 시간째 운전 중이에요, 쉬어 가시려면 휴게소 버튼을 누르세요." else "두 시간째 운전 중이에요, 다음 휴게소에서 쉬어 가세요."
 fun fatigued(room: Room?, tripMin: Int?): Boolean = room != null && room != Room.PARK && (tripMin ?: 0) >= FATIGUE_MIN
-
-/** S1 피로 중 [말하기]: 급해·화장실(Q3)과 잡담(UNKNOWN, 졸음 방지)은 통과, 전화·일정 같은 업무 말은 실행하지 않고 이 한 문장으로 거절. */
-const val FATIGUE_BLOCK_SPEECH = "업무는 쉬고 나서 하고, 급하면 '화장실'이나 '급해'라고 말씀하세요."
-fun fatigueGate(intent: CarIntent, fatigued: Boolean): String? = if (fatigued && intent != CarIntent.URGENT && intent != CarIntent.NEARBY && intent != CarIntent.UNKNOWN) FATIGUE_BLOCK_SPEECH else null
 
 const val TELLTALE_SPEECH = "계기판에 빨간 경고등이 켜졌어요. 안전한 곳에 세운 뒤 확인해 주세요"
 

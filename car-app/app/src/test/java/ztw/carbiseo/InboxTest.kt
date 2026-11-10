@@ -161,18 +161,6 @@ class InboxTest {
         assertNull(mailDraft("메일: / 제목 / 내용"))                           // 받는 사람 없음
     }
 
-    @Test fun 바로_연결_전화는_피로여도_한_줄로_읽는다() {
-        val d = item(1, urgent = true, label = "김민수", summary = "견적 확인 부탁")
-        assertEquals("바로 연결: 김민수님 전화, 용건 견적 확인 부탁.", directSpeech(listOf(d)))
-        assertEquals("바로 연결: 김민수님 전화, 용건 견적 확인 부탁.", directSpeech(listOf(item(1, label = "김민수", summary = "견적 확인 부탁").copy(direct = true)))) // meta.direct만 있어도
-        assertEquals("바로 연결: 알 수 없는 번호님 전화.", directSpeech(listOf(item(2, urgent = true, label = " ", summary = ""))))
-        assertEquals(2, directSpeech(listOf(d, item(3, urgent = true, label = "박", summary = "급함")))!!.split("바로 연결").size - 1)
-        assertNull(directSpeech(listOf(item(4)))) // 일반 부재중은 피로에 읽지 않는다
-        assertNull(directSpeech(listOf(d.copy(kind = "hint"))))
-        assertNull(directSpeech(listOf(d), "off"))
-        assertEquals("바로 연결: 김민수님 전화, 용건 견적 확인 부탁.", directSpeech(listOf(d, d)))  // 같은 id는 한 번
-    }
-
     @Test fun 퇴근길도_direct_카드는_읽는다() {
         assertEquals("급한 전화 한 건, AI가 용건을 받아 두었습니다.", speechFor(listOf(item(1), item(2).copy(direct = true)), Room.DRIVE_REST))
     }
@@ -221,7 +209,6 @@ class InboxTest {
         assertNull(replaceSpeech(listOf(sum), Room.DRIVE_WORK, "off"))
         assertNull(replaceSpeech(listOf(other, ring), Room.DRIVE_WORK))                 // 교체가 아닌 카드는 해당 없음
         assertNull(replaceSpeech(listOf(sum.copy(summary = " ")), Room.DRIVE_WORK))      // 요약이 비면 말할 게 없다
-        assertEquals("박대리님 전화, 용건 회의 끝나면 연락 부탁.".let { "바로 연결: $it" }, directSpeech(listOf(other.copy(direct = true), sum).filter { it.replaces == 0L }))
     }
 
     @Test fun 할일_카드_화면문장은_번호를_빼고_보여준다() {

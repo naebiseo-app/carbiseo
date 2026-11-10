@@ -87,7 +87,7 @@ fun mailDraft(text: String): Triple<String, String, String>? {
 /** 서버가 ringing 카드를 요약 카드로 교체한 항목들이 가리키는 옛 카드 id들. 차는 이 카드를 inbox·callFresh·seen 등에서 뺀다. */
 fun replacedIds(items: List<InboxItem>): Set<Long> = items.mapNotNull { it.replaces.takeIf { r -> r > 0 } }.toSet()
 
-/** 교체 요약 카드는 일반 새 전화 문장(speechFor·directSpeech)으로 다시 읽지 않고, 업무·쉼 운전 중에만 "○○님 전화 요약: …" 한 문장씩(최대 3). 끔 모드·정차·판정 전은 카드만. */
+/** 교체 요약 카드는 일반 새 전화 문장(speechFor)으로 다시 읽지 않고, 업무·쉼 운전 중에만 "○○님 전화 요약: …" 한 문장씩(최대 3). 끔 모드·정차·판정 전은 카드만. */
 fun replaceSpeech(items: List<InboxItem>, room: Room?, mode: String = "ai"): String? {
     if (mode == "off" || (room != Room.DRIVE_WORK && room != Room.DRIVE_REST)) return null
     val d = items.filter { it.kind == "call" && it.replaces > 0 && it.summary.isNotBlank() }.distinctBy { it.id }.take(3)
@@ -127,14 +127,6 @@ fun speechFor(items: List<InboxItem>, room: Room?, mode: String = "ai"): String?
         else -> "부재중 전화 ${n}건"
     }
     return "$head, ${if (mode == "ment") "안내 멘트로 응대했어요." else "AI가 용건을 받아 두었습니다."}"
-}
-
-/** 바로 연결(급함·direct) 전화 한 줄씩(최대 3). 방·피로 필터를 통과시키려고 따로 둔다 — 호출자가 안전 미루기(조작·경고·통화 중)는 그대로 거친다. 끔 모드는 무음. */
-fun directSpeech(items: List<InboxItem>, mode: String = "ai"): String? {
-    if (mode == "off") return null
-    val d = items.filter { it.kind == "call" && (it.urgent || it.direct) }.distinctBy { it.id }.take(3)
-    if (d.isEmpty()) return null
-    return sentences(*d.map { "바로 연결: ${it.fromLabel.ifBlank { "알 수 없는 번호" }}님 전화${if (it.summary.isNotBlank()) ", 용건 ${it.summary}" else ""}" }.toTypedArray())
 }
 
 /** M12: 세운 지 30초 뒤, 안 본 급한 통화가 남았으면 정차마다 한 문장. */

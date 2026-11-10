@@ -176,11 +176,9 @@ class RoomService : Service() {
         }
         inbox = (fresh.filter { it.kind in SHOWN_KINDS } + inbox).sortedByDescending { it.id }.take(50)
         Log.i("ROOM", "inbox ${if (initial) "initial" else "new"} ${fresh.size}")
-        // 피로 모드면 음성 없이 보관만(카드는 쌓인다). 바로 연결(급함·direct) 전화만 예외로 한 줄(조작·경고·통화 중 보류는 say가 그대로 적용)
         if (!initial && !passenger) {
             val plain = fresh.filter { it.replaces == 0L } // 교체 요약 카드는 같은 바로 연결 전화를 다시 알리지 않는다
-            if (fatigued(machine.room, tripMin())) directSpeech(plain, mode)?.let(::say)
-            else hold.offerItems(plain, machine.room, quiet)?.let { speaker.speak(it) }
+            hold.offerItems(plain, machine.room, quiet)?.let { speaker.speak(it) }
             replaceSpeech(fresh, machine.room, mode)?.let(::say) // 요약만 한 번
         }
         if (!initial) callFresh += fresh.filter { it.kind == "call" }.map { it.id }
@@ -248,7 +246,6 @@ class RoomService : Service() {
                 }
             }
             // F5: [말하기] 뒤 한 마디. 못 알아들으면 "다시 말씀해 주세요" 한 번만, 그다음은 화면 2택(주행 중엔 그냥 끝).
-            // S1 피로 중엔 급해·화장실만 통과, 업무 말은 한 문장으로 거절(fatigueGate)
             Ask.INTENT -> carIntent(said).let { ci ->
                 if (ci != CarIntent.UNKNOWN) runIntent(ci, said) else {
                     val unk = { unsure(p, "아까 전화" to { say(recentCallsSpeech(cards())) }, "다음 일정" to { say(nextEventSpeech(nextEvent(schedule, System.currentTimeMillis()))) }, {}, "어떤 걸 알려 드릴까요?") }
@@ -270,9 +267,8 @@ class RoomService : Service() {
         }
     }
 
-    /** [말하기]·이름 호출·Gleo가 같이 쓰는 의도 실행. 피로 중 업무는 여기서 거절한다. */
+    /** [말하기]·이름 호출·Gleo가 같이 쓰는 의도 실행. */
     private fun runIntent(ci: CarIntent, said: String? = null) {
-        fatigueGate(ci, fatigued(machine.room, tripMin()))?.let { say(it); return }
         when (ci) {
             CarIntent.URGENT -> addRestStop(true, true)
             CarIntent.RECENT_CALLS -> say(recentCallsSpeech(cards()))
@@ -539,9 +535,9 @@ class RoomService : Service() {
             tickReplay()
             syncWake()
             strip.sync(stripVisible(screenOverride ?: room, appFront, canOverlay))
-            // 폰 알림: 미루기 조건(경고·깜빡이·후진·큰 조향·통화·피로)이 다 풀리고 대화 중이 아니면 쌓인 것을 묶어서 한 번
+            // 폰 알림: 미루기 조건(경고·깜빡이·후진·큰 조향·통화)이 다 풀리고 대화 중이 아니면 쌓인 것을 묶어서 한 번
             // 대답 없이 남은 묻기(P의 바)도 새 알림이 오면 닫고, 못 읽어 준 알림과 합쳐 다시 묻는다(같은 알림은 한 번만)
-            if (!q && (talk.step == NotifTalk.Step.NONE || talk.waiting && !listening) && pending == Ask.NONE && notifQueue.isNotEmpty() && machine.room != null && !passenger && !fatigued(machine.room, tripMin())) {
+            if (!q && (talk.step == NotifTalk.Step.NONE || talk.waiting && !listening) && pending == Ask.NONE && notifQueue.isNotEmpty() && machine.room != null && !passenger) {
                 offerNotifs((talk.dropStale() + notifQueue).distinctBy { it.id }.sortedBy { it.id }); notifQueue.clear()
             }
             // 자비스처럼 먼저 제안: 정차 중 안 본 새 통화 카드에 기한·회신 요청이 있으면 카드당 한 번 "문자 먼저 보내 드릴까요?"(알림 묻기가 끝난 뒤)
@@ -556,10 +552,9 @@ class RoomService : Service() {
             // 짧은 P 동안은 driveStart가 남아 있으니 주행 중일 때만 센다(M4). 휴식·피로가 같은 순간이면 한 문장만(H10).
             val restNow = restOnce.fire(restDue(driveStart.takeIf { machine.room != Room.PARK }, clock.millis(), restMin, restSnoozeUntil))
             if (restNow) { restOffer = true; if (canAsk()) askVoice(REST_ASK, Ask.REST) else say(REST_SPEECH) }
-            // 안전 안내라 동승자 모드에서도. 피로 보관이 켜지면 휴게소 버튼도 같이 띄운다(휴식 기준을 더 길게 잡았어도).
+            // 안전 안내라 동승자 모드에서도. 피로 기준이 되면 휴게소 버튼도 같이 띄운다(휴식 기준을 더 길게 잡았어도).
             if (fatigueOnce.fire(fatigued(machine.room, tripMin()))) {
                 restOffer = true; if (!restNow) say(fatigueSpeech(machine.signals.gear))
-                if (talk.step != NotifTalk.Step.NONE) { talk.cancel(); askStep = talk.step; listening = false } // 폰 알림 대화는 피로 진입 때 조용히 닫는다(카드는 남음)
             }
             // 하차(P + 운전석 문 열림): 정차 위치를 그 시점 위치로 한 번 더 갱신. 신호·권한이 없으면 PARK 진입 때 저장한 것이 그대로 남는다.
             if (alightOnce.fire(machine.room == Room.PARK && gotOff(machine.signals.gear, adapters.forcedDoor ?: adapters.driverDoorPos))) machine.signals.location?.let { Log.i("ROOM", "alight -> park update"); postParked(it) }
