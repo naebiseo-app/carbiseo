@@ -153,3 +153,9 @@ test("지어내기 금지·소속 한 글자 되읽기·아는 번호 이름 확
 test("한 마디 안내: 기본·직접 쓴 멘트 모두 녹음 고지를 말한다", () => {
   for (const m of [undefined, "회의 중이에요."]) assert.match(pickScript("DRIVE_WORK", "도윤", undefined, 5, "ment", null, null, Date.now(), m).instruction, /이 통화는 녹음됩니다\.'라고만 말하고/);
 });
+
+test("이름·용건을 들으면 되읽고 '맞으실까요?'로 한 번 확인한다(11-10 대표님 결정)", () => {
+  const s = pickScript("DRIVE_WORK", "주인").instruction;
+  assert.match(s, /\[2-2\][^[]*맞으실까요\?/);
+  assert.doesNotMatch(s, /'맞으시죠\?'라고 따로 확인하지 않습니다/);
+});
