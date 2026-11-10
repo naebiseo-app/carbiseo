@@ -426,6 +426,40 @@ fun fatigueSpeech(gear: Gear): String =
     if (gear == Gear.PARK) "두 시간째 운전 중이에요, 쉬어 가시려면 휴게소 버튼을 누르세요." else "두 시간째 운전 중이에요, 다음 휴게소에서 쉬어 가세요."
 fun fatigued(room: Room?, tripMin: Int?): Boolean = room != null && room != Room.PARK && (tripMin ?: 0) >= FATIGUE_MIN
 
+/**
+ * 졸음 확인(카메라 없음): 운전 시간·시각으로 위험을 추정하고, 위험이면 15분마다 "졸리진 않으세요?"를 물어 대답이 늦거나 없는 횟수로 본다.
+ * 위험 = 120분 이상, 또는 60분 이상이면서 02:00~05:59·14:00~15:59. 판정만 하는 순수 함수(주행 중인지는 호출부가 본다).
+ */
+const val DROWSY_CHECK_MS = 15 * 60_000L
+const val DROWSY_RETRY_MS = 5 * 60_000L // 졸음 의심이면 5분마다 다시
+const val DROWSY_SLOW_MS = 4_000L // 이보다 늦게 대답하면 '느림'
+fun drowsyRisk(tripMin: Int?, hour: Int): Boolean = tripMin != null && (tripMin >= FATIGUE_MIN || tripMin >= 60 && (hour in 2..5 || hour in 14..15))
+const val DROWSY_OPEN_SPEECH = "운전이 길어졌어요. 졸리면 말 걸어 주세요, 이야기 상대 해 드릴게요."
+const val DROWSY_ASK = "졸리진 않으세요? 한 마디만 대답해 주세요."
+const val DROWSY_OK_SPEECH = "좋아요, 계속 말 걸어 드릴게요."
+const val DROWSY_ALERT_SPEECH = "반응이 늦어요. 가까운 졸음쉼터에서 쉬어 가세요."
+
+enum class Drowsy { FINE, WATCH, ALERT }
+/** 확인 시각·'느림/무응답' 연속 횟수. 시각은 elapsedRealtime 같은 단조 시계(ms). 메인 스레드에서만. */
+class DrowsyCheck {
+    private var last: Long? = null
+    private var strikes = 0
+    private var gap = DROWSY_CHECK_MS
+    /** 디버그: true면 위험·간격과 상관없이 다음 틱에 바로 확인(asked가 끈다). */
+    var force = false
+    fun due(now: Long) = last?.let { now - it >= gap } == true
+    /** 말동무 여는 말을 했거나 질문을 한 시각. */
+    fun mark(now: Long) { last = now; force = false }
+    /** delayMs = 질문 뒤 대답까지 걸린 시간, null = 무응답. 정상이면 카운터 0·간격 15분 복귀, 연속 2번 '느림/무응답'이면 ALERT·간격 5분. */
+    fun result(delayMs: Long?): Drowsy {
+        if (delayMs != null && delayMs <= DROWSY_SLOW_MS) { strikes = 0; gap = DROWSY_CHECK_MS; return Drowsy.FINE }
+        strikes++
+        if (strikes < 2) return Drowsy.WATCH
+        gap = DROWSY_RETRY_MS; return Drowsy.ALERT
+    }
+    fun reset() { last = null; strikes = 0; gap = DROWSY_CHECK_MS; force = false }
+}
+
 const val TELLTALE_SPEECH = "계기판에 빨간 경고등이 켜졌어요. 안전한 곳에 세운 뒤 확인해 주세요"
 
 /** C① 내비 즐겨찾기 '집'이 없을 때: 최근 목적지 중 이름이 '집'·'우리집'·'home'인 곳(꽃집·옷집 같은 가게는 제외). */

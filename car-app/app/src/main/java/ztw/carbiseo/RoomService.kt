@@ -77,6 +77,9 @@ class RoomService : Service() {
     private val homeOnce = Once()
     private val restOnce = Once()
     private val fatigueOnce = Once()
+    private val drowsyOnce = Once() // 졸음 위험이 켜질 때 말동무 여는 말 한 번(운전마다)
+    private val drowsy = DrowsyCheck()
+    private var drowsyListenAt = 0L // 졸음 질문이 끝나 듣기를 시작한 시각(elapsedRealtime)
     private val alightOnce = Once() // 정차 한 번당 하차 위치 갱신 한 번(PARK 진입 때 reset)
     private val parkRemind = Once() // M12: 정차마다 1회
     private var greenSaid = false        // 이번 신호에 출발 알림을 했나
@@ -92,7 +95,7 @@ class RoomService : Service() {
     private val notifFresh = mutableSetOf<Long>()
     private val notifSaid = mutableSetOf<Long>()
     // 음성으로 묻고 대답을 기다리는 질문(알림 묻기는 talk가 따로). 대답은 heard()가 받는다.
-    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, INTENT, NEAR_FIND, NEAR_GO, PARK_CALL, PARK_MEMO }
+    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, INTENT, NEAR_FIND, NEAR_GO, PARK_CALL, PARK_MEMO, DROWSY }
     private class PendingSend(val label: String, val number: String, val body: String, val task: String) // 보낼 문자(label·number·body)와 못 보냈을 때 남길 할 일 본문
     private var pending = Ask.NONE
     private val chatHistory = mutableListOf<Pair<String, String>>() // 말동무 대화 맥락(메모리만, 저장·로그 없음). 메인 스레드에서만
@@ -257,6 +260,12 @@ class RoomService : Service() {
                 voiceCmd(said).let { it == Cmd.No || it == Cmd.Later } -> {} // '아니·취소·됐어'는 메모가 아니라 그만두기
                 !said.isNullOrBlank() -> saveParkMemo(said.trim().take(40))
                 reask.again() -> { pending = p; speaker.speak(REASK_SPEECH, ::listenNow) }
+            }
+            // 졸음 확인: 아무 말이나 오면 대답. 질문이 끝나고 듣기를 시작한 뒤 결과가 오기까지(말 시작 지연 + 말 길이)로 느림을 가른다. 못 들음·빈 말은 무응답.
+            Ask.DROWSY -> when (drowsy.result(if (said.isNullOrBlank()) null else SystemClock.elapsedRealtime() - drowsyListenAt)) {
+                Drowsy.FINE -> say(DROWSY_OK_SPEECH)
+                Drowsy.WATCH -> {}
+                Drowsy.ALERT -> { restOffer = true; say(DROWSY_ALERT_SPEECH) }
             }
             Ask.NONE -> {
                 // 알림 묻기(제안·보낼까요)도 같은 규칙: 못 알아들으면 한 번만 다시 묻고, 그다음은 P의 화면 버튼(읽어줘/나중에·보내/취소)·주행 중엔 카드로
@@ -462,6 +471,7 @@ class RoomService : Service() {
     /** 음성 인식이 없고(path none) 주행 중이면 대답을 못 받으니 '나중에'(카드로 보관). */
     private fun listenNow() {
         if (voice.path == "none") { if (!touchOk() || pending == Ask.CALLBACK || pending == Ask.SEND) heard("나중에"); return }
+        if (pending == Ask.DROWSY) drowsyListenAt = SystemClock.elapsedRealtime()
         listening = true; voice.listen(); syncWake()
     }
 
@@ -553,9 +563,16 @@ class RoomService : Service() {
             val restNow = restOnce.fire(restDue(driveStart.takeIf { machine.room != Room.PARK }, clock.millis(), restMin, restSnoozeUntil))
             if (restNow) { restOffer = true; if (canAsk()) askVoice(REST_ASK, Ask.REST) else say(REST_SPEECH) }
             // 안전 안내라 동승자 모드에서도. 피로 기준이 되면 휴게소 버튼도 같이 띄운다(휴식 기준을 더 길게 잡았어도).
-            if (fatigueOnce.fire(fatigued(machine.room, tripMin()))) {
+            val fatigueNow = fatigueOnce.fire(fatigued(machine.room, tripMin()))
+            if (fatigueNow) {
                 restOffer = true; if (!restNow) say(fatigueSpeech(machine.signals.gear))
             }
+            // 졸음 확인: 위험이 켜지면 말동무 여는 말 한 번(피로·휴식 안내와 같은 순간이면 그쪽 한 문장만), 그 뒤 15분마다 한 마디 묻기(D·canAsk·동승자 아님). 화면 카드 없음.
+            val driving = machine.room.let { it != null && it != Room.PARK }
+            val risk = driving && machine.signals.gear == Gear.DRIVE && drowsyRisk(tripMin(), LocalTime.now(clock).hour)
+            val tNow = SystemClock.elapsedRealtime()
+            if (drowsyOnce.fire(risk && !passenger)) { drowsy.mark(tNow); if (!fatigueNow && !restNow) say(DROWSY_OPEN_SPEECH) }
+            else if (driving && !passenger && canAsk() && voice.path != "none" && (drowsy.force || risk && drowsy.due(tNow))) { drowsy.mark(tNow); askVoice(DROWSY_ASK, Ask.DROWSY) }
             // 하차(P + 운전석 문 열림): 정차 위치를 그 시점 위치로 한 번 더 갱신. 신호·권한이 없으면 PARK 진입 때 저장한 것이 그대로 남는다.
             if (alightOnce.fire(machine.room == Room.PARK && gotOff(machine.signals.gear, adapters.forcedDoor ?: adapters.driverDoorPos))) machine.signals.location?.let { Log.i("ROOM", "alight -> park update"); postParked(it) }
             if (machine.room == Room.PARK) adapters.arrivedName?.let { n -> parkCard?.takeIf { it.place == null }?.let { parkCard = it.copy(place = n) } } // 도착 이벤트가 P 진입보다 늦게 온 경우
@@ -657,7 +674,7 @@ class RoomService : Service() {
                 replay = replay?.copy(hint = null) // 출발하면 도움 카드는 내리고(운전 중엔 귓속말만), 다음 도움부터 TTS
                 if (from == Room.PARK && talk.step != NotifTalk.Step.NONE) { talk.cancel(); askStep = talk.step; listening = false } // P에서 남겨 둔 바는 출발하면 닫는다(카드는 남음)
                 // M4: 2분 미만 P는 같은 운전 — 휴식·피로·집 문턱 1회 안내와 운전 시작 시각을 유지
-                if (newDrive(parked)) { homeOnce.reset(); reserveOnce.reset(); restOnce.reset(); fatigueOnce.reset(); trip.reset(); driveStart = now; restSnoozeUntil = 0
+                if (newDrive(parked)) { homeOnce.reset(); reserveOnce.reset(); restOnce.reset(); fatigueOnce.reset(); drowsyOnce.reset(); drowsy.reset(); trip.reset(); driveStart = now; restSnoozeUntil = 0
                     lastMealOffer = null; lastChargeOffer = null; lastTrafficOffer = null; parkMemoText = null; adapters.clearArrived(); net.execute { Server.clearParked() } }
                 else Log.i("ROOM", "short park ${parked!! / 1000}s -> same drive")
                 // H9: 오래 세운 뒤의 출발이면 그 전에 켠 동승자 모드는 끈다
@@ -783,6 +800,10 @@ class RoomService : Service() {
                 callFresh += id; Log.i("ROOM", "debug callcard $id")
             }
         }
+        // adb shell am broadcast -a ztw.carbiseo.DROWSY (extra 없음. 다음 틱에 졸음 확인 질문을 바로 한다. 주행 중(P 아님)·말해도 되는 때만)
+        val drow = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) { drowsy.force = true; Log.i("ROOM", "debug drowsy force") }
+        }
         // adb shell am broadcast -a ztw.carbiseo.HEAR (앱 files/hear.pcm을 다음 듣기 때 STT 엔진에 넣기, run-as로 복사, 실측용)
         // adb shell am broadcast -a ztw.carbiseo.CLEARLOCAL (차 안에서 만든 할 일 카드를 비운다. 촬영 전 시험 찌꺼기 정리용)
         val clearLocal = object : BroadcastReceiver() {
@@ -802,7 +823,7 @@ class RoomService : Service() {
         val wiper = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { val on = i.getBooleanExtra("on", false); adapters.setRain(on); Log.i("ROOM", "debug wiper rain=$on") }
         }
-        for ((rc, action) in listOf(door to "ztw.carbiseo.DOOR", wiper to "ztw.carbiseo.WIPER", cc to "ztw.carbiseo.CALLCARD", hear to "ztw.carbiseo.HEAR", clearLocal to "ztw.carbiseo.CLEARLOCAL", wakePcm to "ztw.carbiseo.WAKEPCM", say to "ztw.carbiseo.SAY", wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP", loc to "ztw.carbiseo.LOC", tm to "ztw.carbiseo.TIME", soc to "ztw.carbiseo.SOC", sig to "ztw.carbiseo.SIGNAL")) {
+        for ((rc, action) in listOf(drow to "ztw.carbiseo.DROWSY", door to "ztw.carbiseo.DOOR", wiper to "ztw.carbiseo.WIPER", cc to "ztw.carbiseo.CALLCARD", hear to "ztw.carbiseo.HEAR", clearLocal to "ztw.carbiseo.CLEARLOCAL", wakePcm to "ztw.carbiseo.WAKEPCM", say to "ztw.carbiseo.SAY", wp to "ztw.carbiseo.WP", r to "ztw.carbiseo.ROUTE", al to "ztw.carbiseo.ALERT", tr to "ztw.carbiseo.TRIP", loc to "ztw.carbiseo.LOC", tm to "ztw.carbiseo.TIME", soc to "ztw.carbiseo.SOC", sig to "ztw.carbiseo.SIGNAL")) {
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(rc, IntentFilter(action), Context.RECEIVER_EXPORTED) else registerReceiver(rc, IntentFilter(action))
             receivers += rc
         }

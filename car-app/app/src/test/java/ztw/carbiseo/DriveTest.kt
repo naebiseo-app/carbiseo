@@ -266,6 +266,29 @@ class DriveTest {
         assertTrue(fatigued(Room.DRIVE_WORK, 120)); assertFalse(fatigued(Room.DRIVE_WORK, 119)); assertFalse(fatigued(Room.PARK, 300))
     }
 
+    @Test fun 졸음_위험_경계값() {
+        assertFalse(drowsyRisk(null, 3)); assertFalse(drowsyRisk(59, 3)); assertTrue(drowsyRisk(60, 3)); assertTrue(drowsyRisk(119, 3)) // 새벽엔 60분부터
+        assertFalse(drowsyRisk(119, 10)); assertTrue(drowsyRisk(120, 10)); assertTrue(drowsyRisk(300, 20)) // 낮·저녁엔 120분부터
+        assertFalse(drowsyRisk(60, 1)); assertTrue(drowsyRisk(60, 2)); assertTrue(drowsyRisk(60, 5)); assertFalse(drowsyRisk(60, 6))
+        assertFalse(drowsyRisk(60, 13)); assertTrue(drowsyRisk(60, 14)); assertTrue(drowsyRisk(60, 15)); assertFalse(drowsyRisk(60, 16))
+        assertTrue(drowsyRisk(120, 1)); assertTrue(drowsyRisk(120, 6)) // 120분이면 시각 상관없음
+    }
+
+    @Test fun 졸음_확인_카운터는_연속_2번에_경고_정상이면_복귀() {
+        val d = DrowsyCheck()
+        assertFalse(d.due(0)) // 아직 확인한 적 없음 = 여는 말(mark) 전엔 때가 아님
+        d.mark(0); assertFalse(d.due(DROWSY_CHECK_MS - 1)); assertTrue(d.due(DROWSY_CHECK_MS))
+        assertEquals(Drowsy.FINE, d.result(4_000)) // 4.0초는 정상
+        assertEquals(Drowsy.WATCH, d.result(4_100)) // 4.1초는 느림 1번
+        assertEquals(Drowsy.FINE, d.result(1_000)) // 정상이면 카운터 0
+        assertEquals(Drowsy.WATCH, d.result(null)); assertEquals(Drowsy.ALERT, d.result(9_000)) // 무응답 + 느림 = 연속 2번
+        d.mark(0); assertFalse(d.due(DROWSY_RETRY_MS - 1)); assertTrue(d.due(DROWSY_RETRY_MS)) // 의심이면 5분 간격
+        assertEquals(Drowsy.ALERT, d.result(null)) // 계속 이어지면 계속 경고
+        assertEquals(Drowsy.FINE, d.result(500)); d.mark(0); assertFalse(d.due(DROWSY_RETRY_MS)); assertTrue(d.due(DROWSY_CHECK_MS)) // 정상 1번이면 15분 복귀
+        assertEquals(Drowsy.WATCH, d.result(null)); d.reset(); assertEquals(Drowsy.WATCH, d.result(null)); assertFalse(d.due(10 * DROWSY_CHECK_MS)) // 새 운전은 카운터·시각 리셋
+        d.force = true; d.mark(0); assertFalse(d.force)
+    }
+
     @Test fun 근처_찾기_말은_종류별로_가른다() {
         for (t in listOf("배고파", "출출해", "뭐 먹지", "밥 먹자", "근처 식당 찾아줘", "맛집 가고 싶어")) assertEquals(t, NearKind.FOOD, nearWish(t))
         for (t in listOf("커피 마시고 싶다", "근처 카페 찾아줘", "카페 가자")) assertEquals(t, NearKind.CAFE, nearWish(t))
