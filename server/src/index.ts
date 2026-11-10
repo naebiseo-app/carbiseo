@@ -930,6 +930,13 @@ export default {
         await env.DB.prepare("INSERT OR REPLACE INTO kv(key,value,updated_at) VALUES('owner_as_guest',?,?)").bind(JSON.stringify(on), now()).run();
         return html(on ? "주인 번호를 손님으로 취급합니다(켜짐)" : "주인 번호는 주인 모드입니다(꺼짐)");
       }
+      // 품질 시험: 받아쓰기 대화문을 실제 요약 경로(참고 이름+자모 교정)에 넣어 결과만 돌려준다. 저장 안 함
+      if (m === "POST" && pathname === "/admin/resummarize") {
+        const fd = await req.formData(), dialog = String(fd.get("dialog") ?? "").slice(0, 4000);
+        const names = await hintNames(env);
+        const memo = await summarizeCall(env.ANTHROPIC_API_KEY, SUMMARY_SYSTEM, names.length ? `${dialog}\n\n[참고 이름 목록] ${names.join(", ")}` : dialog);
+        return json({ caller: fixNames(String(memo?.caller ?? ""), names), summary: fixNames(String(memo?.summary ?? ""), names), raw: memo });
+      }
       // 촬영 기간: 요약이 끝난 통화 녹음을 지우지 않고 남긴다(기본 꺼짐 = 자동 삭제)
       if (m === "POST" && pathname === "/admin/keep-recordings") {
         const on = String((await req.formData()).get("on")) === "1";
