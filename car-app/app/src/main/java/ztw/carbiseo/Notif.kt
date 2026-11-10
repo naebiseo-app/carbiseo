@@ -52,7 +52,11 @@ private fun appShort(a: String) = when {
 }
 
 /** 즐겨찾기(가족)는 '엄마', 그 밖은 '김부장님'. */
-private fun who(s: String, favs: Set<String>) = if (s in favs) s else "${s}님"
+private fun who(s: String, favs: Set<String>) = if (s in favs) spoken(s) else "${spoken(s)}님"
+/** 읽을 이름: 이모지·기호(❤ 등)는 TTS가 이상하게 읽으니 뺀다. */
+fun spoken(s: String) = s.replace(Regex("""[^\p{L}\p{N}\s]"""), "").trim().ifEmpty { s }
+/** 답장 확인 호칭: 딸 → 따님, 아들 → 아드님, 그 밖은 이름+님. */
+fun honor(s: String) = spoken(s).let { n -> when { "딸" in n -> "따님"; "아들" in n -> "아드님"; else -> "${n}님" } }
 
 /** "카톡 3건, 김부장님 외 2명. 읽어드릴까요?" 앱이 섞이면 '알림 N건'. */
 fun notifSpeech(items: List<InboxItem>, favs: Set<String>): String? {
@@ -135,7 +139,7 @@ class NotifTalk {
     private fun confirm(text: String): Turn {
         val t = items.lastOrNull { it.replyable } ?: return Turn("이 알림은 답장할 수 없어요. 화면에 남겨 둘게요.")
         target = t; draft = text; step = Step.CONFIRM
-        return Turn("${t.fromLabel}님께 '$text' 보낼까요?", listen = true)
+        return Turn("${honor(t.fromLabel)}께 '$text' 보낼까요?", listen = true)
     }
 
     fun cancel() { step = Step.NONE }
