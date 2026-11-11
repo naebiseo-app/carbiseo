@@ -625,4 +625,25 @@ class DriveTest {
         assertEquals(-3L, parkWireId(LOCAL_ID_BASE + 3)); assertEquals(7L, parkWireId(7))
         assertEquals(LOCAL_ID_BASE + 3, parkLocalId(-3)); assertEquals(7L, parkLocalId(7))
     }
+
+    @Test fun 출발_한번_묻기() {
+        val ev = Event("상담", 0, "판교역", LatLng(37.3948, 127.1112))
+        assertEquals("다음 일정 판교역으로 안내할까요?", departOffer(ev, null, 80, null, true, false))
+        assertEquals("다음 일정 판교역으로 안내할까요? 배터리가 15퍼센트라 가는 길에 충전소도 넣을게요.", departOffer(ev, null, 15, null, true, false))
+        assertEquals("다음 일정 판교역으로 안내할까요? 연료가 10퍼센트라 가는 길에 주유소도 넣을게요.", departOffer(ev, null, null, 10, false, false))
+        assertEquals("다음 일정 판교역으로 안내할까요?", departOffer(ev, null, null, null, true, false)) // 에너지 모름 = 경로만
+        assertEquals(null, departOffer(ev, ev.at, 15, null, true, false)) // 이미 그 장소로 가는 중
+        assertEquals(null, departOffer(ev, null, 15, null, true, true)) // 이번 운전에서 이미 물음
+        assertEquals(null, departOffer(null, null, 15, null, true, false))
+        assertEquals(null, departOffer(Event("상담", 0, "어딘가", LatLng(0.0, 0.0)), null, 15, null, true, false)) // 좌표 없는 일정
+    }
+
+    @Test fun 출발_응답_조사() {
+        assertEquals("수원시청으로 안내할게요. 판교충전소를 경유지로 넣었어요.", departDone("수원시청", "판교충전소"))
+        assertEquals("서울로 안내할게요.", departDone("서울", null)) // ㄹ 받침
+        assertEquals("카페로 안내할게요. SK주유소를 경유지로 넣었어요.", departDone("카페", "SK주유소"))
+        assertEquals("GS칼텍스 판교점을", eul("GS칼텍스 판교점"))
+        assertEquals("A로", ro("A"))
+    }
 }
+

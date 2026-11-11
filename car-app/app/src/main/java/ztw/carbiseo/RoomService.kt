@@ -62,6 +62,7 @@ class RoomService : Service() {
     private var forced: Alert? = null // 디버그 브로드캐스트로 강제한 값
     private var forcedTrip: Int? = null // 디버그: 트립 주행시간(분) 강제
     private var forcedTraffic: String? = null // 디버그: 경로 정체 단계 강제 (정체 제안만 읽는다)
+    private var forcedFuel: Int? = null // 디버그(FLAG_DEBUGGABLE만): 연료량(%) 강제 = 엔진차로 본다
     private var forcedSoc: Int? = null // 디버그: 배터리 잔량(%) 강제 (먼저 말 걸기의 충전 제안만 읽는다)
     private var lastMealOffer: Long? = null; private var lastChargeOffer: Long? = null; private var lastTrafficOffer: Long? = null // 이번 운전에서 먼저 제안한 시각(시뮬 시각). 새 운전에서 비운다
     private var parkMemoText: String? = null // "주차 지하 2층"으로 적어 둔 메모. 새 운전에서 비운다
@@ -87,6 +88,7 @@ class RoomService : Service() {
     private val seat = SeatEdge()
     private var lastTell: String? = null
     private var ctxSent = ""; private var ctxAt = 0L // 차량 맥락: 바뀌면 올리되 10초에 한 번까지
+    private var departAsked = false; private var departEv: Event? = null; private var departKind: NearKind? = null; private var departLowAsked = false // 출발 때 한 번 묻기(운전 1회). 새 운전에서 비운다
     private var driveStart: Long? = null // 이번 운전 시작(PARK에서 나온 시각). 정차 중 null.
     // 폰 알림(35): 알릴 대기열(미루기 조건이 풀리면 묶어서), 이번 실행에 새로 온 것, 이미 알린 것
     private lateinit var voice: Voice
@@ -95,7 +97,7 @@ class RoomService : Service() {
     private val notifFresh = mutableSetOf<Long>()
     private val notifSaid = mutableSetOf<Long>()
     // 음성으로 묻고 대답을 기다리는 질문(알림 묻기는 talk가 따로). 대답은 heard()가 받는다.
-    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, INTENT, NEAR_FIND, NEAR_GO, PARK_CALL, PARK_MEMO, DROWSY }
+    private enum class Ask { NONE, LATE, REST, RESERVE, CALLBACK, SEND, INTENT, NEAR_FIND, NEAR_GO, PARK_CALL, PARK_MEMO, DROWSY, DEPART }
     private class PendingSend(val label: String, val number: String, val body: String, val task: String) // 보낼 문자(label·number·body)와 못 보냈을 때 남길 할 일 본문
     private var pending = Ask.NONE
     private val chatHistory = mutableListOf<Pair<String, String>>() // 말동무 대화 맥락(메모리만, 저장·로그 없음). 메인 스레드에서만
@@ -228,12 +230,13 @@ class RoomService : Service() {
         if (urgentNeed(said) && machine.room.let { it != null && it != Room.PARK }) { talk.cancel(); askStep = talk.step; return addRestStop(true, true) }
         when (p) {
             // Q1 조용한 비서: 못 알아들으면 한 번만 다시 묻고, 그다음은 화면 2택(unsure). 번호를 알면 초안을 읽어 주고 "이대로 보낼까요?"(SEND). 모르면 지금처럼 카드만.
-            Ask.LATE, Ask.CALLBACK, Ask.SEND, Ask.REST, Ask.NEAR_FIND, Ask.NEAR_GO, Ask.PARK_CALL -> when (voiceCmd(said)) {
+            Ask.LATE, Ask.CALLBACK, Ask.SEND, Ask.REST, Ask.NEAR_FIND, Ask.NEAR_GO, Ask.PARK_CALL, Ask.DEPART -> when (voiceCmd(said)) {
                 Cmd.Yes -> answerYn(p, true)
                 Cmd.No, Cmd.Later -> answerYn(p, false) // '나중에'는 이 질문들엔 '아니'
                 else -> when (p) {
                     Ask.REST, Ask.NEAR_GO -> unsure(p, "들르기" to { answerYn(p, true) }, "괜찮아요" to { answerYn(p, false) }, { answerYn(p, false) })
                     Ask.PARK_CALL -> unsure(p, "물어보기" to { answerYn(p, true) }, "괜찮아요" to { answerYn(p, false) }, { answerYn(p, false) })
+                    Ask.DEPART -> unsure(p, "안내하기" to { answerYn(p, true) }, "괜찮아요" to { answerYn(p, false) }, { answerYn(p, false) })
                     Ask.NEAR_FIND -> unsure(p, "찾기" to { answerYn(p, true) }, "괜찮아요" to { answerYn(p, false) }, { answerYn(p, false) })
                     else -> unsure(p, "보내기" to { answerYn(p, true) }, "그만두기" to { answerYn(p, false) }, { answerYn(p, false) })
                 }
@@ -339,6 +342,7 @@ class RoomService : Service() {
             Ask.NEAR_FIND -> if (y) nearFind()
             Ask.NEAR_GO -> if (y) nearGo()
             Ask.PARK_CALL -> if (y) parkCall()
+            Ask.DEPART -> if (y) departGo()
             else -> {}
         }
     }
@@ -364,6 +368,28 @@ class RoomService : Service() {
                 val hit = pickPark(lots); val text = parkingSpeech(lots, callTo != null)
                 if (hit != null) { if (canAsk()) { nearKind = null; nearHit = NearPlace(hit.name, hit.lat, hit.lng, hit.distM); askVoice(text, Ask.NEAR_GO) } }
                 else if (callTo != null) { if (canAsk()) askVoice(text, Ask.PARK_CALL) } else say(text)
+            }
+        }
+    }
+
+    /** 출발 질문 "응": 일정 장소로 경로를 잡고, 에너지가 낮았으면 가장 가까운 충전소(주유소) 1곳을 되묻지 않고 첫 경유지로 넣는다. 경로가 잡힌 뒤여야 경유지가 들어가서 목적지가 잡힐 때까지 2초마다 최대 30초 기다린다. */
+    private fun departGo() {
+        val ev = departEv ?: return; val kind = departKind
+        route(ev.at, ev.place)
+        val loc = machine.signals.location
+        if (kind == null || loc == null) return say(departDone(ev.place, null))
+        net.execute {
+            val hit = pickNear(Server.nearby(kind.code, loc.lat, loc.lng), loc, ev.at)
+            ui.post {
+                if (hit == null) return@post say(departDone(ev.place, null))
+                var tries = 0
+                val add = object : Runnable { override fun run() {
+                    val n = adapters.navi
+                    if (n != null && machine.signals.destination?.let { distanceM(it, ev.at) < 300 } == true) {
+                        n.addWaypoint(RequestWaypointInfo(hit.lat, hit.lng, hit.name, WaypointIndex.FIRST, "", "", "", "")); say(departDone(ev.place, hit.name))
+                    } else if (++tries < 15) ui.postDelayed(this, 2_000) else { Log.w("ROOM", "depart waypoint skipped: route not set"); say(departDone(ev.place, null)) }
+                } }
+                add.run()
             }
         }
     }
@@ -603,10 +629,19 @@ class RoomService : Service() {
             val dn = forcedDest ?: adapters.destName
             if (machine.room.let { it != null && it != Room.PARK } && !passenger && e != null && reservable(dn) && canAsk() &&
                 reserveOnce.fire(true)) arriveAt(clock.millis(), e, clock.zone).let { t -> reserve = dn!! to t; reservePlace = null; askVoice(reserveSpeech(dn, t), Ask.RESERVE) }
+            // 출발 때 한 번: D 기어로 운전이 시작되면(운전 1회당 한 번, 묻든 안 묻든 이때 한 번만 본다) 다음 일정 경로(+에너지 낮으면 충전소·주유소 경유지)를 묻는다
+            if (!departAsked && machine.room.let { it != null && it != Room.PARK } && machine.signals.gear == Gear.DRIVE && !passenger && canAsk()) {
+                departAsked = true
+                val fuel = forcedFuel ?: adapters.fuel; val soc = forcedSoc ?: adapters.soc; val ev = forcedFuel == null && (soc != null || fuel == null)
+                val ev0 = nextEvent(schedule, System.currentTimeMillis())
+                departOffer(ev0, machine.signals.destination, soc, fuel, ev, false)?.let { q ->
+                    departEv = ev0; departKind = departLow(soc, fuel, ev)?.let { if (ev) NearKind.CHARGE else NearKind.GAS }; departLowAsked = departKind != null; askVoice(q, Ask.DEPART)
+                }
+            }
             // 먼저 말 걸기(근처 찾기 흐름 그대로): 충전이 먼저, 한 틱에 하나. 시각·운전 시간은 TIME·TRIP 디버그와 같은 값
             if (machine.room.let { it != null && it != Room.PARK } && !passenger && canAsk()) clock.millis().let { now ->
                 val soc = forcedSoc ?: adapters.soc; val word = mealWord(LocalTime.now(clock))
-                if (soc != null && soc <= CHARGE_OFFER_SOC && offerDue(proactive, lastChargeOffer, now)) { lastChargeOffer = now; nearKind = NearKind.CHARGE; askVoice(chargeOffer(soc), Ask.NEAR_FIND) }
+                if (soc != null && soc <= CHARGE_OFFER_SOC && !departLowAsked && offerDue(proactive, lastChargeOffer, now)) { lastChargeOffer = now; nearKind = NearKind.CHARGE; askVoice(chargeOffer(soc), Ask.NEAR_FIND) }
                 else if (word != null && (tripMin() ?: 0) >= MEAL_OFFER_DRIVE_MIN && !reservable(dn) && offerDue(proactive, lastMealOffer, now)) { lastMealOffer = now; nearKind = NearKind.FOOD; askVoice(mealOffer(word), Ask.NEAR_FIND) }
                 else nextEvent(schedule, System.currentTimeMillis())?.takeIf { machine.room == Room.DRIVE_WORK && headingTo(machine.signals.destination, it) && trafficOfferDue(proactive, forcedTraffic ?: adapters.trafficWorst, it, lateAsked, lastTrafficOffer, now, (forcedTripEta ?: e)?.let { m -> System.currentTimeMillis() + m * 60_000L }) }?.let { ev ->
                     // 대답 '응'은 기존 LATE 경로(answerYn)로 간다. 지각 분은 아는 만큼만(lateBy), 모르면 분 수 없이
@@ -676,7 +711,7 @@ class RoomService : Service() {
                 if (from == Room.PARK && talk.step != NotifTalk.Step.NONE) { talk.cancel(); askStep = talk.step; listening = false } // P에서 남겨 둔 바는 출발하면 닫는다(카드는 남음)
                 // M4: 2분 미만 P는 같은 운전 — 휴식·피로·집 문턱 1회 안내와 운전 시작 시각을 유지
                 if (newDrive(parked)) { homeOnce.reset(); reserveOnce.reset(); restOnce.reset(); fatigueOnce.reset(); drowsyOnce.reset(); drowsy.reset(); trip.reset(); driveStart = now; restSnoozeUntil = 0
-                    lastMealOffer = null; lastChargeOffer = null; lastTrafficOffer = null; parkMemoText = null; adapters.clearArrived(); net.execute { Server.clearParked() } }
+                    lastMealOffer = null; lastChargeOffer = null; lastTrafficOffer = null; departAsked = false; departLowAsked = false; parkMemoText = null; adapters.clearArrived(); net.execute { Server.clearParked() } }
                 else Log.i("ROOM", "short park ${parked!! / 1000}s -> same drive")
                 // H9: 오래 세운 뒤의 출발이면 그 전에 켠 동승자 모드는 끈다
                 if (passenger && parked != null && parked >= PASSENGER_RESET_PARK_MS && passengerAt < now - parked) { togglePassenger(false); say("동승자 모드를 껐어요") }
@@ -842,6 +877,10 @@ class RoomService : Service() {
             val tripEta = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) { forcedTripEta = i.getIntExtra("min", -1).takeIf { it >= 0 }; Log.i("ROOM", "debug tripEta force=$forcedTripEta") } }
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(tripEta, IntentFilter("ztw.carbiseo.TRIPETA"), Context.RECEIVER_EXPORTED) else registerReceiver(tripEta, IntentFilter("ztw.carbiseo.TRIPETA"))
             receivers += tripEta
+            // adb shell am broadcast -a ztw.carbiseo.FUEL --ei pct 15 (-1 = 해제). 엔진차 분기 시험용: 켜 두면 엔진차로 본다(실제 연료 API 값은 adapters.fuel). SOC 디버그 수신기 옆.
+            val fuelRc = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) { forcedFuel = i.getIntExtra("pct", -1).takeIf { it >= 0 }; Log.i("ROOM", "debug fuel force=$forcedFuel") } }
+            if (Build.VERSION.SDK_INT >= 33) registerReceiver(fuelRc, IntentFilter("ztw.carbiseo.FUEL"), Context.RECEIVER_EXPORTED) else registerReceiver(fuelRc, IntentFilter("ztw.carbiseo.FUEL"))
+            receivers += fuelRc
         }
     }
 

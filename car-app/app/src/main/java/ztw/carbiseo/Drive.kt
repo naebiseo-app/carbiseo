@@ -90,6 +90,22 @@ fun offerDue(level: Proactive, lastOfferMs: Long?, now: Long): Boolean =
 fun mealOffer(word: String) = "$word 시간이에요. 근처 식당 찾아드릴까요?"
 fun chargeOffer(soc: Int) = "배터리가 ${soc}퍼센트 남았어요. 근처 충전소 찾아드릴까요?"
 
+/** 출발 때 한 번 묻기(D 기어 운전 시작): 다음 일정에 좌표가 있고 내비가 그 장소로 안 가는 중이며 이 운전에서 아직 안 물었으면 질문 문장, 아니면 null. 에너지가 CHARGE_OFFER_SOC 이하면 충전소(엔진차는 주유소) 경유 문구를 붙인다. */
+fun departOffer(next: Event?, dest: LatLng?, soc: Int?, fuelPct: Int?, isEv: Boolean, alreadyAsked: Boolean): String? {
+    if (alreadyAsked || next == null || next.at.lat == 0.0 || headingTo(dest, next)) return null
+    val base = "다음 일정 ${ro(next.place)} 안내할까요?"
+    val low = departLow(soc, fuelPct, isEv) ?: return base
+    return if (isEv) "$base 배터리가 ${low}퍼센트라 가는 길에 충전소도 넣을게요." else "$base 연료가 ${low}퍼센트라 가는 길에 주유소도 넣을게요."
+}
+/** 에너지가 낮으면 그 퍼센트, 아니면 null(모르는 값 포함). */
+fun departLow(soc: Int?, fuelPct: Int?, isEv: Boolean): Int? = (if (isEv) soc else fuelPct)?.takeIf { it <= CHARGE_OFFER_SOC }
+/** "응" 뒤 한 문장. stopName이 있으면 경유지로 넣었다고 덧붙인다. */
+fun departDone(place: String, stopName: String?) = "${ro(place)} 안내할게요." + (stopName?.let { " ${eul(it)} 경유지로 넣었어요." } ?: "")
+/** 받침에 맞는 조사: 마지막 글자가 한글이 아니면 받침 없음으로 본다. */
+private fun jong(w: String): Int = w.lastOrNull()?.takeIf { it in '가'..'힣' }?.let { (it - '가') % 28 } ?: 0
+fun ro(w: String) = w + (if (jong(w).let { it == 0 || it == 8 }) "로" else "으로") // ㄹ 받침(8)은 "로"
+fun eul(w: String) = w + (if (jong(w) == 0) "를" else "을")
+
 /** 주차 메모: "주차 지하 2층 C구역" -> "지하 2층 C구역". '주차'가 없거나 층·구역을 못 읽거나 답장 문장이면 null. */
 private val PARK_SPOT = Regex("""지하\s?\d+층|\d+층|[A-Za-z가-힣]?\d*구역""")
 private val PARK_QUESTION = Regex("""자리\s?있|있어\?|있나|어디""") // "주차장 3층 자리 있어?"는 메모가 아니라 문의

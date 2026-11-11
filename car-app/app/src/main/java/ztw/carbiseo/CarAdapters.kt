@@ -31,6 +31,7 @@ import ai.pleos.playground.vehicle.constant.telltale.TelltaleColor
 import ai.pleos.playground.vehicle.constant.telltale.TelltaleState
 import ai.pleos.playground.vehicle.listener.DrivingTimeListener
 import ai.pleos.playground.vehicle.listener.EvBatteryStateOfChargeListener
+import ai.pleos.playground.vehicle.listener.FuelPercentListener
 import ai.pleos.playground.vehicle.listener.SeatOccupancyListener
 import ai.pleos.playground.vehicle.listener.SteeringWheelAngleListener
 import ai.pleos.playground.vehicle.listener.TurnSignalStateListener
@@ -75,6 +76,7 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
     var steerDeg: Float? = null; private set
     var tripMin: Int? = null; private set
     var soc: Int? = null; private set
+    var fuel: Int? = null; private set // 연료량 %. 엔진차만(Fuel.getFuelPercent). 연료 종류를 읽는 API는 SDK 2.3.2에 없다
     var passengerSeat: Boolean? = null; private set // 조수석 착석 원값. 에뮬은 콘솔 값과 반대로 온다(26 실측) — 뒤집지 않고 RoomService가 SeatEdge 기준선으로 해석
     var telltale: String? = null; private set // 빨간색·켜짐 경고등 종류
     var driverDoorPos: Int? = null; private set // 운전석(ROW_1_LEFT) 문 위치값. 0 = 닫힘 가정. null = 모름/권한 없음
@@ -168,6 +170,14 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
             })
             v.getEvBattery().getEvBatteryStateOfCharge({ onSoc(it) }, fail("soc get"))
         }.onFailure { Log.w(TAG, "soc attach FAIL $it") }
+        runCatching {
+            val onFuel = { f: Int? -> Log.i(TAG, "fuel $f"); ui.post { fuel = f }; Unit }
+            v.getFuel().registerFuelPercent(object : FuelPercentListener {
+                override fun onFuelPercentUpdated(f: Int?) { onFuel(f) }
+                override fun onFailed(e: Exception) { fail("fuel")(e) }
+            })
+            v.getFuel().getFuelPercent({ onFuel(it) }, fail("fuel get"))
+        }.onFailure { Log.w(TAG, "fuel attach FAIL $it") }
         runCatching {
             val seat = SeatArea(SeatValue.ROW_1_RIGHT)
             val onSeat = { b: Boolean? -> Log.i(TAG, "passengerSeat $b"); ui.post { passengerSeat = b }; Unit }
