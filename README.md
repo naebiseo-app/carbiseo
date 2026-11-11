@@ -128,7 +128,7 @@ cd car-app
 ./gradlew assembleRelease --max-workers=2
 ```
 - 저장소 루트 `.env`의 `CAR_TOKEN`이 BuildConfig로 들어간다(`.env.example` 참고). 없으면 서버 연동 없이 빌드된다.
-- release 서명은 저장소 밖 `../keys/keystore.properties`(storeFile·storePassword·keyAlias·keyPassword)를 읽는다. 없으면 서명 없이 빌드된다.
+- release 서명은 저장소 밖 `../keys/keystore.properties`(storeFile·storePassword·keyAlias·keyPassword)를 읽는다. 없으면 서명 없이 빌드된다(`app-release-unsigned.apk`, 그대로는 설치 안 됨 — 설치는 `apk/`의 서명된 파일 또는 `./gradlew assembleDebug`).
 - 이름 호출 음성 모델(약 132MB)은 파일 크기 때문에 저장소에 넣지 않았다. 없어도 빌드되고 이름 호출만 동작하지 않는다. 넣으려면 [모델 압축 파일](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-korean-2024-06-16.tar.bz2)을 풀어 `encoder-epoch-99-avg-1.int8.onnx`·`decoder-epoch-99-avg-1.int8.onnx`·`joiner-epoch-99-avg-1.int8.onnx`·`tokens.txt`를 `car-app/app/src/main/assets/sherpa-ko/`에 복사한다. 제출 APK에는 모델이 들어 있다.
 - minify(R8)는 끈다. Pleos SDK가 kotlin-reflect로 클래스 메타데이터를 읽기 때문이다.
 - Gleo 연결: `app/src/main/assets/schema.json`에 함수 3개(`READ_RECENT_CALLS`·`READ_NEXT_SCHEDULE`·`ADD_REST_STOP`). 에뮬은 `adb emu avd hostmicon`으로 마이크를 켠 뒤 `adb shell cmd voiceinteraction show`로 듣기를 시작하고 "내비서 일정 읽어줘"라고 말하면 된다. 이름 호출을 켜 두면 Gleo가 버튼을 무시하므로 끄고 시험한다.
@@ -145,6 +145,7 @@ cd phone-app
 ### 3. 서버 (Cloudflare Workers + D1)
 ```
 cd server
+npm install
 npm test
 npx wrangler@4 d1 execute carbiseo --remote --file=schema.sql   # 최초 1회
 npm run deploy
@@ -160,9 +161,9 @@ npm run deploy
 ## 테스트
 | 대상 | 명령 | 현재 |
 |---|---|---|
-| 차 앱 단위 테스트(방 판정·부재중·주행 기능·피로·졸음 확인·지각·경고·도착 예정·배경·폰 알림·재현 통화) | `cd car-app && ./gradlew testDebugUnitTest --max-workers=2` | 172개 (11-09 기록 전체 통과) |
-| 서버(대본·서명 검증·관리자·보관 정책·요약·주인 통화·재현·중계·스위치·폰 알림·바로 연결·가족 문자·AI 문장 가드·카드 동작·예약 전화·근처 찾기·하차 정보·구글 캘린더·주차) | `cd server && npm test` | 177개 (11-09 실행 전체 통과) |
-| 휴대폰 연결 앱(메시지 알림 거르기·화면 로직) | `cd phone-app && ./gradlew testDebugUnitTest --max-workers=2` | 18개 (11-09 집계) |
+| 차 앱 단위 테스트(방 판정·부재중·주행 기능·피로·졸음 확인·지각·경고·도착 예정·배경·폰 알림·재현 통화) | `cd car-app && ./gradlew testDebugUnitTest --max-workers=2` | 174개 (11-11 깨끗한 clone 전체 통과) |
+| 서버(대본·서명 검증·관리자·보관 정책·요약·주인 통화·재현·중계·스위치·폰 알림·바로 연결·가족 문자·AI 문장 가드·카드 동작·예약 전화·근처 찾기·하차 정보·구글 캘린더·주차) | `cd server && npm test` | 183개 (11-11 깨끗한 clone 전체 통과) |
+| 휴대폰 연결 앱(메시지 알림 거르기·화면 로직) | `cd phone-app && ./gradlew testDebugUnitTest --max-workers=2` | 18개 (11-11 깨끗한 clone 전체 통과) |
 
 ## 개인정보
 - 음성은 우리 서버에 저장하지 않는다. 통화 엔진이 보낸 원문 기록은 7일 뒤 비우고, 요약 카드는 30일 뒤 삭제한다.
