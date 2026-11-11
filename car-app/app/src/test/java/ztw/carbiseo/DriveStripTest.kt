@@ -1,5 +1,6 @@
 package ztw.carbiseo
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -15,5 +16,11 @@ class DriveStripTest {
 
     @Test fun 정차와_판정_전은_숨긴다() {
         for (r in listOf("PARK", "(판정 전)", null)) assertFalse(stripVisible(r, appFront = false, canOverlay = true))
+    }
+
+    @Test fun 끌어_옮긴_카드는_화면_안에_머문다() {
+        assertEquals(100 to 200, clampCard(100, 200, 2560, 1440))
+        assertEquals(0 to 0, clampCard(-50, -9, 2560, 1440))
+        assertEquals((2560 - 595) to (1440 - 165), clampCard(9999, 9999, 2560, 1440))
     }
 }

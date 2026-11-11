@@ -6,6 +6,7 @@ import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -41,6 +43,10 @@ private const val CARD_Y = 1020
 private const val CARD_W = 595
 private const val CARD_H = 165
 
+/** 끌어 옮긴 카드 위치를 화면 안으로 묶는다(카드 전체가 보이게). */
+fun clampCard(x: Int, y: Int, screenW: Int, screenH: Int): Pair<Int, Int> =
+    x.coerceIn(0, maxOf(0, screenW - CARD_W)) to y.coerceIn(0, maxOf(0, screenH - CARD_H))
+
 /** 내비 위 카드 창. 메인 스레드에서만. 못 띄우면 로그만 남기고 띠 없이 음성 안내가 계속된다. */
 class DriveStrip(private val c: Context) : LifecycleOwner, SavedStateRegistryOwner {
     private val life = LifecycleRegistry(this)
@@ -50,6 +56,19 @@ class DriveStrip(private val c: Context) : LifecycleOwner, SavedStateRegistryOwn
     private val wm = c.getSystemService(WindowManager::class.java)
     private var view: ComposeView? = null
     private var failed = false // 조건이 풀릴 때까지 다시 안 띄운다(200ms마다 실패 로그 방지)
+    private val prefs = c.getSharedPreferences("car_ui", Context.MODE_PRIVATE)
+    private var lp: WindowManager.LayoutParams? = null
+
+    /** 카드를 손가락으로 끈 만큼 옮긴다. 손을 떼면 위치를 저장해 다음에도 그 자리에 띄운다. */
+    private fun drag(dx: Float, dy: Float) {
+        val v = view ?: return; val p = lp ?: return
+        val b = screen()
+        clampCard(p.x + dx.toInt(), p.y + dy.toInt(), b.x, b.y).let { (x, y) -> p.x = x; p.y = y }
+        runCatching { wm.updateViewLayout(v, p) }
+    }
+    // 앱 창(displayMetrics)이 아니라 화면 전체 크기. 앱 창 기준이면 카드가 왼쪽으로 밀린다(11-11 실측)
+    @Suppress("DEPRECATION") private fun screen() = android.graphics.Point().also { wm.defaultDisplay.getRealSize(it) }
+    private fun dragEnd() { lp?.let { prefs.edit().putInt("strip_x", it.x).putInt("strip_y", it.y).apply() } }
 
     init { life.currentState = Lifecycle.State.RESUMED }
 
@@ -58,22 +77,26 @@ class DriveStrip(private val c: Context) : LifecycleOwner, SavedStateRegistryOwn
         else if (view == null && !failed) runCatching {
             val v = ComposeView(c).apply {
                 setViewTreeLifecycleOwner(this@DriveStrip); setViewTreeSavedStateRegistryOwner(this@DriveStrip)
-                setContent { Strip(RoomService.screenOverride ?: RoomService.room) }
+                setContent { Strip(RoomService.screenOverride ?: RoomService.room, ::drag, ::dragEnd) }
             }
             // 카드 크기만 한 창이라 밖의 터치는 내비로 간다(NOT_FOCUSABLE이면 NOT_TOUCH_MODAL도 켜진다)
-            wm.addView(v, WindowManager.LayoutParams(CARD_W, CARD_H,
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.LEFT; x = CARD_X; y = CARD_Y })
-            view = v
+            val b = screen()
+            val (x0, y0) = clampCard(prefs.getInt("strip_x", CARD_X), prefs.getInt("strip_y", CARD_Y), b.x, b.y)
+            val p = WindowManager.LayoutParams(CARD_W, CARD_H,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.LEFT; x = x0; y = y0 }
+            wm.addView(v, p)
+            view = v; lp = p
         }.onFailure { failed = true; Log.w("ROOM", "strip add FAIL $it") }
     }
 }
 
 /** 내비 위 작은 카드: 상태 · 급한 건 수 · 말하기. 도착 시각은 내비가 보여 준다. 창 밀도 160 = px 1:1. */
 @Composable
-private fun Strip(r: String) {
+private fun Strip(r: String, onDrag: (Float, Float) -> Unit, onDragEnd: () -> Unit) {
     val ctx = LocalContext.current
     val d = driveNow(r)
-    Row(Modifier.size(CARD_W.dp, CARD_H.dp).clip(RoundedCornerShape(28.dp)).background(DriveBg).border(3.dp, d.acc, RoundedCornerShape(28.dp)).padding(horizontal = 28.dp),
+    Row(Modifier.size(CARD_W.dp, CARD_H.dp).clip(RoundedCornerShape(28.dp)).background(DriveBg).border(3.dp, d.acc, RoundedCornerShape(28.dp))
+        .pointerInput(Unit) { detectDragGestures(onDragEnd = onDragEnd) { ch, a -> ch.consume(); onDrag(a.x, a.y) } }.padding(horizontal = 28.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(d.title.replace('\n', ' '), color = DTx, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
