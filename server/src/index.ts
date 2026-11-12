@@ -1,4 +1,4 @@
-import { CALL_ID, carChip, callerNumber, cleanMent, cleanName, field, freshCtx, hhmm, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseMode, parseRoom, pickScript, isDirect, parkingScript, reserveScript, sameNumber, type Mode, type Recent } from "./script.ts";
+import { CALL_ID, carChip, callerNumber, cleanMent, cleanName, field, freshCtx, hhmm, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseEtaShare, etaFor, inBook, parseMode, parseRoom, pickScript, isDirect, parkingScript, reserveScript, sameNumber, type EtaShare, type Mode, type Recent } from "./script.ts";
 import { adminPage, basicOk, demoSchedule, encodeReplay, parseFakeCall, replayScript, type MailRow, type ReplyRow } from "./admin.ts";
 import { FALLBACK, guardText, isBlocked } from "./guard.ts";
 import { connectGoogle, disconnectGoogle, googleStatus, syncCalendar, syncIfStale } from "./calendar.ts";
@@ -495,6 +495,11 @@ export default {
         if (!v) return json({ error: "mode must be ai|ment|off" }, 400);
         cur.mode = v;
       }
+      if ("eta_share" in b) { // 도착 예정 알리기: all|known|off (없으면 known)
+        const v = parseEtaShare(b.eta_share);
+        if (!v) return json({ error: "eta_share must be all|known|off" }, 400);
+        cur.eta_share = v;
+      }
       for (const k of ["owner_label", "assistant_name"] as const) {
         if (!(k in b)) continue;
         const v = cleanName(b[k]);
@@ -552,6 +557,8 @@ export default {
       let ment: string | undefined;
       let known: string | undefined; // 같은 번호의 지난 통화 카드 이름(음성인식에 이름을 맡기지 않음)
       let isOwner = sameNumber(callerNumber(raw), env.OWNER_NUMBER);
+      let acq = false; // 아는 번호(바로 연결·주소록·일정 상대·지난 통화 카드)
+      let share: EtaShare = "known";
       let recent: Recent[] = [];
       let clk = now(); // 대본의 요일·시각(평일/저녁/주말). 녹화용 시연 시각이 있으면 그만큼 민다
       try {
@@ -568,6 +575,8 @@ export default {
         direct = isDirect(st?.direct_numbers, callerNumber(raw));
         schedule = await kvGet(env.DB, "schedule");
         const from = callerNumber(raw);
+        acq = direct || inBook(await kvGet(env.DB, "contacts"), schedule, from);
+        share = parseEtaShare(st?.eta_share) ?? "known";
         if (mode === "ai" && !isOwner && from && !(await kvGet(env.DB, "owner_as_guest"))) {
           // ponytail: 최근 50건만 JS에서 sameNumber로 거른다. 카드가 많아 놓치면 from_number 정규화 컬럼+인덱스로
           const rows = (await env.DB.prepare("SELECT from_label,from_number FROM inbox WHERE kind='call' AND from_label<>'' AND from_label NOT LIKE '끝번호%' AND from_number IS NOT NULL ORDER BY id DESC LIMIT 50").all<{ from_label: string; from_number: string }>()).results;
@@ -582,7 +591,8 @@ export default {
         const instruction = ownerScript({ owner, name, room, eta, schedule, recent, nowMs: now(), passenger: cc?.passenger === true, trip_min: cc?.trip_min });
         return json({ CallContext: { Instruction: instruction, Variables: { room: room ?? "UNKNOWN", owner_mode: "1" } } });
       }
-      const s = pickScript(room, owner, name, eta, mode, nextEventAt(schedule, now()), cc, clk, ment, known);
+      // ponytail: 한 마디 안내 모드는 지난 통화 카드(known)를 안 찾는다 — 주소록·일정·바로 연결로만 아는 번호
+      const s = pickScript(room, owner, name, etaFor(eta, share, acq || !!known), mode, nextEventAt(schedule, now()), cc, clk, ment, known);
       const callId = field(raw, ["callid", "callsid", "call_id"]);
       // 멘트·끔: 모델이 끊기를 미루는 일이 있어(장면 9) 멘트 길이만큼 기다렸다가 서버가 통화를 끝낸다. ponytail: 고정 12초, 긴 사용자 멘트면 길이 비례로
       if (mode !== "ai" && CALL_ID.test(callId) && env.CLAWOPS_API_KEY)

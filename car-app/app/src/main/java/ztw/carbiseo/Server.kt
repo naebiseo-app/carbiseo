@@ -29,6 +29,7 @@ object Server {
 
     fun postCardAction(id: Long, action: String) = post("/car/inbox/$id", JSONObject().put("action", action))
     fun postMode(mode: String) = post("/car/settings", JSONObject().put("mode", mode))
+    fun postEtaShare(v: String) = post("/car/settings", JSONObject().put("eta_share", v)) // all|known|off
 
     /** 확인된 문자 발송. 결과 code(queued·sent·overseas_ip_blocked 등), 네트워크 실패면 null. */
     fun send(label: String, number: String, body: String): String? = runCatching {

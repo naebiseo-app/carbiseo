@@ -66,6 +66,11 @@ export function parseEta(v: unknown): number | null {
   return Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 1440 ? (v as number) : null;
 }
 
+// 도착 예정을 누구에게 말하나: 모두 / 아는 번호만(기본) / 말하지 않음. 모르는 번호엔 '운전 중'까지만(개인정보).
+export type EtaShare = "all" | "known" | "off";
+export const parseEtaShare = (v: unknown): EtaShare | null => (["all", "known", "off"].includes(v as string) ? (v as EtaShare) : null);
+export const etaFor = (eta: number | null, share: EtaShare, knownCaller: boolean) => (share === "all" || (share === "known" && knownCaller) ? eta : null);
+
 export type Mode = "ai" | "ment" | "off";
 export const parseMode = (v: unknown): Mode | null => (["ai", "ment", "off"].includes(v as string) ? (v as Mode) : null);
 
@@ -131,6 +136,9 @@ export const CALL_ID = /^CA[0-9a-f]{20,40}$/i;
 // 숫자만 비교, +82 → 0
 const digits = (n: string) => n.replace(/\D/g, "").replace(/^82/, "0");
 export const sameNumber = (a: string, b: string | undefined) => !!b && digits(a).length >= 9 && digits(a) === digits(b);
+// 아는 번호인가: 주소록(kv contacts 이름→번호)·일정 상대 번호에 발신번호가 있나
+export const inBook = (contacts: unknown, schedule: unknown, from: string) =>
+  (contacts && typeof contacts === "object" ? Object.values(contacts) : []).concat(Array.isArray(schedule) ? schedule.map((e) => e?.contact_number) : []).some((n) => typeof n === "string" && sameNumber(from, n));
 // 바로 연결 목록(settings.direct_numbers)에 발신번호가 있나
 export const isDirect = (list: unknown, from: string) => Array.isArray(list) && list.some((n) => sameNumber(from, n));
 

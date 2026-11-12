@@ -159,3 +159,17 @@ test("이름·용건을 들으면 되읽고 '맞으실까요?'로 한 번 확인
   assert.match(s, /\[2-2\][^[]*맞으실까요\?/);
   assert.doesNotMatch(s, /'맞으시죠\?'라고 따로 확인하지 않습니다/);
 });
+
+test("도착 예정은 설정·아는 번호에 따라서만 말한다", async () => {
+  const { etaFor, inBook, parseEtaShare, pickScript } = await import("../src/script.ts");
+  assert.equal(etaFor(12, "known", false), null);
+  assert.equal(etaFor(12, "known", true), 12);
+  assert.equal(etaFor(12, "all", false), 12);
+  assert.equal(etaFor(12, "off", true), null);
+  assert.equal(parseEtaShare("x"), null);
+  assert.equal(inBook({ 김민수: "01012345678" }, null, "+821012345678") || inBook({ 김민수: "01012345678" }, null, "010-1234-5678"), true);
+  assert.equal(inBook(null, [{ contact_number: "01012345678" }], "01012345678"), true);
+  assert.equal(inBook({ 김민수: "01012345678" }, [], "01099999999"), false);
+  assert.doesNotMatch(pickScript("DRIVE_WORK", "주인", undefined, etaFor(12, "known", false)).instruction, /분 뒤 도착/);
+  assert.match(pickScript("DRIVE_WORK", "주인", undefined, etaFor(12, "known", true)).instruction, /약 12분 뒤 도착/);
+});

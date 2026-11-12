@@ -1097,6 +1097,19 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
                 }
             }
         }
+        // 전화 건 사람에게 도착 예정을 말할지: 서버 저장이 성공해야 바뀐다. 모르는 번호엔 '운전 중'까지만(기본).
+        var etaShare by remember { mutableStateOf(prefs.getString("eta_share", "known") ?: "known") }
+        Text("전화 건 분께 도착 예정 알리기", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            for ((v, t) in listOf("off" to "알리지 않기", "known" to "아는 번호만", "all" to "모두에게")) {
+                Button({ scope.launch {
+                    val ok = withContext(Dispatchers.IO) { Server.postEtaShare(v) }
+                    if (ok) { etaShare = v; prefs.edit().putString("eta_share", v).apply() } else toast(ctx, "저장 실패 — 다시 시도해 주세요")
+                } }, Tall, colors = ButtonDefaults.buttonColors(containerColor = if (etaShare == v) ParkAcc else ParkNote)) {
+                    Text(t, color = if (etaShare == v) Color.White else ParkInk, fontSize = 18.sp)
+                }
+            }
+        }
         Text("업무 끝 시각: ${RoomService.workEndHour}시", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             for (h in WORK_END_CHOICES) {
