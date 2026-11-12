@@ -416,12 +416,14 @@ export async function coordAddress(key: string | undefined, lat: number, lng: nu
   } catch { return ""; }
 }
 
-/** 차 현재 좌표 근처 가까운 순 최대 15곳(카카오 카테고리 검색, 반경 5km). 지나온 곳을 거르는 건 차가 한다. category는 FD6 식당·CE7 카페·OL7 주유소·CS2 충전소만. 좌표·결과는 저장·로그하지 않는다. */
+/** 차 현재 좌표 근처 가까운 순 최대 15곳(카카오 카테고리 검색, 반경 5km). 지나온 곳을 거르는 건 차가 한다. category는 FD6 식당·CE7 카페·OL7 주유소·CS2 충전소(차와 약속한 이름표일 뿐, 실제로는 '전기차충전소' 키워드 검색)만. 좌표·결과는 저장·로그하지 않는다. */
 export async function nearby(key: string | undefined, category: string, lat: string, lng: string): Promise<{ places: { name: string; lat: number; lng: number; distance: number }[] } | { reason: string }> {
   if (!key) return { reason: "no_key" };
   if (!["FD6", "CE7", "OL7", "CS2"].includes(category) || lat.trim() === "" || lng.trim() === "" || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return { reason: "bad_request" };
   try {
-    const r = await fetch(`https://dapi.kakao.com/v2/local/search/category.json?category_group_code=${category}&x=${lng}&y=${lat}&radius=5000&sort=distance&size=15`, { headers: { Authorization: `KakaoAK ${key}` } });
+    // 카카오 CS2는 편의점이고 전기차 충전소 카테고리는 없다(11-12 에뮬 실측: 경유지로 편의점이 들어감) → 충전소만 키워드 검색
+    const q = category === "CS2" ? `keyword.json?query=${encodeURIComponent("전기차충전소")}` : `category.json?category_group_code=${category}`;
+    const r = await fetch(`https://dapi.kakao.com/v2/local/search/${q}&x=${lng}&y=${lat}&radius=5000&sort=distance&size=15`, { headers: { Authorization: `KakaoAK ${key}` } });
     if (!r.ok) return { reason: "upstream" };
     const docs = ((await r.json()) as { documents?: { place_name?: string; y?: string; x?: string; distance?: string }[] }).documents ?? [];
     const places = docs.slice(0, 15).map((d) => ({ name: d.place_name ?? "", lat: Number(d.y), lng: Number(d.x), distance: Number(d.distance) }))
