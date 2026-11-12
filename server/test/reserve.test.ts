@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import worker, { signData } from "../src/index.ts";
 import { parkingScript, reserveScript } from "../src/script.ts";
+import { FALLBACK } from "../src/guard.ts";
 
 // D1 흉내: 실제 schema.sql을 메모리 SQLite에
 function d1() {
@@ -380,4 +381,49 @@ test("예약 대본은 그대로, 주차 대본은 별개 함수", () => {
   assert.ok(s.includes("알아낼 것은 오늘 오후 6시 30분에 네 명 예약이 되는지, 주차가 되는지 두 가지입니다."));
   const p = parkingScript({ owner: "만일", place: "가'\"`{}명" });
   assert.ok(p.includes("만일님 대신 전화드렸어요. 지금 주차 자리가 있을까요?") && !p.includes("{") && p.length <= 4000);
+});
+
+// --- 공개 APK 토큰 남용 방지: 문자 발송·AI 대화 하루 상한 ---
+const send = (env: any, to_number: string) =>
+  worker.fetch(new Request("https://x/car/send", { method: "POST", headers: { authorization: "Bearer t" }, body: JSON.stringify({ to_number, body: "가명 문자", confirmed: true }) }), env);
+const chat = (env: any) =>
+  worker.fetch(new Request("https://x/car/chat", { method: "POST", headers: { authorization: "Bearer t" }, body: JSON.stringify({ text: "안녕" }) }), env);
+
+test("문자 발송 하루 20건 상한: 21번째는 429 daily_limit, 중계 호출 없음", async () => {
+  const f = fake();
+  try {
+    const env = mkEnv({ SMS_RELAY_URL: "https://relay.test/send" });
+    for (let i = 0; i < 20; i++) assert.equal((await send(env, "010-1111-2222")).status, 200);
+    f.calls.length = 0;
+    const r = await send(env, "010-1111-2222");
+    assert.equal(r.status, 429);
+    assert.deepEqual(await r.json(), { ok: false, code: "daily_limit" });
+    assert.equal(f.calls.length, 0);
+  } finally { f.restore(); }
+});
+
+test("데모 번호(010-0000-000x) 발송은 하루 상한에 안 센다", async () => {
+  const f = fake();
+  try {
+    const env = mkEnv({ SMS_RELAY_URL: "https://relay.test/send" });
+    for (let i = 0; i < 25; i++) assert.equal((await send(env, "010-0000-0001")).status, 200);
+    assert.equal((await send(env, "010-1111-2222")).status, 200); // 실제 번호는 아직 0건
+    assert.equal(rows(env, "sent").length, 26);
+  } finally { f.restore(); }
+});
+
+test("말동무 하루 200회 상한: 넘으면 AI fetch 없이 FALLBACK.chat, 어제 횟수는 무관", async () => {
+  const f = fake();
+  try {
+    const env = mkEnv();
+    const day = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 10);
+    const put = (v: object) => env.DB.db.prepare("INSERT OR REPLACE INTO kv(key,value,updated_at) VALUES('chat_count',?,?)").run(JSON.stringify(v), Date.now());
+    put({ day: "2000-01-01", n: 999 }); // 어제 이전 횟수는 안 센다
+    await chat(env);
+    assert.equal(to(f, "anthropic").length, 1); // 상한 전에는 AI를 부른다
+    put({ day, n: 200 });
+    f.calls.length = 0;
+    assert.deepEqual(await (await chat(env)).json(), { reply: FALLBACK.chat, source: "fallback" });
+    assert.equal(to(f, "anthropic").length, 0);
+  } finally { f.restore(); }
 });

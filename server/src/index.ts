@@ -32,6 +32,8 @@ const json = (o: unknown, status = 200) =>
 const now = () => Date.now();
 
 const RESERVE_DAILY_MAX = 5; // 예약 전화 하루(KST) 상한: 오발신·반복 호출로 전화비가 새는 것을 막는다
+const SEND_DAILY_MAX = 20; // 문자 발송 하루(KST) 상한(데모 번호 제외): 공개 APK 토큰으로 문자비가 새는 것을 막는다
+const CHAT_DAILY_MAX = 200; // 말동무 AI 대화 하루(KST) 상한: 공개 APK 토큰으로 AI비가 새는 것을 막는다
 
 export async function kvGet(db: D1Database, key: string) {
   const r = await db.prepare("SELECT value FROM kv WHERE key=?").bind(key).first<{ value: string }>();
@@ -661,6 +663,9 @@ export default {
       if (!authed) return json({ error: "unauthorized" }, 401);
       const p = parseSend((await req.json().catch(() => ({}))) as Record<string, unknown>);
       if ("error" in p) return json({ error: p.error }, 400);
+      const day0 = Math.floor((now() + 9 * 3_600_000) / 86_400_000) * 86_400_000 - 9 * 3_600_000; // 오늘 0시(KST)
+      const used = await env.DB.prepare("SELECT COUNT(*) AS n FROM inbox WHERE kind='sent' AND IFNULL(json_extract(meta,'$.code'),'')<>'demo' AND created_at>=?").bind(day0).first<{ n: number }>();
+      if ((used?.n ?? 0) >= SEND_DAILY_MAX) return json({ ok: false, code: "daily_limit" }, 429);
       const r = await sendText(env, p.to, p.body, p.label, null);
       return json(r, r.ok ? 200 : 502);
     }
@@ -873,7 +878,15 @@ export default {
       const history = (Array.isArray(b.history) ? b.history : []).slice(-6)
         .filter((h): h is { role: "user" | "assistant"; text: string } => !!h && (h.role === "user" || h.role === "assistant") && typeof h.text === "string")
         .map((h) => ({ role: h.role, text: h.text.slice(0, 200) }));
-      return json(await carChat(env.ANTHROPIC_API_KEY, text, history, (await kvGet(env.DB, "car_context").catch(() => null))?.room === "PARK"));
+      // 대화는 DB에 행이 없어 kv에 날짜별 횟수. 상한이면 키 없이 불러 AI 없이 고정 문구(졸음 안전 문구는 그대로). DB 오류는 막지 않는다
+      const day = new Date(now() + 9 * 3_600_000).toISOString().slice(0, 10);
+      const cc = await kvGet(env.DB, "chat_count").catch(() => null);
+      const n = cc?.day === day ? Number(cc.n) || 0 : 0;
+      const over = n >= CHAT_DAILY_MAX;
+      if (!over) await kvPut(env.DB, "chat_count", { day, n: n + 1 }).catch(() => {});
+      const room = (await kvGet(env.DB, "car_context").catch(() => null))?.room === "PARK";
+      const out = await carChat(over ? undefined : env.ANTHROPIC_API_KEY, text, history, room);
+      return json(over ? { ...out, source: "fallback" } : out);
     }
 
     // 구글 캘린더 연결: 폰이 받은 인증 코드를 서버가 토큰으로 바꾼다(토큰은 폰·응답에 안 나간다)
