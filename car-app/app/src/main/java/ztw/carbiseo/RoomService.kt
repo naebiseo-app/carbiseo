@@ -627,10 +627,10 @@ class RoomService : Service() {
                     arriveSaid += ev.start; val z = arriveSaid.sorted().takeLast(50).joinToString(","); net.execute { prefs.edit().putString("arrive_said", z).apply() }; say(sp) } }
             // O4: 식당·카페류 목적지로 출발하면 한 번 "몇 분으로 예약할까요?"(업무·쉼 방 상관없이)
             val dn = forcedDest ?: adapters.destName
-            if (machine.room.let { it != null && it != Room.PARK } && !passenger && e != null && reservable(dn) && canAsk() &&
+            if (machine.room.let { it != null && it != Room.PARK } && !passenger && e != null && reservable(dn) && canAsk() && proactive != Proactive.OFF &&
                 reserveOnce.fire(true)) arriveAt(clock.millis(), e, clock.zone).let { t -> reserve = dn!! to t; reservePlace = null; askVoice(reserveSpeech(dn, t), Ask.RESERVE) }
             // 출발 때 한 번: D 기어로 운전이 시작되면(운전 1회당 한 번, 묻든 안 묻든 이때 한 번만 본다) 다음 일정 경로(+에너지 낮으면 충전소·주유소 경유지)를 묻는다
-            if (!departAsked && machine.room.let { it != null && it != Room.PARK } && machine.signals.gear == Gear.DRIVE && !passenger && canAsk()) {
+            if (!departAsked && machine.room.let { it != null && it != Room.PARK } && machine.signals.gear == Gear.DRIVE && !passenger && canAsk() && proactive != Proactive.OFF) { // '먼저 말 걸기' 끔이면 출발·예약 질문도 안 함(11-12 대표님 결정)
                 departAsked = true
                 val fuel = forcedFuel ?: adapters.fuel; val soc = forcedSoc ?: adapters.soc; val ev = forcedFuel == null && (soc != null || fuel == null)
                 val ev0 = nextEvent(schedule, System.currentTimeMillis())
