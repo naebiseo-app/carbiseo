@@ -6,7 +6,7 @@
 | 문제 | 내비서의 해결 |
 |---|---|
 | 운전 중 업무 전화가 오면 받자니 위험하고, 안 받자니 상대가 기다린다 | 운전 중 못 받은 전화는 AI 비서가 대신 받아 "운전 중이라 정차 후 연락드리겠습니다"처럼 방에 맞게 응대하고 요약 카드로 남긴다 |
-| 통신사 AI 비서는 내가 운전 중인지, 퇴근길인지 모른다 | 차 앱이 기어·목적지·도착 예정·운전 시간을 서버에 올리고, 통화 직전 서버가 그 상태로 응대 대본을 고른다 |
+| 통신사 AI 비서는 내가 운전 중인지, 퇴근길인지 모른다 | 차 앱이 기어·목적지·도착 예정·동승자 여부 등을 서버에 올리고, 통화 직전 서버가 그 상태로 응대 대본을 고른다(운전 시간은 상대에게 말하지 않는다) |
 | 운전 중 화면을 들여다보면 위험하다 | 주행 중엔 상태 링·숫자와 음성 한 줄만. 카드 확인·문자 답장은 기어 P일 때만, 문자를 음성으로 보낼 땐 내용을 읽어 주고 "응"일 때만 |
 | 운전 중 폰 메시지 알림을 볼 수 없다 | 차가 방·운전 상황으로 **언제·무엇을 읽을지** 정해 "카톡 3건, 김민수님 외 2명. 읽어드릴까요?"로 묻고, "읽어줘"·"답장, ○○라고 해 줘"·"나중에"로 답한다 |
 | 퇴근 뒤에도 업무가 따라온다 | 퇴근길엔 급한 전화·바로 연결 번호만 알리고, 나머지와 "내일 아침에"로 미룬 카드는 다음 첫 업무 운전에 "어제 넘긴 전화 N건"으로 묶어 알린다 |
@@ -50,7 +50,7 @@ flowchart LR
 | Vehicle `getGear().registerGearSelection` / `getCurrentGearSelectionState` | 방 판정의 핵심(P = 5분 사무실), 후진 중 음성 미루기, 카드 칩 "기어 D" | `CarAdapters.kt`, `RoomStateMachine.kt` |
 | Vehicle `getTurnSignal().registerTurnSignalState` | 깜빡이 켜진 동안 음성 미루기 | `CarAdapters.kt`, `Drive.kt`(busyManeuver) |
 | Vehicle `getSteeringWheel().registerSteeringWheelAngle` | 큰 조향 중 음성 미루기 | `CarAdapters.kt`, `Drive.kt` |
-| Vehicle `getOdometer().getTrip{Current,Cumulative,SinceRefill}DrivingTime` + register | 피로 모드(장시간 운전이면 휴게소 안내 + 버튼), 졸음 확인 위험 판정, 응대 대본 "N시간 운전" | `CarAdapters.kt`, `Drive.kt`(TripDelta) |
+| Vehicle `getOdometer().getTrip{Current,Cumulative,SinceRefill}DrivingTime` + register | 피로 모드(장시간 운전이면 휴게소 안내 + 버튼), 졸음 확인 위험 판정, 통화 카드 칩 "N시간 운전"(상대에게는 말하지 않음) | `CarAdapters.kt`, `Drive.kt`(TripDelta) |
 | Vehicle `getSeat().registerSeatOccupancy` / `getCurrentSeatOccupancy` (조수석) | 동승자 감지 시 "동승자 모드로 바꿀까요?" 확인 | `CarAdapters.kt`, `Drive.kt`(SeatEdge) |
 | Vehicle `getEvBattery().registerEvBatteryStateOfCharge` / `getEvBatteryStateOfCharge` | 서버로 보내는 차량 맥락(soc), 20% 이하면 충전소 먼저 제안 | `CarAdapters.kt`, `RoomService.kt` |
 | Vehicle `getDoor().registerDoorPosition` / `getCurrentDoorPosition` (운전석 `ROW_1_LEFT`) | 기어 P + 운전석 문 열림 = 하차 → 주차 위치를 서버에 한 번 더 올림 | `CarAdapters.kt`, `Drive.kt`(gotOff) |
@@ -100,22 +100,25 @@ flowchart LR
 
 | 기능 | 동작 | 확인 |
 |---|---|---|
-| 먼저 말 걸기 | 설정 '먼저 말 걸기' 끄기 / 필요할 때만(기본, 운전 1번에 종류별 1번) / 자주(같은 종류 2시간마다). ①배터리 20% 이하 "배터리가 N퍼센트 남았어요. 근처 충전소 찾아드릴까요?" ②점심 11:30~13:30·저녁 17:30~19:30에 60분 넘게 운전 중이고 목적지가 식당류가 아니면 "점심 시간이에요. 근처 식당 찾아드릴까요?" ③업무 운전 중 다음 일정 장소로 가는데 경로 정체가 최고 단계(HEAVY)이고 일정에 상대가 있으면 "앞이 많이 막혀요. 다음 일정 상대에게 늦을 수 있다고 알릴까요?" | ①② 에뮬 실측(값은 디버그 주입). ③ 정체 단계 수신만 에뮬 실측 |
+| 먼저 말 걸기 | 설정 '먼저 말 걸기' 끄기 / 필요할 때만(기본, 운전 1번에 종류별 1번) / 자주(같은 종류 2시간마다). ①배터리 20% 이하 "배터리가 N퍼센트 남았어요. 근처 충전소 찾아드릴까요?" ②점심 11:30~13:30·저녁 17:30~19:30에 60분 넘게 운전 중이고 목적지가 식당류가 아니면 "점심 시간이에요. 근처 식당 찾아드릴까요?" ③업무 운전 중 다음 일정 장소로 가는데 경로 정체가 최고 단계(HEAVY)이고 일정에 상대가 있으면 "앞이 많이 막혀요. 다음 일정 상대에게 늦을 수 있다고 알릴까요?" ④아래 '출발 때 한 번 묻기'. 끄면 ④와 식당 예약 질문도 하지 않는다 | ①② 에뮬 실측(값은 디버그 주입). ③ 정체 단계 수신만 에뮬 실측 |
+| 출발 때 한 번 묻기 | D 기어로 운전이 시작되면(업무·쉼 운전 모두, 운전 1번에 1번) 다음 일정 장소로 가는 중이 아닐 때 "다음 일정 ○○로 안내할까요?". 배터리(전기차)·연료(엔진차)가 20% 이하면 "배터리가 N퍼센트라 가는 길에 충전소도 넣을게요."(엔진차는 연료·주유소)를 붙이고, "응"이면 경로와 함께 가까운 충전소·주유소를 첫 경유지로 넣는다. 동승자가 있거나 '먼저 말 걸기'를 끄면 묻지 않는다 | 단위 테스트(`DriveTest`) |
 | 근처 찾기 | "배고파·출출해·뭐 먹지"(식당), "커피 마시고 싶다"(카페), "기름 떨어졌어"(주유소), "충전해야 돼·배터리 부족"(충전소) → "근처 ○○ 찾아드릴까요?" → "응"이면 차 좌표를 서버로 1번 보내 카카오 장소 검색(반경 5km) → 목적지 방향 앞쪽에서 가장 가까운 곳 "○○, N미터예요, 들를까요?" → "응"이면 첫 경유지. 주유소·충전소는 "경로에 넣었어요", 식당·카페는 "○○에 HH:MM쯤 도착해요. 몇 분으로 예약할까요?" → 인원을 말하면 AI 예약 전화 | 실서버 실측(11-07). 식당 경유지 뒤 예약 질문 연결은 에뮬 미실측 |
 | 하차 카드 | 주행 → P 전환 때 "남은 일"(할 일·회신할 전화 최대 8건 + "외 N건")과 주차 위치(주소, 메모, "다음 출발 때 지워져요"). 기어 P에서 운전석 문이 열리면 위치를 서버에 한 번 더 올린다. 폰 앱 '내비서 연결'에서도 같은 카드를 보고 할 일을 끝낼 수 있다(`/phone/parked`) | 차 화면 에뮬 실측, 폰 화면 캡처 확인, 차→서버→폰 연동 미실측 |
 | 주차 메모 | 말 속 "주차 지하 2층 B구역" → 층·구역만 저장, "주차 위치를 적어 뒀어요". 하차 카드 [메모 남기기] → "어디에 세우셨어요?" 뒤 한 마디(40자) | 에뮬 실측 |
-| 주차 빈자리 | "주차 자리 있어?" → 목적지(없으면 현재 위치) 1km 안 최대 3곳의 공공데이터 실시간 값 → "○○에 N자리 남았고 N미터예요, 경유지로 넣을까요?" / "근처 주차장이 다 찼어요" / 정보가 없으면 "가게에 주차 자리 물어볼까요?" → "응"이면 AI가 가게에 주차 가능 여부만 묻는 전화(예약 전화와 같은 `O4_LIVE`·하루 5통 규칙) | 서버 단위 테스트. 범위는 아래 '알려진 제약' |
+| 주차 빈자리 | "주차 자리 있어?" → 목적지(없으면 현재 위치) 1km 안 최대 3곳의 공공데이터 실시간 값 → "○○에 N자리 남았고 N미터예요, 경유지로 넣을까요?" / "근처 주차장이 다 찼어요" / 정보가 없으면 "가게에 주차 자리 물어볼까요?" → "응"이면 AI가 가게에 지금 주차 자리가 있는지와 주차비를 묻는 전화(예약 전화와 같은 `O4_LIVE`·하루 5통 규칙) | 서버 단위 테스트. 범위는 아래 '알려진 제약' |
 | 구글 캘린더 | 폰 앱에서 구글 로그인(`calendar.events.readonly`) → 서버가 인증 코드를 토큰으로 바꿔 보관(폰·차로 안 내보냄) → `/car/schedule` 조회 때 5분 넘게 지났으면 다시 가져옴. 일정 장소는 카카오 검색으로 좌표를 붙여 지각 계산에 쓰고, 집·회사·온라인처럼 모호한 장소는 찾지 않는다. 연결 전·끊은 뒤는 데모 일정 | 시험 계정으로 연결·일정 수신 실측(좌표 변환 전 버전). 좌표 변환은 배포 뒤 재측정 필요 |
 | 비 오는 날 지각 | 와이퍼가 켜져 있으면 "비가 와서 다음 일정에 약 N분 늦을 것 같아요. 늦는다고 문자 보낼까요?", 문자 초안 "운전 중인데 비가 와서 약 N분 늦을 것 같습니다. 죄송합니다." | 에뮬 실측(도착 시간은 디버그로 늘림) |
 | 이름 호출 | "내비서"와 "네비서"를 같은 이름으로 받고, 인식기가 잘못 받아 적는 꼴(예: "네미서")도 받는다 | 녹음 음성 주입 3/3(11-09), 실차 마이크 미확인 |
 | 졸음 확인 | 카메라 없음. 주행 중 (운전 120분 이상) 또는 (60분 이상이면서 02:00~05:59·14:00~15:59)이면 "운전이 길어졌어요. 졸리면 말 걸어 주세요, 이야기 상대 해 드릴게요." 한 번 → 15분마다 "졸리진 않으세요? 한 마디만 대답해 주세요." 듣기 시작~인식 결과 6초 초과·무응답이 연속 2번이면 "반응이 늦어요. 가까운 졸음쉼터에서 쉬어 가세요." + 휴게소 버튼, 간격 5분. 정상 대답 1번이면 15분으로. 졸음 판정이 아니라 참고 신호 | 단위 테스트(`DriveTest`) |
 | 집 직접 지정 | 설정(P단) [지금 위치를 집으로] → 현재 위치를 집으로 저장. 직접 정한 집이 내비 즐겨찾기·최근 목적지보다 우선이라, 내비 즐겨찾기 없이도 집 문턱 안내·가족 도착 문자가 동작 | 단위 테스트 |
 | 공휴일 | 법정 공휴일(2027년까지 표, 임시공휴일 없음)을 주말처럼 쉬는 날로 판정 | 단위 테스트 |
+| 이름·용건 되읽기 | AI가 상대의 이름(소속)과 용건을 다 들으면 한 번 되읽고 "맞으실까요?"라고 묻는다(통화에 한 번). 고치면 고친 말로 다시 되읽고, 요약도 확인·고친 말을 쓴다 | 서버 단위 테스트 |
+| 내비 위 카드 | 주행 중 앱이 앞에 없으면 내비 위에 작은 카드(방 상태·급한 건 수·[말하기])를 띄운다(다른 앱 위 표시 권한이 있을 때만). 처음 자리는 오른쪽 아래이고, 끌어 옮기면 화면 안으로 묶고 위치를 기억한다 | 단위 테스트(위치 묶기) |
 
 ## 실행 방법
 ### 1. 에뮬레이터
 - Pleos Connect SDK Emulator(Android API 34 Pleos 이미지)를 실행한다.
-- APK 설치: `adb install -r -g apk/내비서_내비서_release.apk`
+- APK 설치: [GitHub Releases](https://github.com/naebiseo-app/carbiseo/releases/tag/v1.0-submit)의 `naebiseo-car-release.apk`(태그 v1.0-submit)를 받아 `adb install -r -g naebiseo-car-release.apk`
 - 차 화면 하단 앱 목록에서 **내비서**를 연다. 명령으로 열 땐 `adb shell monkey -p ztw.carbiseo -c android.intent.category.LAUNCHER 1`. 상단 알림에 "내비서 실행 중 — 방: ○○"이 뜨고, 내비를 앞에 띄워도 판정은 포그라운드 서비스에서 계속된다.
 - 방 바꿔 보기: `adb forward tcp:8088 tcp:8088` 후 `http://127.0.0.1:8088/`(Virtual Console)에서 기어 P ↔ D, 내비에서 목적지를 집/다른 곳으로.
 - 로그: `adb logcat -s ROOM ROOMADP`
@@ -128,7 +131,7 @@ cd car-app
 ./gradlew assembleRelease --max-workers=2
 ```
 - 저장소 루트 `.env`의 `CAR_TOKEN`이 BuildConfig로 들어간다(`.env.example` 참고). 없으면 서버 연동 없이 빌드된다.
-- release 서명은 저장소 밖 `../keys/keystore.properties`(storeFile·storePassword·keyAlias·keyPassword)를 읽는다. 없으면 서명 없이 빌드된다(`app-release-unsigned.apk`, 그대로는 설치 안 됨 — 설치는 `apk/`의 서명된 파일 또는 `./gradlew assembleDebug`).
+- release 서명은 저장소 밖 `../keys/keystore.properties`(storeFile·storePassword·keyAlias·keyPassword)를 읽는다. 없으면 서명 없이 빌드된다(`app-release-unsigned.apk`, 그대로는 설치 안 됨 — 설치는 GitHub Releases의 서명된 파일 또는 `./gradlew assembleDebug`).
 - 이름 호출 음성 모델(약 132MB)은 파일 크기 때문에 저장소에 넣지 않았다. 없어도 빌드되고 이름 호출만 동작하지 않는다. 넣으려면 [모델 압축 파일](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-korean-2024-06-16.tar.bz2)을 풀어 `encoder-epoch-99-avg-1.int8.onnx`·`decoder-epoch-99-avg-1.int8.onnx`·`joiner-epoch-99-avg-1.int8.onnx`·`tokens.txt`를 `car-app/app/src/main/assets/sherpa-ko/`에 복사한다. 제출 APK에는 모델이 들어 있다.
 - minify(R8)는 끈다. Pleos SDK가 kotlin-reflect로 클래스 메타데이터를 읽기 때문이다.
 - Gleo 연결: `app/src/main/assets/schema.json`에 함수 3개(`READ_RECENT_CALLS`·`READ_NEXT_SCHEDULE`·`ADD_REST_STOP`). 에뮬은 `adb emu avd hostmicon`으로 마이크를 켠 뒤 `adb shell cmd voiceinteraction show`로 듣기를 시작하고 "내비서 일정 읽어줘"라고 말하면 된다. 이름 호출을 켜 두면 Gleo가 버튼을 무시하므로 끄고 시험한다.
@@ -153,6 +156,7 @@ npm run deploy
 - 배포 주소: `https://carbiseo-api.<계정>.workers.dev`(심사용 주소는 제출 메일에 별도 기재) · 데모 관리 페이지 `/admin`(Basic 인증)
 - 비밀값(`wrangler secret put`): `CAR_TOKEN`, `ADMIN_TOKEN`, `CALL_CONTEXT_SECRET`, `OWNER_NUMBER`, `CLAWOPS_ACCOUNT_ID`, `CLAWOPS_API_KEY`, `CLAWOPS_NUMBER`, `CLAWOPS_SIGNING_KEY`, `SMS_RELAY_URL`, `SMS_RELAY_SECRET`, `ANTHROPIC_API_KEY`(말동무), `KAKAO_REST_KEY`(근처 찾기·가게 번호·주소·일정 장소 좌표), `PARKING_API_KEY`(공공데이터 주차정보), `GOOGLE_CLIENT_SECRET`(구글 캘린더). 키가 없으면 그 기능만 `no_key`·`no_secret`으로 꺼진다. `O4_LIVE=1`일 때만 예약·주차 문의 전화가 실제 가게로 간다(기본은 `OWNER_NUMBER`)
 - 주차장 좌표 표 `server/src/parking_lots.json`(지금 677곳)은 `server/scripts/parking_index.py`가 공공데이터 시설정보에서 만든다. 다시 만든 뒤 배포해야 반영된다
+- 하루(KST) 상한: 문자 발송 20건(데모 번호 제외)·말동무 AI 대화 200건·예약·주차 문의 전화 5건. 공개 APK에 든 토큰이 남용되는 것을 막는다.
 - 예약 작업: 매일 03시(KST) 보관 정책 실행.
 
 ### 4. 문자 중계 (Vercel, 서울 icn1)
@@ -161,9 +165,9 @@ npm run deploy
 ## 테스트
 | 대상 | 명령 | 현재 |
 |---|---|---|
-| 차 앱 단위 테스트(방 판정·부재중·주행 기능·피로·졸음 확인·지각·경고·도착 예정·배경·폰 알림·재현 통화) | `cd car-app && ./gradlew testDebugUnitTest --max-workers=2` | 174개 (11-11 깨끗한 clone 전체 통과) |
-| 서버(대본·서명 검증·관리자·보관 정책·요약·주인 통화·재현·중계·스위치·폰 알림·바로 연결·가족 문자·AI 문장 가드·카드 동작·예약 전화·근처 찾기·하차 정보·구글 캘린더·주차) | `cd server && npm test` | 183개 (11-11 깨끗한 clone 전체 통과) |
-| 휴대폰 연결 앱(메시지 알림 거르기·화면 로직) | `cd phone-app && ./gradlew testDebugUnitTest --max-workers=2` | 18개 (11-11 깨끗한 clone 전체 통과) |
+| 차 앱 단위 테스트(방 판정·부재중·주행 기능·피로·졸음 확인·지각·경고·도착 예정·배경·폰 알림·재현 통화) | `cd car-app && ./gradlew testDebugUnitTest --max-workers=2` | 176개 (11-12 집계) |
+| 서버(대본·서명 검증·관리자·보관 정책·요약·주인 통화·재현·중계·스위치·폰 알림·바로 연결·가족 문자·AI 문장 가드·카드 동작·예약 전화·근처 찾기·하차 정보·구글 캘린더·주차) | `cd server && npm test` | 186개 (11-12 집계) |
+| 휴대폰 연결 앱(메시지 알림 거르기·화면 로직) | `cd phone-app && ./gradlew testDebugUnitTest --max-workers=2` | 18개 (11-12 집계) |
 
 ## 개인정보
 - 음성은 우리 서버에 저장하지 않는다. 통화 엔진이 보낸 원문 기록은 7일 뒤 비우고, 요약 카드는 30일 뒤 삭제한다.
@@ -173,11 +177,12 @@ npm run deploy
 - 근처 찾기 좌표는 운전자가 "응"이라고 답한 뒤에만 서버를 거쳐 카카오 장소 검색에 1번 보낸다. 서버는 그 좌표·결과와 주차 빈자리 조회 좌표를 저장하거나 로그에 남기지 않고, 말동무 AI에도 보내지 않는다.
 - 하차 정보(위치·주소·메모·남은 일 목록)는 서버에 마지막 1건만 두고(`kv` 'parked'), 2분 넘게 세운 뒤 다시 출발하면 차가 지운다. 좌표·주소는 로그에 남기지 않는다. 폰에 줄 때 번호는 그때그때 보관함에서 찾고 저장하지 않는다.
 - 구글 캘린더는 읽기 전용 권한만 받는다. 토큰은 서버에만 두고 폰·차로 내보내지 않으며, 연결을 끊으면 토큰을 폐기 요청하고 데모 일정으로 되돌린다. 일정 장소 이름은 좌표를 찾으려고 카카오 검색에 보낸다.
+- 통화 요약 정확도를 위해 연락처·일정의 이름과 상호(전화번호는 빼고)를 요약 AI(Anthropic API)에 참고 이름 목록으로 함께 보내고, 통화 서비스(ClawOps)의 받아쓰기 낱말 사전에도 업무 낱말과 함께 올린다(`server/src/index.ts` `namesFrom`, `server/src/sttdict.ts`).
 
 ## APK
-`apk/내비서_내비서_release.apk` (release 빌드, minSdk 28 / targetSdk 34, applicationId `ztw.carbiseo`)
+GitHub Releases [v1.0-submit](https://github.com/naebiseo-app/carbiseo/releases/tag/v1.0-submit)의 `naebiseo-car-release.apk` (release 빌드, minSdk 28 / targetSdk 34, applicationId `ztw.carbiseo`). 음성 모델이 들어 있어 238MB라 저장소에는 넣지 않는다.
 
-권한: `STT_SERVICE`, `RECORD_AUDIO`, `CAR_DRIVE`, `CAR_LIGHTS`, `CAR_SEATS`, `CAR_ENERGY`, `CAR_SAFETY`, `CAR_DOORS`(운전석 문), `CAR_WINDOWS`(와이퍼), `NAVI_ROUTE`, `NAVI_ROUTE_SEARCH`, `NAVI_CUSTOM_MAP`, `TTS_SERVICE`, `CAR_SPEED`, 포그라운드 서비스, 알림, 부팅 완료, 인터넷.
+권한: `STT_SERVICE`, `RECORD_AUDIO`, `CAR_DRIVE`, `CAR_LIGHTS`, `CAR_SEATS`, `CAR_ENERGY`, `CAR_SAFETY`, `CAR_DOORS`(운전석 문), `CAR_WINDOWS`(와이퍼), `NAVI_ROUTE`, `NAVI_ROUTE_SEARCH`, `NAVI_CUSTOM_MAP`, `TTS_SERVICE`, `CAR_SPEED`, `FOREGROUND_SERVICE`·`FOREGROUND_SERVICE_SPECIAL_USE`, `FOREGROUND_SERVICE_MICROPHONE`(이름 호출), `SYSTEM_ALERT_WINDOW`(내비 위 카드), `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`, `INTERNET`.
 
 ## 알려진 제약
 - **주행 중 화면 가림**: 지금 에뮬레이터 이미지는 기어 D에서도 앱 화면을 가리지 않는다(2026-11-06 디버그·release 모두 실측). 실차는 주행 제한(CarUxRestrictions)에 따라 가릴 수 있어, 주행 중 기능은 음성만으로 끝나게 만들었다.
