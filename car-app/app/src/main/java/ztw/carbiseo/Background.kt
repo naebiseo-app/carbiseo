@@ -2,7 +2,6 @@ package ztw.carbiseo
 
 import android.graphics.ImageDecoder
 import android.graphics.drawable.Drawable
-import android.util.Log
 import java.io.File
 import kotlin.math.sqrt
 

@@ -3,7 +3,6 @@ package ztw.carbiseo
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import android.content.pm.ApplicationInfo
 import android.os.Build
 import android.os.Bundle

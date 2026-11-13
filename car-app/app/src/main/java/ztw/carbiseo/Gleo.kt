@@ -3,7 +3,6 @@ package ztw.carbiseo
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import org.json.JSONObject
 
 private const val GLEO_PREFIX = "ztw.carbiseo." // 에뮬 Gleo 4.2는 action에 패키지를 붙여 보낸다(공식 예시는 안 붙임)

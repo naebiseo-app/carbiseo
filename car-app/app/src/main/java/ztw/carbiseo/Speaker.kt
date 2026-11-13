@@ -6,7 +6,6 @@ import ai.pleos.playground.tts.constant.Mode
 import ai.pleos.playground.tts.listener.EventListener
 import ai.pleos.playground.tts.listener.OnInitializeListener
 import android.content.Context
-import android.util.Log
 import java.util.Locale
 
 /** Pleos TTS SDK로 읽고, 초기화/재생이 실패하면 android.speech.tts로 대체한다. 메인 스레드에서만 호출. */
