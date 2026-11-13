@@ -2,6 +2,8 @@
 
 > 눈은 도로에, 일은 목소리로. 기어·내비 목적지·시각으로 지금 차가 **5분 사무실(정차) / 업무 운전 / 업무 시간 밖(퇴근길)** 중 어느 방인지 판정하고, 방에 맞게 차 화면·음성 안내·전화 응대 말투를 바꾸는 Pleos Connect 앱. 안전 원칙은 **운전 중 화면·휴대폰을 쳐다보는 것을 줄인다**이다. 통화·짧은 음성 대화는 막지 않고, 읽을 것·누를 것을 음성으로 바꾼다.
 
+**시연 영상(4분 33초)**: https://youtu.be/iSY_78r14Xs — 설명란에 장별 시각이 있다.
+
 ## 문제와 해결
 | 문제 | 내비서의 해결 |
 |---|---|
@@ -158,7 +160,7 @@ npm run deploy
 - 배포 주소: `https://carbiseo-api.<계정>.workers.dev`(심사용 주소는 제출 메일에 별도 기재) · 데모 관리 페이지 `/admin`(Basic 인증)
 - 비밀값(`wrangler secret put`): `CAR_TOKEN`, `ADMIN_TOKEN`, `CALL_CONTEXT_SECRET`, `OWNER_NUMBER`, `CLAWOPS_ACCOUNT_ID`, `CLAWOPS_API_KEY`, `CLAWOPS_NUMBER`, `CLAWOPS_SIGNING_KEY`, `SMS_RELAY_URL`, `SMS_RELAY_SECRET`, `ANTHROPIC_API_KEY`(말동무), `KAKAO_REST_KEY`(근처 찾기·가게 번호·주소·일정 장소 좌표), `PARKING_API_KEY`(공공데이터 주차정보), `GOOGLE_CLIENT_SECRET`(구글 캘린더). 키가 없으면 그 기능만 `no_key`·`no_secret`으로 꺼진다. `O4_LIVE=1`일 때만 예약·주차 문의 전화가 실제 가게로 간다(기본은 `OWNER_NUMBER`)
 - 주차장 좌표 표 `server/src/parking_lots.json`(지금 677곳)은 `server/scripts/parking_index.py`가 공공데이터 시설정보에서 만든다. 다시 만든 뒤 배포해야 반영된다
-- 하루(KST) 상한: 문자 발송 20건(데모 번호 제외)·말동무 AI 대화 200건·예약·주차 문의 전화 5건. 공개 APK에 든 토큰이 남용되는 것을 막는다.
+- 하루(KST) 상한: 문자 발송 20건(데모 번호 제외)·말동무 AI 대화 200건·예약·주차 문의 전화 5건. 공개 APK에 든 토큰이 남용되는 것을 막는다. 이 토큰은 공모전 시연용 공용 값이다. 출시 전에는 APK에 값을 넣지 않고, 설치한 기기마다 서버가 발급하는 토큰(기기 등록 → 기기 보안 저장소 보관, 폐기 가능)으로 바꾼다(Pleos 앱 보안 가이드: 인증 토큰 하드코딩 금지). 심사 공개 기간이 끝나면 지금 값은 교체한다.
 - 예약 작업: 매일 03시(KST) 보관 정책 실행.
 
 ### 4. 문자 중계 (Vercel, 서울 icn1)
