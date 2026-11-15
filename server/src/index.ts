@@ -1,7 +1,7 @@
 // 내비서 서버(Cloudflare Worker): 차 앱·폰 앱·통화 사업자(ClawOps) 웹훅·관리 페이지 요청이 모두 이 파일의 fetch로 들어온다.
 // 맡은 일: 경로별 인증·입력 검증, 통화가 끝난 뒤 받아쓰기 → 요약 → 카드 저장, 문자 중계 호출, 하루 상한(문자·말동무·예약 전화), 보관 정책(scheduled).
 // 맡지 않는 일: 대본 문구(script.ts), AI 문장 가드(guard.ts), 구글 캘린더(calendar.ts), 공공 주차(parking.ts), 관리 페이지 HTML(admin.ts).
-// 먼저 읽을 곳: 맨 아래 fetch 위의 경로 색인 → transcriptWork(통화 뒤 카드 만들기) → saveCallCard.
+// 먼저 읽을 곳: fetch 맨 위의 경로 목차 → transcriptWork(통화 뒤 카드 만들기) → saveCallCard.
 import { CALL_ID, carChip, callerNumber, cleanMent, cleanName, field, freshCtx, hhmm, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseEtaShare, etaFor, inBook, parseMode, parseRoom, pickScript, isDirect, parkingScript, reserveScript, sameNumber, type EtaShare, type Mode, type Recent } from "./script.ts";
 import { adminPage, basicOk, demoSchedule, encodeReplay, parseFakeCall, replayScript, type MailRow, type ReplyRow } from "./admin.ts";
 import { FALLBACK, guardText, isBlocked } from "./guard.ts";

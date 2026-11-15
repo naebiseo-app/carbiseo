@@ -140,7 +140,7 @@ flowchart LR
 - APK 설치: [GitHub Releases](https://github.com/naebiseo-app/carbiseo/releases/tag/v1.0-submit)의 `naebiseo_naebiseo_release.apk`(태그 v1.0-submit)를 받아 `adb install -r -g naebiseo_naebiseo_release.apk`
 - 차 화면 하단 앱 목록에서 **내비서**를 연다. 명령으로 열 땐 `adb shell monkey -p ztw.carbiseo -c android.intent.category.LAUNCHER 1`. 상단 알림에 "내비서 실행 중 — 방: ○○"이 뜨고, 내비를 앞에 띄워도 판정은 포그라운드 서비스에서 계속된다.
 - 방 바꿔 보기: `adb forward tcp:8088 tcp:8088` 후 `http://127.0.0.1:8088/`(Virtual Console)에서 기어 P ↔ D, 내비에서 목적지를 집/다른 곳으로.
-- 로그: `adb logcat -s ROOM ROOMADP`
+- 로그: release APK는 로그를 남기지 않는다(`Log.kt`). 직접 빌드한 디버그 APK에서만 `adb logcat -s ROOM ROOMADP`
 - 부팅 직후 내비를 한 번도 열지 않았으면 첫 경로 요청이 무시될 수 있다. 앱이 내비를 깨운 뒤 다시 보내지만, 시연 전에 내비를 한 번 열어 두면 확실하다.
 
 ### 2. 차 앱 빌드
