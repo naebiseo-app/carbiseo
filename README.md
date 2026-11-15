@@ -4,6 +4,19 @@
 
 **시연 영상(4분 33초)**: https://youtu.be/iSY_78r14Xs — 설명란에 장별 시각이 있다.
 
+## 저장소 안내 — 먼저 볼 곳
+| 폴더 | 내용 | 먼저 볼 파일 |
+|---|---|---|
+| `car-app/` | 차 앱(심사 대상 APK). Kotlin 18개 파일, 단위 테스트 176개 | `RoomStateMachine.kt`(방 판정, 순수 Kotlin) → `CarAdapters.kt`(Pleos SDK 호출이 모인 곳) → `RoomService.kt`(중심 서비스, 파일 머리에 읽는 순서) |
+| `server/` | Cloudflare Workers + D1. TypeScript 8개 파일 | `src/script.ts`(응대 대본) → `src/index.ts`(경로별 처리, `fetch` 맨 위에 경로 목차) → `src/guard.ts`(AI 문장 검사) |
+| `phone-app/` | 안드로이드 폰 연결 앱(메시지 알림 전달·하차 카드) | `Relay.kt`, `Listener.kt` |
+| `sms-relay/` | 문자 중계 함수 1개(Vercel 서울 리전) | `api/send.js` |
+| `docs/ARCHITECTURE.md` | 파일별 역할과 데이터 흐름 4가지 | — |
+
+- 아래 [Pleos SDK·차량 데이터 사용 표](#pleos-sdk차량-데이터-사용-표)가 SDK 호출과 파일을 잇는 색인이다.
+- 코드 주석의 `F6`·`H7`·`O4`·`B안` 같은 표기는 개발 중 쓴 설계 항목 번호이고, `11-06` 같은 날짜는 그 동작을 실측한 날이다. `한계:`로 시작하는 주석은 일부러 단순하게 둔 곳과 그 한도를 적은 것이다.
+- 하지 못한 것·확인하지 못한 것은 [알려진 제약](#알려진-제약)에 모았다.
+
 ## 문제와 해결
 | 문제 | 내비서의 해결 |
 |---|---|
@@ -97,7 +110,7 @@ flowchart LR
 
 응대 방식은 "AI가 대신 받기"와 "한 마디 안내"(운전 중이라는 한 문장 + 도착 예정만 말하고 끊음) 2가지다. 바로 연결 번호(설정, 최대 10개)는 통화 중에 "바로 연결" 카드가 먼저 뜨고, 쉼터 방에서도 차가 읽는다.
 
-폰 알림: 업무 운전 = 광고((광고) 표기·이름에 '광고') 외 전부 묻기, 업무 시간 밖 = 설정의 즐겨찾기 보낸이만, 나머지는 세울 때 묶어서. 깜빡이·후진·큰 조향·경고·블루투스 통화 중이면 미뤘다가 풀리면 한 번에. 알림은 `phone-app/`(안드로이드 '내비서 연결', 알림 접근 권한)이 서버로 넘기고 답장도 그 알림의 답장 버튼으로 보낸다. 시연용으로 관리 페이지 '시험 알림 보내기'가 같은 경로에 넣는다.
+폰 알림: 업무 운전 = 광고((광고) 표기·이름에 '광고') 외 전부 묻기, 업무 시간 밖 = 설정의 즐겨찾기 보낸이만, 나머지는 세울 때 묶어서. 깜빡이·후진·큰 조향·경고·블루투스 통화 중이면 미뤘다가 풀리면 한 번에. 알림은 `phone-app/`(안드로이드 '내비서 연결', 알림 접근 권한)이 메시지형 알림을 모두 서버로 넘기고(광고 판정과 읽을지 말지는 차가 정한다, 30일 뒤 삭제) 답장도 그 알림의 답장 버튼으로 보낸다. 시연용으로 관리 페이지 '시험 알림 보내기'가 같은 경로에 넣는다.
 
 ## 11-07 이후 추가 기능
 문구는 코드의 TTS 문자열 그대로다(`Drive.kt`).
@@ -137,6 +150,7 @@ cd car-app
 - 저장소 루트 `.env`의 `CAR_TOKEN`이 BuildConfig로 들어간다(`.env.example` 참고). 없으면 서버 연동 없이 빌드된다.
 - release 서명은 저장소 밖 `../keys/keystore.properties`(storeFile·storePassword·keyAlias·keyPassword)를 읽는다. 없으면 서명 없이 빌드된다(`app-release-unsigned.apk`, 그대로는 설치 안 됨 — 설치는 GitHub Releases의 서명된 파일 또는 `./gradlew assembleDebug`).
 - 이름 호출 음성 모델(약 132MB)은 파일 크기 때문에 저장소에 넣지 않았다. 없어도 빌드되고 이름 호출만 동작하지 않는다. 넣으려면 [모델 압축 파일](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-korean-2024-06-16.tar.bz2)을 풀어 `encoder-epoch-99-avg-1.int8.onnx`·`decoder-epoch-99-avg-1.int8.onnx`·`joiner-epoch-99-avg-1.int8.onnx`·`tokens.txt`를 `car-app/app/src/main/assets/sherpa-ko/`에 복사한다. 제출 APK에는 모델이 들어 있다.
+- `car-app/app/libs/sherpa-onnx-2.0.1.aar`(49MB)는 이름 호출 인식 라이브러리(sherpa-onnx, Apache License 2.0)의 배포 파일을 그대로 넣은 것이다(Maven 저장소에 없어 파일로 둔다).
 - minify(R8)는 끈다. Pleos SDK가 kotlin-reflect로 클래스 메타데이터를 읽기 때문이다.
 - Gleo 연결: `app/src/main/assets/schema.json`에 함수 3개(`READ_RECENT_CALLS`·`READ_NEXT_SCHEDULE`·`ADD_REST_STOP`). 에뮬은 `adb emu avd hostmicon`으로 마이크를 켠 뒤 `adb shell cmd voiceinteraction show`로 듣기를 시작하고 "내비서 일정 읽어줘"라고 말하면 된다. 이름 호출을 켜 두면 Gleo가 버튼을 무시하므로 끄고 시험한다.
 - 디버그 빌드에만 시연용 브로드캐스트(`ztw.carbiseo.ALERT·TRIP·LOC·TIME·ROUTE·WP·SAY·HEAR·SIGNAL·SCREEN·SOC·TRAFFIC·DOOR·WIPER·WAKEPCM·DROWSY` 등, `DROWSY`는 주행 중 졸음 확인 질문을 바로 한다)가 등록된다. release에서는 등록되지 않는다(`FLAG_DEBUGGABLE` 검사).
@@ -146,7 +160,7 @@ cd car-app
 cd phone-app
 ./gradlew testDebugUnitTest assembleDebug --max-workers=2
 ```
-- 차 앱과 같은 `.env`의 `CAR_TOKEN`이 BuildConfig로 들어간다. 설치 뒤 앱을 열면 '알림 접근 허용' 화면이 뜨고, '내비서 연결'을 켠다(adb: `cmd notification allow_listener ztw.carbiseo.phone/.Listener`).
+- 차 앱과 같은 `.env`의 `CAR_TOKEN`이 BuildConfig로 들어간다. 설치 뒤 앱을 열면 첫 실행 안내가 ①통신사 고르기 ②착신 전환 걸기·확인 ③알림 접근 허용 순서로 나오고(건너뛸 수 있다), 알림 접근 화면에서 '내비서 연결'을 켠다(adb: `cmd notification allow_listener ztw.carbiseo.phone/.Listener`).
 - 디버그 빌드에만 답장 버튼이 있는 시험 메시지: `adb shell am broadcast -n ztw.carbiseo.phone/.TestSender --es from 김민수 --es text "회의 자료 보냈어요"`.
 
 ### 3. 서버 (Cloudflare Workers + D1)
@@ -157,10 +171,23 @@ npm test
 npx wrangler@4 d1 execute carbiseo --remote --file=schema.sql   # 최초 1회
 npm run deploy
 ```
-- 배포 주소: `https://carbiseo-api.<계정>.workers.dev`(심사용 주소는 제출 메일에 별도 기재) · 데모 관리 페이지 `/admin`(Basic 인증)
+- Node 22.18 이상(시험이 `.ts`를 그대로 실행한다).
+- 배포 주소: `https://carbiseo-api.<계정>.workers.dev`. 제출한 APK가 붙는 시연 서버 주소는 `car-app/app/build.gradle.kts`의 `SERVER_URL`이다 · 데모 관리 페이지 `/admin`(Basic 인증, 비밀번호 = `ADMIN_TOKEN`)
 - 비밀값(`wrangler secret put`): `CAR_TOKEN`, `ADMIN_TOKEN`, `CALL_CONTEXT_SECRET`, `OWNER_NUMBER`, `CLAWOPS_ACCOUNT_ID`, `CLAWOPS_API_KEY`, `CLAWOPS_NUMBER`, `CLAWOPS_SIGNING_KEY`, `SMS_RELAY_URL`, `SMS_RELAY_SECRET`, `ANTHROPIC_API_KEY`(말동무), `KAKAO_REST_KEY`(근처 찾기·가게 번호·주소·일정 장소 좌표), `PARKING_API_KEY`(공공데이터 주차정보), `GOOGLE_CLIENT_SECRET`(구글 캘린더). 키가 없으면 그 기능만 `no_key`·`no_secret`으로 꺼진다. `O4_LIVE=1`일 때만 예약·주차 문의 전화가 실제 가게로 간다(기본은 `OWNER_NUMBER`)
 - 주차장 좌표 표 `server/src/parking_lots.json`(지금 677곳)은 `server/scripts/parking_index.py`가 공공데이터 시설정보에서 만든다. 다시 만든 뒤 배포해야 반영된다
 - 하루(KST) 상한: 문자 발송 20건(데모 번호 제외)·말동무 AI 대화 200건·예약·주차 문의 전화 5건. 공개 APK에 든 토큰이 남용되는 것을 막는다. 이 토큰은 공모전 시연용 공용 값이다. 출시 전에는 APK에 값을 넣지 않고, 설치한 기기마다 서버가 발급하는 토큰(기기 등록 → 기기 보안 저장소 보관, 폐기 가능)으로 바꾼다(Pleos 앱 보안 가이드: 인증 토큰 하드코딩 금지). 심사 공개 기간이 끝나면 지금 값은 교체한다.
+- 공용 토큰으로 할 수 있는 일: `/car/*`·`/phone/*` 전부(받은 전화 카드 읽기, 위 상한 안에서 문자·AI 대화·예약 전화 요청). 그래서 공개 기간의 시연 서버에는 가명 시연 카드만 두고 촬영 때 쌓인 실제 통화 기록·주차 위치는 지웠으며, `/car/inbox` 응답에서는 통화 서비스가 보낸 원문(`ring`·`event` 행의 `raw`·`meta`)을 뺀다(`forCar`). 공개 기간에 시연 번호로 실제 전화를 걸면 그 카드(발신 번호 포함)는 같은 토큰을 가진 사람에게 읽힐 수 있으니, 이 서버는 심사·시연에만 쓴다.
+- 시연용 관리 스위치(`/admin`, `ADMIN_TOKEN` 뒤에만 있고 차·폰 토큰으로는 못 건드린다):
+
+  | 경로 | 하는 일 | 기본 |
+  |---|---|---|
+  | `owner-as-guest` | 주인 번호로 건 전화도 일반 발신자처럼 AI가 응대(촬영용) | 꺼짐 |
+  | `keep-recordings` | 요약이 끝난 통화 녹음을 지우지 않고 남김(촬영 기간용) | 꺼짐(자동 삭제) |
+  | `demo-clock` | 손님 대본의 평일·저녁·주말 판단만 지정한 시각으로 | 해제 |
+  | `fake-call`·`fake-notif` | 가짜 수신 카드·시험 알림 넣기 | — |
+  | `replay` | 재현 통화(준비한 통화 대본을 차에서 시각에 맞춰 진행, 실제 전화가 아니다) | — |
+  | `reset-inbox`·`reset-schedule` | 카드 비우기·데모 일정으로 되돌리기 | — |
+  | `stt-dict`·`resummarize` | 받아쓰기 낱말 사전 맞추기·요약 품질 시험(저장 안 함) | — |
 - 예약 작업: 매일 03시(KST) 보관 정책 실행.
 
 ### 4. 문자 중계 (Vercel, 서울 icn1)
@@ -170,7 +197,7 @@ npm run deploy
 | 대상 | 명령 | 현재 |
 |---|---|---|
 | 차 앱 단위 테스트(방 판정·부재중·주행 기능·피로·졸음 확인·지각·경고·도착 예정·배경·폰 알림·재현 통화) | `cd car-app && ./gradlew testDebugUnitTest --max-workers=2` | 176개 (11-12 집계) |
-| 서버(대본·서명 검증·관리자·보관 정책·요약·주인 통화·재현·중계·스위치·폰 알림·바로 연결·가족 문자·AI 문장 가드·카드 동작·예약 전화·근처 찾기·하차 정보·구글 캘린더·주차) | `cd server && npm test` | 187개 (11-12 집계) |
+| 서버(대본·서명 검증·인증·관리자·보관 정책·요약·주인 통화·재현·중계·스위치·폰 알림·바로 연결·가족 문자·AI 문장 가드·카드 동작·예약 전화·근처 찾기·하차 정보·구글 캘린더·주차) | `cd server && npm test` | 193개 (11-15 집계) |
 | 휴대폰 연결 앱(메시지 알림 거르기·화면 로직) | `cd phone-app && ./gradlew testDebugUnitTest --max-workers=2` | 18개 (11-12 집계) |
 
 ## 개인정보
@@ -178,7 +205,7 @@ npm run deploy
 - 음성은 우리 서버에 저장하지 않는다. 통화 엔진이 보낸 원문 기록은 7일 뒤 비우고, 요약 카드는 30일 뒤 삭제한다.
 - 차 화면에는 발신 번호 끝 4자리와 요약만 보인다. 문자 중계 응답에서도 번호를 가린다.
 - AI가 만든 요약·할 일 문장은 저장 전에 120자·금칙어·전화번호 검사를 거치고, 걸리면 고정 문구로 바꾼다(`server/src/guard.ts`). 사용자가 확인한 문자·메일 본문은 금칙어가 있으면 보내지 않는다.
-- 통화 엔진(ClawOps) 쪽 녹음은 끄는 설정이 없어, 요약이 저장되면 서버가 그 통화 녹음을 삭제 요청한다(`server/src/index.ts`, 촬영 기간 관리자 스위치로만 남김).
+- 통화 엔진(ClawOps) 쪽 녹음은 끄는 설정이 없어, 요약이 저장되면 서버가 그 통화 녹음을 삭제 요청한다(`server/src/index.ts` `transcriptCard`). 예외: 요약이 저장되지 않은 통화(받아쓰기 조회·요약 실패)와 관리자 스위치 `keep-recordings`를 켠 동안의 녹음은 통화 서비스 쪽에 남는다(지금 스위치는 꺼져 있다).
 - 근처 찾기 좌표는 운전자가 "응"이라고 답한 뒤에만 서버를 거쳐 카카오 장소 검색에 1번 보낸다. 서버는 그 좌표·결과와 주차 빈자리 조회 좌표를 저장하거나 로그에 남기지 않고, 말동무 AI에도 보내지 않는다.
 - 하차 정보(위치·주소·메모·남은 일 목록)는 서버에 마지막 1건만 두고(`kv` 'parked'), 2분 넘게 세운 뒤 다시 출발하면 차가 지운다. 좌표·주소는 로그에 남기지 않는다. 폰에 줄 때 번호는 그때그때 보관함에서 찾고 저장하지 않는다.
 - 구글 캘린더는 읽기 전용 권한만 받는다. 토큰은 서버에만 두고 폰·차로 내보내지 않으며, 연결을 끊으면 토큰을 폐기 요청하고 데모 일정으로 되돌린다. 일정 장소 이름은 좌표를 찾으려고 카카오 검색에 보낸다.
@@ -204,6 +231,10 @@ GitHub Releases [v1.0-submit](https://github.com/naebiseo-app/carbiseo/releases/
 - **주차 빈자리 범위**: 공공데이터 실시간 항목 4,634곳 중 좌표를 붙인 곳은 677곳이고, 그중 값이 실제로 바뀌는 곳은 측정 때마다 수십 곳(11-08 36곳, 11-09 14시 10분 간격 16곳)이다. 값이 멈춘 곳은 숫자가 맞지 않을 수 있고, '0'이 만차인지 미보고인지는 가리지 못했다. 대부분의 목적지에서는 "가게에 주차 자리 물어볼까요?"(AI 전화)로 넘어간다. 배포본에서 차가 조회한 실측은 아직이다.
 - **구글 캘린더**: 구글 앱이 시험(Testing) 단계라 등록한 시험 사용자만 로그인되고 토큰이 7일 뒤 만료된다. 심사 환경에서는 데모 일정으로 동작한다. 일정 장소 좌표는 차 위치 없이 전국 검색이라 체인점 이름("스타벅스" 등)은 다른 지점이 잡힐 수 있다.
 - **하차 감지**: 운전석 문 위치값 0 = 닫힘, 0보다 크면 열림으로 가정했다(에뮬 콘솔에서 1 수신). `CAR_DOORS`·`CAR_WINDOWS` 권한은 공개 문서끼리 설명이 달라 실차 확인이 필요하다. 와이퍼는 간헐 모드를 비로 보는지 확인하지 못했다.
+- **공용 시연 토큰**: 공개 APK에서 꺼낼 수 있다. 영향 범위와 출시 전 대책(기기별 발급 토큰)은 '실행 방법 3. 서버'에 적었다.
+- **Gleo 수신기**: Gleo가 보내는 Action을 받으려고 `GleoReceiver`를 공개(exported)로 두었고 보낸 앱을 확인하지 않는다. 같은 기기의 다른 앱이 이 방송을 보내면 최근 전화·다음 일정을 차 안에서 소리 내어 읽거나 휴게소 경유지를 넣게 할 수 있다(문자·전화 발신은 이 경로로 나가지 않고, 응답 방송에도 내용을 싣지 않는다). 출시 전에 Gleo 서명 권한으로 보낸 쪽을 제한한다.
+- **속도를 못 읽을 때의 화면 버튼**: 주행 중 큰 버튼은 정차이거나 시속 10km 미만일 때만 받는데, 속도 값을 아직 못 읽었으면 0으로 본다(`RoomService.touchOk`). 실차에서는 "주행 중 + 속도 미확인"이면 막는 쪽으로 바꿔야 한다.
+- **설정의 "1분(시연)"**: 휴식 제안 기준을 1분으로 잡는 시연용 선택지다(저장하지 않아 앱을 다시 켜면 풀린다). 출시 전에 뺀다.
 - **2차 예정**: 실통화 중 도움 카드(지금은 관리 페이지 재현 통화), 회전 직전 음성 미루기(`onTBTInfo`).
 - **블루투스 통화 중 낭독 보류**: `AudioManager` 모드로 판단하며 실차에서 확인하지 않았다.
 
@@ -217,3 +248,6 @@ GitHub Releases [v1.0-submit](https://github.com/naebiseo-app/carbiseo/releases/
 - 차량·내비·음성 기능: Pleos SDK(현대자동차그룹) — 공모전 제공 SDK 약관에 따름
 - 이름 호출 음성 인식: sherpa-onnx(k2-fsa) — Apache License 2.0 / 한국어 모델 `sherpa-onnx-streaming-zipformer-korean-2024-06-16`, 원본 [icefall KsponSpeech 모델](https://huggingface.co/johnBamma/icefall-asr-ksponspeech-pruned-transducer-stateless7-streaming-2024-06-12) — Apache License 2.0. 이 음성 모델은 한국지능정보사회진흥원의 사업결과인 AI Hub 「한국어 음성」(KsponSpeech) 데이터로 학습됨(AI Hub 이용정책에 따른 출처 표기)
 - 주요 라이브러리(Gradle 의존성): Jetpack Compose(BOM 2024.09.03)·Material3·Activity Compose 1.9.3·Kotlin 1.9.25 — Apache License 2.0 / JUnit 4.13.2(테스트 전용) — Eclipse Public License 1.0
+
+## 라이선스
+이 저장소는 공모전 심사를 위해 공개한다. 별도 라이선스를 붙이지 않았으므로 저작권은 작성자에게 있고, 심사·열람 밖의 복제·재배포는 허락하지 않는다. 포함한 오픈소스와 데이터는 위 출처의 각 라이선스를 따른다.

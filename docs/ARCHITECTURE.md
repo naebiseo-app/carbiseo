@@ -1,5 +1,7 @@
 # 내비서 코드 구조
 
+이 문서와 코드 주석의 `F6`·`H7`·`O4` 같은 표기는 개발 중 쓴 설계 항목 번호다(같은 번호는 같은 기능을 가리킨다). `11-06` 같은 날짜는 그 동작을 실측한 날이다.
+
 ## car-app (Android, Kotlin + Jetpack Compose)
 경로: `car-app/app/src/main/java/ztw/carbiseo/`
 
@@ -22,13 +24,14 @@
 | `Gleo.kt` | Gleo 함수 이름(`assets/schema.json`) → 음성 의도(`gleoIntent`)와 Gleo Action 수신(`GleoReceiver`). 답은 앱이 직접 읽고 Gleo에는 결과만 알린다. |
 | `Wake.kt` | 이름 호출. 기기 안 sherpa-onnx 스트리밍 인식으로 "내비서"("네비서" 포함)를 찾고 뒤 문장을 넘긴다(`wakeSplit`). 이름이 없는 문장은 버리고 내보내지 않는다. |
 | `MainActivity.kt` | 화면 진입점(서비스 시작 + `App()`)과 부팅·업데이트 뒤 서비스를 띄우는 `BootReceiver`. |
+| `Log.kt` | 로그 감싸개. 디버그 빌드에서만 logcat에 쓰고 release에서는 아무것도 남기지 않는다. |
 
 테스트: `car-app/app/src/test/java/ztw/carbiseo/` — 판정기·inbox·주행·경고·도착 예정·배경·폰 알림·재현 통화·내비 위 카드 위치 순수 함수(176개).
 
 ## server (Cloudflare Workers + D1)
 | 파일 | 역할 |
 |---|---|
-| `src/index.ts` | 라우터. 차 API(`/car/*`, Bearer `CAR_TOKEN`), 폰 API(`/phone/notify`, `/phone/replies`), 통화 엔진 API(`/clawops/call-context/<비밀 경로>`, `/clawops/status/<비밀 경로>` 통화 종료 → 받아쓰기 요청, `/clawops/events` 서명 검증, `/mcp/<비밀 경로>` AI가 끝맺음 직전 부르는 `report_call`), 관리 페이지(`/admin/*`, Basic 인증), 문자 중계 호출(`relaySend`), 매일 보관 정책(`scheduled`). 통화 요약 때 연락처·일정 이름을 참고 이름 목록으로 붙이고 결과를 다시 맞춘다(`namesFrom`·`fixNames`). 하루(KST) 상한: 문자 20건(데모 번호 제외)·말동무 200건·예약·주차 문의 전화 5건. |
+| `src/index.ts` | 라우터. 차 API(`/car/*`, Bearer `CAR_TOKEN`), 폰 API(`/phone/notify`, `/phone/replies`, `/phone/contacts`, `/phone/parked`, `/phone/parked/done`, `/phone/google` — 차와 같은 토큰), 통화 엔진 API(`/clawops/call-context/<비밀 경로>`, `/clawops/status/<비밀 경로>` 통화 종료 → 받아쓰기 요청, `/clawops/events` 서명 검증, `/mcp/<비밀 경로>` 통화 엔진 에이전트의 MCP 연결용 응답 — 도구는 없다), 관리 페이지(`/admin/*`, Basic 인증, 다른 출처의 POST 거절), 문자 중계 호출(`relaySend`), 매일 보관 정책(`scheduled`). 통화 요약 때 연락처·일정 이름을 참고 이름 목록으로 붙이고 결과를 다시 맞춘다(`namesFrom`·`fixNames`). 하루(KST) 상한: 문자 20건(데모 번호 제외)·말동무 200건·예약·주차 문의 전화 5건. |
 | `src/guard.ts` | AI 문장 가드: 요약·할 일은 120자·금칙어·번호 검사 후 실패하면 고정 문구, 사용자가 확인한 본문은 금칙어만 막는다. |
 | `src/script.ts` | 응대 대본 생성. 방·도착 예정·동승자·다음 일정·응대 방식(AI / 한 마디 안내)으로 시스템 프롬프트를 만들고(첫 마디에 AI·기록 고지, 이름·용건 되읽고 "맞으실까요?" 한 번, 회신 날짜 약속 금지, 운전 시간은 상대에게 말하지 않음), 차주 통화 대본(`ownerScript`, 운전 2시간 넘으면 짧게), 예약 전화(`reserveScript`)·주차 문의 전화(`parkingScript`, 자리·주차비) 대본, 급함 판정(`isUrgent`), 오래된 차 상태 무시(`freshCtx`, 10분). |
 | `src/admin.ts` | 데모 관리 페이지와 순수 함수: 가짜 수신, 시험 알림 폼·보낼 답장 목록, 데모 메일함, 데모 일정, 재현 통화 대본(`replayScript`), 빈 시간 계산(`freeSlots`). |
@@ -42,9 +45,9 @@
 ## phone-app (안드로이드 폰 '내비서 연결', Kotlin)
 | 파일 | 역할 |
 |---|---|
-| `Listener.kt` | NotificationListenerService. 메시지형 알림(카카오톡·문자 앱, 메시지 분류·메시지 스타일)만 `/phone/notify`로 넘기고, 15초마다 `/phone/replies`를 받아 그 알림의 답장 버튼(RemoteInput)으로 보낸다. 첫 화면은 알림 접근 설정을 연다. |
+| `Listener.kt` | NotificationListenerService. 메시지형 알림(카카오톡·문자 앱, 메시지 분류·메시지 스타일)만 `/phone/notify`로 넘기고, 15초마다 `/phone/replies`를 받아 그 알림의 답장 버튼(RemoteInput)으로 보낸다. |
 | `Relay.kt` | 메시지 알림 거르기(`toMsg`, 순수 함수)와 서버 호출. 토큰은 차 앱과 같은 `CAR_TOKEN`(빌드 때 주입). |
-| `App.kt`·`Model.kt` | 폰 화면(첫 실행·홈·기록·설정)과 앱이 한 일 로컬 기록·화면 로직 순수 함수. |
+| `App.kt`·`Model.kt` | 폰 화면(첫 실행·홈·기록·설정)과 앱이 한 일 로컬 기록·화면 로직 순수 함수. 첫 실행은 통신사 고르기 → 착신 전환 걸기·확인 → 알림 접근 허용 순서다(건너뛸 수 있다). 연락처 올리기·지우기, 구글 캘린더 연결, 하차 카드 보기도 여기서 한다. |
 | `src/debug/TestSender.kt` | 디버그 전용 시험 메신저: 답장 버튼 있는 메시지 알림을 띄우고 받은 답장을 알림으로 보여 준다. |
 
 ## sms-relay (Vercel, 서울 icn1)

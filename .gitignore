@@ -6,7 +6,6 @@ build/
 local.properties
 *.apk
 .idea/
-!apk/*.apk
 sms-relay/.vercel
 
 # 이름 호출 모델(인코더가 GitHub 100MB 제한 초과): 절대 커밋 금지
