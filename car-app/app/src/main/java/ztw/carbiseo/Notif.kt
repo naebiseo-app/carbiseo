@@ -36,7 +36,7 @@ const val CALLBACK_DONE_SPEECH = "할 일에 문자를 준비해 뒀어요. 보�
 /** 설정 문자열 "엄마, 아빠" → 이름 집합. */
 fun parseFavs(s: String) = s.split(",", "，").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
 
-/** 광고성: 앱·보낸이 이름에 '광고', 또는 본문이 '(광고)'로 시작(정보통신망법 표기). ponytail: 표기만 본다, 스팸 판정은 안 한다. */
+/** 광고성: 앱·보낸이 이름에 '광고', 또는 본문이 '(광고)'로 시작(정보통신망법 표기). 한계: 표기만 본다, 스팸 판정은 안 한다. */
 fun isAd(i: InboxItem) = "광고" in i.app || "광고" in i.fromLabel || i.summary.trimStart().startsWith("(광고)")
 
 /** 지금 바로 알릴 알림. 업무 방 = 광고 외 전부, 쉼 방 = 즐겨찾기 발신자만(나머지는 정차 요약), 판정 전 = 없음(카드).

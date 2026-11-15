@@ -31,11 +31,11 @@ class AlertLatch(private val clock: Clock, private val releaseMs: Long = 2000) {
     }
 }
 
-/** 조용히 할 때(경고·깜빡이·후진·큰 조향) 새 TTS를 보류한다. 전화는 항목을 쌓아 두었다가 풀릴 때 한 문장(급함·건수 유지), 그 밖의 문장은 최신 1개. */
 /** 낭독 문장 이어붙이기는 여기서만: 앞뒤 공백을 떼고, 끝에 마침표(없으면)를 붙여 공백 하나로 잇는다(TTS가 문장 사이를 쉬게). */
 fun sentences(vararg parts: String?): String =
     parts.mapNotNull { it?.trim()?.takeIf(String::isNotEmpty) }.joinToString(" ") { if (it.last() in ".?!…") it else "$it." }
 
+/** 조용히 할 때(경고·깜빡이·후진·큰 조향) 새 TTS를 보류한다. 전화는 항목을 쌓아 두었다가 풀릴 때 한 문장(급함·건수 유지), 그 밖의 문장은 최신 1개. */
 class SpeechHold(private val mode: () -> String = { "ai" }) {
     private val items = mutableListOf<InboxItem>()
     private var text: String? = null

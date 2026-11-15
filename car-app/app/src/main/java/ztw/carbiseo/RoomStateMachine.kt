@@ -51,7 +51,7 @@ fun workEndTime(hour: Int): LocalTime = LocalTime.of(if (hour in WORK_END_CHOICE
 /** 새벽 이 시각 전까지는 '전날 저녁'으로 본다(밤샘 귀가). */
 val NIGHT_END: LocalTime = LocalTime.of(4, 0)
 
-/** 평일에 걸린 공휴일(대체공휴일 포함). ponytail: 2027년까지, 임시공휴일 없음 — 해마다 월력요항으로 추가 */
+/** 평일에 걸린 공휴일(대체공휴일 포함). 한계: 2027년까지, 임시공휴일 없음 — 해마다 월력요항으로 추가 */
 val KR_HOLIDAYS: Set<LocalDate> = listOf("2026-12-25", "2027-01-01", "2027-02-08", "2027-02-09", "2027-03-01", "2027-05-03", "2027-05-05", "2027-05-13",
     "2027-07-19", "2027-08-16", "2027-09-14", "2027-09-15", "2027-09-16", "2027-10-04", "2027-10-11", "2027-12-27").map(LocalDate::parse).toSet()
 fun dayOff(d: LocalDate) = d.dayOfWeek == DayOfWeek.SATURDAY || d.dayOfWeek == DayOfWeek.SUNDAY || d in KR_HOLIDAYS

@@ -36,7 +36,7 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 /** 내비 위 띠를 띄울 때: 운전 방이고, 앱이 앞에 없고, 다른 앱 위 권한이 있을 때만. */
 fun stripVisible(room: String?, appFront: Boolean, canOverlay: Boolean) = (room == "DRIVE_WORK" || room == "DRIVE_REST") && !appFront && canOverlay
 
-// ponytail: 내비 오른쪽 아래 빈칸(px, 에뮬 2560x1440 실측). 음량·설정 버튼과 현재 위치를 피한다. 실차 값이 다르면 여기만 고친다
+// 한계: 내비 오른쪽 아래 빈칸(px, 에뮬 2560x1440 실측). 음량·설정 버튼과 현재 위치를 피한다. 실차 값이 다르면 여기만 고친다
 private const val CARD_X = 1800
 private const val CARD_Y = 1020
 private const val CARD_W = 595

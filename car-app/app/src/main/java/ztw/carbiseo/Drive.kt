@@ -17,7 +17,7 @@ class Once {
 /**
  * C⑤ 조수석 착석: 서비스 시작 때 처음 온 값을 기준선(빈 좌석)으로 잡고, 기준선과 달라지면 "탔다"로 본다.
  * 그래서 값이 반전돼 오는 에뮬(빈 좌석 = true)에서도 시작 즉시 띠가 뜨지 않고, 콘솔로 바꾸는 순간에만 뜬다.
- * ponytail: 시동 직후 이미 앉아 있던 동승자는 못 잡는다(그 사람이 내리면 띠가 한 번 잘못 뜸). 실차 값 방향이 확인되면 기준선 대신 그 값을 쓴다.
+ * 한계: 시동 직후 이미 앉아 있던 동승자는 못 잡는다(그 사람이 내리면 띠가 한 번 잘못 뜸). 실차 값 방향이 확인되면 기준선 대신 그 값을 쓴다.
  */
 class SeatEdge {
     private var base: Boolean? = null
@@ -288,7 +288,6 @@ class ShiftClock(@Volatile var offsetMs: Long = 0, private val base: java.time.C
     override fun millis(): Long = base.millis() + offsetMs
 }
 
-/** H13: 화면 상단 상태 — 거짓으로 '받는 중'이라고 하지 않는다. */
 /** 응대 모드 '끔'은 선택지에서 뺐다: 저장값이 off면 화면엔 한 마디 안내(ment)로 보이고 다음 저장 때 ment가 된다. */
 fun modeShown(mode: String) = if (mode == "off") "ment" else mode
 
@@ -301,6 +300,7 @@ fun firstWords(owner: String, assistant: String, mode: String, ment: String = ""
     return "안녕하세요, $who. ${subj}운전 중이셔서 제가 듣고 전달해 드릴게요. 해당 내용은 녹음됩니다. 어떤 일로 전화 주셨나요?"
 }
 
+/** H13: 화면 상단 상태 — 거짓으로 '받는 중'이라고 하지 않는다. */
 fun readiness(offline: Boolean, forwardOk: Boolean, mode: String): String = when {
     offline -> "서버 연결 끊김 · 알림이 늦어져요"
     !forwardOk -> "AI 응대 준비 안 됨(착신 설정 필요)"
@@ -392,16 +392,16 @@ fun partyOf(said: String?): Int? {
     return counted ?: PARTY_BARE.matchEntire(n)?.groupValues?.get(1)?.let { w -> w.toIntOrNull() ?: if (w == "열") 10 else PARTY_UNITS.indexOf(w) + 1 }?.takeIf { it in 1..20 }
 }
 
-/** 하차: 기어 P + 운전석 문 위치값이 0보다 큼(열림). 값을 모르면 false. ponytail: 열림 > 0은 문서 미확인(에뮬 실측으로 조정) */
+/** 하차: 기어 P + 운전석 문 위치값이 0보다 큼(열림). 값을 모르면 false. 한계: 열림 > 0은 문서 미확인(에뮬 실측으로 조정) */
 fun gotOff(gear: Gear, driverDoorPos: Int?): Boolean = gear == Gear.PARK && (driverDoorPos ?: 0) > 0
 /** 앞유리 와이퍼가 켜져 있으면 비로 본다(WiperState 이름 "ON"). */
 fun rainByWiper(wiperState: String?): Boolean = wiperState == "ON"
 /** 내비 정체 단계(TrafficCongestionType 이름) 중 가장 심한 것. 모르면 null. */
 private val TRAFFIC_ORDER = listOf("FAST", "MODERATE", "SLOW", "HEAVY")
 fun worstTraffic(types: List<String>): String? = types.filter { it in TRAFFIC_ORDER }.maxByOrNull { TRAFFIC_ORDER.indexOf(it) }
-/** O4: 전화를 못 걸었거나 인원을 못 읽었을 때 남기는 예약 문자 초안 = 할 일 카드 본문(taskDraft 형식, 번호는 정차 후 입력). */
 /** 예약 전화 결과 카드. 할 일로 남겨 정차 때 다시 볼 수 있게 한다. */
 fun reserveResultTask(name: String, result: String, parking: Boolean = false) = "$name ${if (parking) "주차 문의" else "예약"} / 내용: $result"
+/** O4: 전화를 못 걸었거나 인원을 못 읽었을 때 남기는 예약 문자 초안 = 할 일 카드 본문(taskDraft 형식, 번호는 정차 후 입력). */
 fun reserveTask(name: String, hhmm: String) = "$name 예약 / 내용: 안녕하세요, ${hhmm}쯤 도착 예정인데 자리(주차) 가능할까요?"
 /** 유선 가게 전화(카드의 `가게전화: 번호`). 없으면 null. */
 fun shopPhone(text: String): String? = Regex("""가게전화\s*[:：]\s*([0-9-]+)""").find(text)?.groupValues?.get(1)

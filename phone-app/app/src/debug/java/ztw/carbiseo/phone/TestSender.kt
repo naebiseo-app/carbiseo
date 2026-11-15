@@ -12,7 +12,7 @@ import android.content.Intent
 import android.util.Log
 
 // 디버그 전용 '시험 메신저': 답장 버튼(RemoteInput) 있는 메시지 알림을 만들고, 답장이 오면 결과 알림을 띄운다.
-// adb shell am broadcast -n ztw.carbiseo.phone/.TestSender --es from 김부장 --es text "회의 자료 보냈어요"
+// adb shell am broadcast -n ztw.carbiseo.phone/.TestSender --es from 김민수 --es text "회의 자료 보냈어요"
 private const val CH = "test_msg"
 private const val KEY = "reply"
 
@@ -22,7 +22,7 @@ private fun nm(c: Context) = c.getSystemService(NotificationManager::class.java)
 
 class TestSender : BroadcastReceiver() {
     override fun onReceive(c: Context, i: Intent) {
-        val from = i.getStringExtra("from") ?: "김부장"; val text = i.getStringExtra("text") ?: "시험 메시지"
+        val from = i.getStringExtra("from") ?: "김민수"; val text = i.getStringExtra("text") ?: "시험 메시지"
         val pi = PendingIntent.getBroadcast(c, 1, Intent(c, TestReply::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
         val action = Notification.Action.Builder(null, "답장", pi).addRemoteInput(RemoteInput.Builder(KEY).setLabel("답장").build()).build()
         val style = Notification.MessagingStyle(Person.Builder().setName("나").build())

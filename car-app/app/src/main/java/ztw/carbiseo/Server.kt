@@ -8,6 +8,7 @@ import java.net.URL
 object Server {
     private fun open(path: String, method: String) = (URL(BuildConfig.SERVER_URL + path).openConnection() as HttpURLConnection).apply {
         requestMethod = method; connectTimeout = 5000; readTimeout = 5000
+        // 심사용 공유 시연 토큰이다. 공개 APK에서 꺼낼 수 있으므로 이 토큰으로 읽히는 서버 자료는 가명 시연 카드뿐이게 운영한다. 공개 기간 뒤 교체하고, 상용에서는 기기별 발급 토큰으로 바꾼다(README '알려진 제약').
         setRequestProperty("Authorization", "Bearer ${BuildConfig.CAR_TOKEN}")
     }
 

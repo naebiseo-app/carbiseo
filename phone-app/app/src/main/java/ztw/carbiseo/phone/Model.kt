@@ -10,7 +10,7 @@ import java.time.format.DateTimeFormatter
 enum class Kind { SENT, SEND_FAIL, REPLIED, REPLY_FAIL }
 data class Event(val at: Long, val kind: Kind, val app: String, val who: String)
 
-const val MAX_EVENTS = 300 // ponytail: 하루 300건 넘으면 오래된 것부터 잘려 '오늘' 숫자가 줄어든다. 넘는 사용자가 생기면 날짜별 카운터로.
+const val MAX_EVENTS = 300 // 한계: 하루 300건 넘으면 오래된 것부터 잘려 '오늘' 숫자가 줄어든다. 넘는 사용자가 생기면 날짜별 카운터로.
 
 private fun clean(s: String) = s.replace('\t', ' ').replace('\n', ' ')
 

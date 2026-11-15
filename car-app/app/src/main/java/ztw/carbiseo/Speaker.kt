@@ -68,7 +68,7 @@ class Speaker(private val ctx: Context) {
     private fun playNext() {
         val item = queue.removeFirstOrNull() ?: run { playing = false; return }
         playing = true; onBusy?.invoke(); then = item.then; val g = ++gen
-        ui.postDelayed({ if (g == gen) afterSpeech() }, 1500L + item.text.length * 200L) // ponytail: 어림값(완료 콜백이 안 올 때만 쓰임), 콜백이 늘 오면 지워도 됨
+        ui.postDelayed({ if (g == gen) afterSpeech() }, 1500L + item.text.length * 200L) // 한계: 어림값(완료 콜백이 안 올 때만 쓰임), 콜백이 늘 오면 지워도 됨
         lastText = item.text
         Log.i("ROOM", "TTS speak: ${item.text}")
         if (ready) runCatching { pleos?.speak(item.text, false) }.onFailure { useFallback("pleos speak $it", replay = false) }

@@ -1,3 +1,17 @@
+/*
+ * Screens — 차 화면(Jetpack Compose)을 한 파일에 모았다. 상태는 RoomService의 companion 값을 읽고, 버튼은 서비스에 요청만 보낸다.
+ *
+ * 읽는 순서
+ *  1. 색·공통 값 (Ink, Brand, ParkBg 등 색 토큰, roomName, toast, label) — 화면 전체가 쓰는 색과 문구 도우미.
+ *  2. 진입점과 아래 띠 (App, ReplayBar, AskBar) — 방이 바뀌면 화면을 교체하고, 재현 통화·대답 대기 띠를 아래에 붙인다.
+ *  3. 경고·방 배경 (AlertBanner, AlertFrame, RoomScreen, BgImage) — 과속·주의 표시와 사용자 배경 그림.
+ *  4. 공통 부품 (press, Pill, Round, MicIcon, dial, talk, dayTime, head) — 누름 효과, 버튼, 아이콘, 카드 머리 글.
+ *  5. 정차 화면 (Park, ParkCardScreen, SegRing, Rail, NextEvent, Focus, Queue, PassengerOffer, PassengerToggle) — 오늘 요약, 지금 처리할 카드 1건, 하차 카드.
+ *  6. 첫 실행 안내 (saveMode, FirstRun, Field, ModeButtons) — 이름·응대 방식·착신 전환을 차례로 입력받는다.
+ *  7. 보내기·권한 (Sheet, RestButton, rememberPermAsk, missingPerms, speak) — 문자 보내기 확인, 휴게소 버튼, 권한 요청.
+ *  8. 운전 화면 (ringState, driveNow, RoomBadge, Drive, Ring, MoonIcon) — 링 하나와 듣기 버튼만 둔 단순한 화면.
+ *  9. 설정 화면 (Settings, NameField) — 정차 중에만 열리는 배경·이름 호출·휴식 제안·먼저 말 걸기 설정.
+ */
 package ztw.carbiseo
 
 import android.content.Context
@@ -175,7 +189,7 @@ fun App() {
         Crossfade(room, animationSpec = tween(200), label = "room") { r -> RoomScreen(r, room, bg(r), ver) { settings = true } }
         AlertFrame(RoomService.alert)
     }
-    AskBar(Modifier) // 2택·대답 띠도 화면을 밀어 올린다(덮으면 말하기가 잘림, 11-09 대표님 선택)
+    AskBar(Modifier) // 2택·대답 띠도 화면을 밀어 올린다(덮으면 말하기가 잘림, 11-09 결정)
     ReplayBar() // 통화 중 띠는 화면을 밀어 올린다(덮으면 다음 일정·말하기가 가려짐)
     }
 }
@@ -1079,6 +1093,7 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
         }
         Text("휴식 제안: 연속 운전 ${RoomService.restMin}분부터", color = ParkInk, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // 시연용 단추: 연속 운전 1분이면 휴식 제안이 나오게 해서 기다리지 않고 동작을 보여 준다. 저장하지 않으므로 앱을 다시 켜면 기본값으로 돌아온다. 상용에서는 뺀다
             for ((min, t) in listOf(1 to "1분(시연)", 60 to "60분", REST_DEFAULT_MIN to "120분")) {
                 val on = RoomService.restMin == min
                 Button({ RoomService.restMin = min; if (min != 1) prefs.edit().putInt("rest_min", min).apply() }, Tall, // 시연값은 저장 안 함

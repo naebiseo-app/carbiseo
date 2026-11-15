@@ -145,7 +145,7 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
             })
         }.onFailure { Log.w(TAG, "steer attach FAIL $it") }
         runCatching {
-            // ponytail: 단위를 분으로 가정(콘솔 usage_time_min과 같은 값이 오는지 에뮬 실측으로 확인). 초로 오면 /60
+            // 한계: 단위를 분으로 가정(콘솔 usage_time_min과 같은 값이 오는지 에뮬 실측으로 확인). 초로 오면 /60
             val onTrip = { t: Int? -> Log.i(TAG, "tripTime raw=$t"); ui.post { tripMin = t }; Unit }
             // 에뮬 실측: Current는 ERROR_NOT_SUPPORTED_PROPERTY, 콘솔 TRIP_DRIVING_TIME(0x21410450)은 Cumulative 쪽
             val l = object : DrivingTimeListener {
@@ -292,7 +292,7 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
             // 0 이하 = 제한속도 모름. 목록이 비면 경고/주의구간 해제로 본다.
             override fun onCurrentRoadSpeedLimit(l: Int) { ui.post { limitKmh = l.takeIf { it > 0 } } }
             override fun onCameraAlert(a: List<CameraAlert>) { val o = a.any { it.isOverSpeed || it.isOverSectionAvrSpeed }; ui.post { cameraOverspeed = o } }
-            // ponytail: 남은 거리 단위를 m로 가정(문서 미확인), 에뮬 실측으로 조정
+            // 한계: 남은 거리 단위를 m로 가정(문서 미확인), 에뮬 실측으로 조정
             override fun onCautionPointInfo(p: List<CautionPoint>) { val z = p.any { it.remainDistance in 0..300 }; ui.post { cautionZone = z } }
             // C①: 내비 즐겨찾기 '집'·'회사'로 방 판정. 집이 없으면 최근 목적지에서 찾고, 그래도 없으면 기존 설정 유지.
             override fun onBookmarkInfo(l: List<BookmarkInfo>) {
