@@ -4,6 +4,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
+// 이 테스트가 지키는 동작: 카톡·문자 알림(Notif.kt)을 방별로 추리고(notifNow), 묶어서 묻고 읽어 주고 답장하는 대화(NotifTalk).
+// 광고는 이름 표기로만 가리고, 숫자는 한 자리씩 읽되 시각·분·금액은 그대로 둔다.
+// 전화 건 사람에게 먼저 보낼 '연락드리겠습니다' 문장(callbackMessage)은 기한이 있을 때만 시각을 넣는다.
 class NotifTest {
     private fun n(id: Long, sender: String, text: String = "회의 자료 보냈어요", app: String = "카카오톡", reply: Boolean = true) =
         InboxItem(id, sender, text, false, 0L, "", kind = "notif", app = app, replyable = reply)
@@ -16,6 +19,7 @@ class NotifTest {
         assertEquals(false, isAd(n(1, "김부장", "광고 시안 확인 부탁"))) // 본문 중간의 '광고'는 업무일 수 있다
     }
 
+    // 업무 운전은 광고 빼고 전부, 업무 시간 밖은 즐겨찾기 보낸이만, 정차는 시각에 따라 두 규칙 중 하나를 따른다.
     @Test fun 업무방은_광고외_전부_쉼방은_즐겨찾기만_정차는_시각따라() {
         val l = listOf(n(1, "김부장"), n(2, "엄마"), n(3, "쇼핑몰", "(광고) 할인"), InboxItem(4, "이", "x", false, 0L, ""))
         assertEquals(listOf(1L, 2L), notifNow(l, Room.DRIVE_WORK, favs).map { it.id })
@@ -25,6 +29,7 @@ class NotifTest {
         assertEquals(emptyList<Long>(), notifNow(l, null, favs).map { it.id })
     }
 
+    // notifSpeech: 건수와 보낸이를 묶어 한 문장으로 묻는다. 같은 앱이면 카톡·문자, 앱이 섞이면 '알림'으로 부른다.
     @Test fun 묶음_문장() {
         assertEquals("카톡 3건, 김부장님 외 2명. 읽어드릴까요?", notifSpeech(listOf(n(1, "김부장"), n(2, "이대리"), n(3, "엄마")), favs))
         assertEquals("카톡 2건, 엄마. 읽어드릴까요?", notifSpeech(listOf(n(1, "엄마"), n(2, "엄마")), favs))
@@ -81,6 +86,7 @@ class NotifTest {
         assertEquals(Turn("이 알림은 답장할 수 없어요. 화면에 남겨 둘게요."), t.hear("답장 네", favs))
     }
 
+    // parked = 정차 중. 못 알아들어도 답을 기다리는 바를 닫지 않고, 버튼을 눌러야 닫힌다.
     @Test fun 정차_중엔_못들어도_바_유지() {
         val t = NotifTalk(); val l = listOf(n(1, "김부장"))
         t.offer(l, favs)
@@ -120,11 +126,12 @@ class NotifTest {
         assertEquals(NotifTalk.Step.NONE, t.step)
     }
 
+    // 대답 없이 남은 질문은 새 알림이 오면 닫고, 남은 알림과 합쳐 한 번에 다시 묻는다(dropStale).
     @Test fun 무응답_묻기는_닫고_새_알림과_합쳐_다시_묻는다() {
         val t = NotifTalk()
         val first = n(1, "김부장")
         t.offer(listOf(first), favs)
-        t.hear(null, favs, parked = true) // P에서 못 들음 → 바는 남는다(예전엔 여기서 새 알림을 못 물었다)
+        t.hear(null, favs, parked = true) // P에서 못 들음 → 바는 남는다
         assertEquals(true, t.waiting)
         val merged = (t.dropStale() + listOf(first, n(2, "박대리"))).distinctBy { it.id }.sortedBy { it.id } // 같은 알림은 한 번만
         assertEquals(NotifTalk.Step.NONE, t.step)
@@ -152,6 +159,7 @@ class NotifTest {
 
     private fun call(label: String = "김부장", num: String = "01000000000", sum: String) = InboxItem(1, label, sum, false, 0L, "", fromNumber = num)
 
+    // 시각 규칙: 오전/오후가 적혀 있으면 그대로, 없으면 1~7시는 오후로 읽고 24시간 표기(15:30)는 그 시각대로 읽는다.
     @Test fun 먼저_제안_기한이면_시각_문장() {
         assertEquals("확인하고 오후 3시 30분 전에 연락드리겠습니다", callbackMessage(call(sum = "오후 3시 30분까지 견적 부탁")))
         // 오전/오후가 없으면 1~7시는 업무 시간 기준 오후, 그 밖은 그대로

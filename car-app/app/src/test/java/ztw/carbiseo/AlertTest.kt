@@ -4,6 +4,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
+// 이 테스트가 지키는 동작: 과속·주의구간 경고의 판정(alertFor)과 해제 지연(AlertLatch), 경고 중 음성 보류(SpeechHold).
+// 과속은 제한속도 +3km/h까지 허용하고 주의구간보다 우선한다. 과속 경고는 제한속도 이하가 2초 이어져야 풀리고, 주의구간은 바로 풀린다.
+// 경고 중에 들어온 문장·전화는 쌓았다가 풀릴 때 한 번에 말한다.
 class AlertTest {
     @Test fun 경계값_제한속도_더하기_3까지는_과속_아님() {
         assertEquals(Alert.NONE, alertFor(53f, 50, false, false))

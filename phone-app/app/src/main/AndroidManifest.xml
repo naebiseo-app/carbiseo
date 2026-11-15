@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- INTERNET: 서버 호출(Relay). READ_CONTACTS: 설정에서 '연락처 연결'을 켤 때만 요청한다. -->
+    <!-- 알림 접근은 이 목록에 없다. 사용자가 시스템 설정에서 직접 켜며, 아래 Listener 서비스가 그 권한으로 동작한다. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- allowBackup=false: 로컬 기록(앱 이름·보낸이)과 하차 저장본이 기기 백업에 올라가지 않는다. -->
     <application android:label="내비서 연결" android:allowBackup="false" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:theme="@style/App" android:enableOnBackInvokedCallback="true">
+        <!-- 알림 접근 서비스. BIND_NOTIFICATION_LISTENER_SERVICE 권한이 있어 시스템만 이 서비스에 연결할 수 있다. -->
         <service android:name=".Listener" android:exported="true" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
         </service>
+        <!-- 화면 하나(첫 실행·홈·기록·설정 탭). -->
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

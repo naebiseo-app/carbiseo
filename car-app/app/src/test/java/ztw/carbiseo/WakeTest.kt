@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
+// 이 테스트가 지키는 동작: 부르는 이름 뒤의 문장을 떼어 내는 wakeSplit. 이름만 부르면 빈 문장, 이름이 없으면 null을 돌려준다.
+// 기본 이름 '내비서'는 음성 인식이 틀리게 적은 꼴도 받고, 다른 이름은 그대로 일치할 때만 받는다.
 class WakeTest {
     @Test fun 이름만_부르면_빈_문장() {
         assertEquals("", wakeSplit("내비서", "내비서"))
@@ -20,6 +22,7 @@ class WakeTest {
         assertEquals("", wakeSplit("내비서", "네비서"))
     }
 
+    // 음성 인식이 '내비서'를 다르게 적은 꼴(내디서·내리서·내미성 등)을 이름으로 받는지 본다.
     @Test fun 기본_이름은_잘못_적힌_꼴도_받는다() {
         assertEquals("", wakeSplit("내비사", "내비서"))
         assertEquals("오늘날씨어때?", wakeSplit("내디서오늘날씨어때?", "내비서"))

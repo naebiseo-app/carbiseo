@@ -6,6 +6,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.ZoneOffset
 
+// 이 테스트가 지키는 동작: 받은 통화 카드(Inbox.kt)를 방에 맞게 한 문장으로 알리는 speechFor와 정차 때 다시 알리는 parkReminder,
+// 업무 시간 밖에 받은 건을 다음 첫 업무 운전에 '넘긴 건'으로 말하는 이월(deferNew·carryOver), 카드 목록·저장 형식.
+// 운전 중에는 새 통화를 건수와 급함 여부로만 말하고, 업무 시간 밖(DRIVE_REST)에는 급한 건과 바로 연결(direct) 번호만 읽는다.
 class InboxTest {
     private fun item(id: Long, urgent: Boolean = false, label: String = "김", summary: String = "급건 아님", raw: String = "") =
         InboxItem(id, label, summary, urgent, 0L, raw)
@@ -46,12 +49,14 @@ class InboxTest {
         assertNull(speechFor(emptyList(), Room.DRIVE_WORK))
     }
 
+    // 같은 통화에서 서버가 보내는 진행 이벤트(kind = event)는 통화 건수로 세지 않는다.
     @Test fun 같은_통화의_웹훅_이벤트는_건수에_안_센다() {
         val ev = InboxItem(2, "", "", false, 0L, "{}", kind = "event")
         assertEquals("부재중 전화 한 건, AI가 용건을 받아 두었습니다.", speechFor(listOf(item(1), ev, ev.copy(id = 3)), Room.DRIVE_WORK))
         assertNull(speechFor(listOf(ev), Room.DRIVE_WORK))
     }
 
+    // pruneGone(cards, minId): 서버에 남은 가장 작은 id보다 오래된 카드를 지운다. minId가 null이면 그대로 둔다.
     @Test fun 서버가_비면_카드도_비우고_모르면_그대로() {
         val cards = listOf(item(5), item(3))
         assertEquals(emptyList<InboxItem>(), pruneGone(cards, Long.MAX_VALUE)) // 관리자 inbox 비우기 뒤
@@ -123,7 +128,7 @@ class InboxTest {
 
     @Test fun 재시작_첫_폴링은_받은_시각과_서버방으로_어제오늘만() {
         val l = listOf(call(1, at(2, 19)), call(2, at(2, 10)), call(3, at(2, 10), room = "DRIVE_REST"), call(4, at(1, 20)), call(5, at(3, 2)))
-        // 월 19시(업무 외), 월 10시(업무), 월 10시인데 서버 방이 쉼, 일요일 20시(이틀 전 → 제외), 화 02시(오늘)
+        // 월 19시(업무 외), 월 10시(업무), 월 10시인데 서버 방이 업무 시간 밖, 일요일 20시(이틀 전 → 제외), 화 02시(오늘)
         assertEquals(mapOf(1L to mon, 3L to mon, 5L to mon + 1), deferNew(l, true, false, mon + 1, RoomSettings(), utc))
     }
 
@@ -196,6 +201,7 @@ class InboxTest {
         assertEquals(30, decodeLocalTasks(encodeLocalTasks((1..40L).map { a.copy(id = LOCAL_ID_BASE + it) })).size)
     }
 
+    // ringing 카드 = '전화 왔어요' 카드. 요약 카드가 replaces로 가리키면 그 카드를 대신한다.
     @Test fun ringing_카드를_요약_카드로_교체하면_옛_id를_뽑고_같은_전화를_다시_알리지_않는다() {
         val ring = item(5, label = "김부장", summary = "전화 왔어요").copy(direct = true)
         val sum = item(7, label = "김부장", summary = "견적 보내 달라고 하세요. 급하진 않아요.").copy(direct = true, replaces = 5)
@@ -217,6 +223,7 @@ class InboxTest {
         assertEquals("2026-11-01 회의", cardText(t.copy(summary = "2026-11-01 회의")))
     }
 
+    // weekCalls의 결과는 (이번 주 통화 수, 그중 DRIVE_REST에서 받은 수). 주는 월요일에 시작한다.
     @Test fun 이번_주_통화는_월요일부터_세고_쉼_방에서_받은_건_따로() {
         val z = ZoneOffset.ofHours(9)
         val at = { d: Int, h: Int -> java.time.LocalDateTime.of(2026, 11, d, h, 0).toInstant(z).toEpochMilli() } // 2026-11-02는 월요일

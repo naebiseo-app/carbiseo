@@ -5,6 +5,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+// 이 테스트가 지키는 동작: 차 안 음성 비서의 규칙 함수(주로 Drive.kt)가 같은 입력에 같은 판정과 같은 문장을 내는 것.
+// 휴식·졸음·피로 기준, 휴게소·근처 가게·주차장 고르기, 일정 지각 예측, 예약·주차 문의 카드, 하차 카드를 값만 넣어 확인한다.
+// 문장은 운전자가 듣는 그대로 비교하고, 경계값(분·미터·시각)은 한 칸 안팎을 함께 본다.
 class DriveTest {
     private val s = RoomSettings()
     private val far = LatLng(37.5663, 126.9779)
@@ -14,10 +17,11 @@ class DriveTest {
         assertFalse(homeSoon(Room.DRIVE_REST, s.home, s, 6))
         assertFalse(homeSoon(Room.DRIVE_REST, s.home, s, null))
         assertFalse(homeSoon(Room.DRIVE_WORK, s.home, s, 3))
-        assertFalse(homeSoon(Room.DRIVE_REST, far, s, 3)) // 업무 종료 후 쉼 방이어도 목적지가 집이 아니면 아님
+        assertFalse(homeSoon(Room.DRIVE_REST, far, s, 3)) // 업무 시간 밖이어도 목적지가 집이 아니면 아님
         assertFalse(homeSoon(Room.DRIVE_REST, null, s, 3))
     }
 
+    // SeatEdge: 처음 읽은 값을 기준선으로 삼고, 그 값에서 바뀔 때만 탔다·내렸다를 알린다(값의 뜻이 반대인 기기도 같다).
     @Test fun 조수석_기준선에서_바뀔때만() {
         for (empty in listOf(false, true)) { // true = 에뮬처럼 반전된 값
             val e = SeatEdge()
@@ -32,6 +36,7 @@ class DriveTest {
         }
     }
 
+    // Once: fire(true)는 운전 1회에 한 번만 true를 주고, reset() 뒤에 다시 한 번 준다. fire(false)는 소모하지 않는다.
     @Test fun 운전_1회당_한번() {
         val o = Once()
         assertFalse(o.fire(false))
@@ -98,6 +103,7 @@ class DriveTest {
         assertEquals("가장 가까운 오창졸음쉼터로 길 안내를 시작해요", restStopSpeech(RestStop("오창졸음쉼터", near.at, true, "졸음쉼터"), false)) // 이름에 있으면 중복 X
     }
 
+    // newDrive(직전 P 길이): P가 SHORT_PARK_MS보다 짧으면 같은 운전으로 이어 본다. 값이 없으면(첫 운전) 새 운전.
     @Test fun 짧은_P는_같은_운전() {
         assertTrue(newDrive(null))
         assertFalse(newDrive(30_000))
@@ -126,6 +132,7 @@ class DriveTest {
         assertEquals(null, t.of(900 + 24 * 60 + 1))
     }
 
+    // readiness(서버 끊김, 착신 확인, 응대 모드): 준비가 안 됐으면 받는 중이라고 말하지 않는다.
     @Test fun 상태는_정직하게() {
         assertEquals("서버 연결 끊김 · 알림이 늦어져요", readiness(true, true, "ai"))
         assertEquals("AI 응대 준비 안 됨(착신 설정 필요)", readiness(false, false, "ai"))
@@ -152,6 +159,7 @@ class DriveTest {
         assertEquals(null, nextEvent(emptyList(), 0))
     }
 
+    // busyManeuver(깜빡이, 기어, 조향각): 깜빡이·후진·큰 조향 중에는 말을 걸지 않는다.
     @Test fun 조작중이면_조용히() {
         assertTrue(busyManeuver(true, Gear.DRIVE, 0f))
         assertTrue(busyManeuver(false, Gear.REVERSE, null))
@@ -236,7 +244,7 @@ class DriveTest {
         assertFalse(trafficOfferDue(n, "HEAVY", e, setOf(1000L), null, 0))
         assertFalse(trafficOfferDue(Proactive.OFF, "HEAVY", e, emptySet(), null, 0))
         assertFalse(trafficOfferDue(n, "HEAVY", e, emptySet(), 0L, 1000))
-        // 11-07 실측: 7분 뒤 도착인데 일정은 76분 뒤 → 늦을 일 없음
+        // 실측 사례: 7분 뒤 도착인데 일정은 76분 뒤 → 늦을 일 없음
         val far = e.copy(start = 76 * 60_000L)
         assertFalse(trafficOfferDue(n, "HEAVY", far, emptySet(), null, 0, 7 * 60_000L))
         assertTrue(trafficOfferDue(n, "HEAVY", far, emptySet(), null, 0, 66 * 60_000L))
@@ -261,7 +269,7 @@ class DriveTest {
         assertEquals("가장 가까운 기흥휴게소로 길 안내를 시작해요", restStopSpeech(stop, false))
     }
 
-    // 피로 모드는 전화·업무 말을 막지 않는다(fatigueGate 삭제). 기준 판정만 남김.
+    // 피로 모드는 전화·업무 말을 막지 않는다. 여기서는 기준 판정만 확인한다.
     @Test fun 피로_기준은_주행_중_120분() {
         assertTrue(fatigued(Room.DRIVE_WORK, 120)); assertFalse(fatigued(Room.DRIVE_WORK, 119)); assertFalse(fatigued(Room.PARK, 300))
     }
@@ -288,7 +296,7 @@ class DriveTest {
         assertEquals(Drowsy.WATCH, d.result(6_100)) // 6.1초는 느림 1번
         assertEquals(Drowsy.FINE, d.result(1_000)) // 정상이면 카운터 0
         assertEquals(Drowsy.WATCH, d.result(null)); assertEquals(Drowsy.ALERT, d.result(9_000)) // 무응답 + 느림 = 연속 2번
-        d.mark(0); assertFalse(d.due(DROWSY_RETRY_MS - 1)); assertTrue(d.due(DROWSY_RETRY_MS)) // 의심이면 5분 간격
+        d.mark(0); assertFalse(d.due(DROWSY_RETRY_MS - 1)); assertTrue(d.due(DROWSY_RETRY_MS)) // 경고(ALERT) 뒤엔 5분 간격
         assertEquals(Drowsy.ALERT, d.result(null)) // 계속 이어지면 계속 경고
         assertEquals(Drowsy.FINE, d.result(500)); d.mark(0); assertFalse(d.due(DROWSY_RETRY_MS)); assertTrue(d.due(DROWSY_CHECK_MS)) // 정상 1번이면 15분 복귀
         assertEquals(Drowsy.WATCH, d.result(null)); d.reset(); assertEquals(Drowsy.WATCH, d.result(null)); assertFalse(d.due(10 * DROWSY_CHECK_MS)) // 새 운전은 카운터·시각 리셋
@@ -403,7 +411,7 @@ class DriveTest {
         assertEquals("번호를 다시 확인해 주세요", sendFailReason("bad_to_number")); assertEquals("잠시 뒤 다시 시도해 주세요", sendFailReason("http_500"))
         assertEquals(null, sendable("")); assertEquals(null, sendable(null)); assertEquals(null, sendable("김부장")); assertEquals(null, sendable("1234"))
         assertEquals("'운전 중이라 약 7분 늦을 것 같습니다. 죄송합니다.' 이대로 보낼까요?", sendConfirmSpeech("운전 중이라 약 7분 늦을 것 같습니다. 죄송합니다."))
-        // F4: 서버가 contact_number를 주면 그 번호가 초안 번호가 된다(옛 contact보다 우선). 없으면 지금처럼.
+        // F4: 서버가 contact_number를 주면 그 번호가 초안 번호가 된다(contact보다 우선). 없으면 contact 문자열을 쓴다.
         val e = Event("거래처 미팅", 0, "곳", LatLng(37.0, 127.0), "김과장", "010-9999-8888")
         assertEquals("01099998888" to "운전 중이라 약 7분 늦을 것 같습니다. 죄송합니다.", taskDraft(lateTask(e, 7)))
         assertEquals("" to "운전 중이라 약 7분 늦을 것 같습니다. 죄송합니다.", taskDraft(lateTask(e.copy(contactNumber = ""), 7)))
@@ -566,6 +574,7 @@ class DriveTest {
         assertEquals("식당 주차 문의 / 내용: 가능해요", reserveResultTask("식당", "가능해요", parking = true))
     }
 
+    // 하차(gotOff), 비(rainByWiper), 정체 단계(worstTraffic)를 차량 신호값에서 판단한다.
     @Test fun 하차_비_정체_판단() {
         assertTrue(gotOff(Gear.PARK, 1))
         assertFalse(gotOff(Gear.PARK, 0)) // 닫힘

@@ -5,6 +5,9 @@ import android.graphics.drawable.Drawable
 import java.io.File
 import kotlin.math.sqrt
 
+// 사용자가 고른 배경 이미지의 정책(bgPolicy)·이름 입력 검증(validName)·디코드(loadBg)만 맡는다.
+// 배경을 화면에 그리는 일은 Screens.kt, 이미지 파일을 저장하는 일도 Screens.kt 쪽이다.
+
 data class BgPolicy(val animate: Boolean, val scrimAlpha: Float)
 
 /** 움직이는 배경은 세워 둔 동안만. 운전 중(판정 전 포함)엔 정지 + 짙은 스크림. */

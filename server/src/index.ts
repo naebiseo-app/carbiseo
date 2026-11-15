@@ -1,3 +1,7 @@
+// 내비서 서버(Cloudflare Worker): 차 앱·폰 앱·통화 사업자(ClawOps) 웹훅·관리 페이지 요청이 모두 이 파일의 fetch로 들어온다.
+// 맡은 일: 경로별 인증·입력 검증, 통화가 끝난 뒤 받아쓰기 → 요약 → 카드 저장, 문자 중계 호출, 하루 상한(문자·말동무·예약 전화), 보관 정책(scheduled).
+// 맡지 않는 일: 대본 문구(script.ts), AI 문장 가드(guard.ts), 구글 캘린더(calendar.ts), 공공 주차(parking.ts), 관리 페이지 HTML(admin.ts).
+// 먼저 읽을 곳: 맨 아래 fetch 위의 경로 색인 → transcriptWork(통화 뒤 카드 만들기) → saveCallCard.
 import { CALL_ID, carChip, callerNumber, cleanMent, cleanName, field, freshCtx, hhmm, isUrgent, nextEventAt, ownerScript, parseCarCtx, parseEta, parseEtaShare, etaFor, inBook, parseMode, parseRoom, pickScript, isDirect, parkingScript, reserveScript, sameNumber, type EtaShare, type Mode, type Recent } from "./script.ts";
 import { adminPage, basicOk, demoSchedule, encodeReplay, parseFakeCall, replayScript, type MailRow, type ReplyRow } from "./admin.ts";
 import { FALLBACK, guardText, isBlocked } from "./guard.ts";
@@ -9,8 +13,8 @@ import { parseNotify, parseReply, TAKE_REPLIES_SQL, type Notif } from "./notif.t
 
 interface Env {
   DB: D1Database;
-  CAR_TOKEN: string;
-  CALL_CONTEXT_SECRET: string;
+  CAR_TOKEN: string; // 차·폰 앱이 같이 쓰는 Bearer 토큰. 비어 있으면 /car/*·/phone/* 전부 401
+  CALL_CONTEXT_SECRET: string; // 통화 사업자가 부르는 /clawops/call-context·status와 /mcp 경로에 들어가는 비밀 조각
   CLAWOPS_SIGNING_KEY?: string; // 없으면 서명 검증이 'nokey'라 /clawops/events는 전부 401(기록·카드 없음)
   ADMIN_TOKEN?: string; // 없으면 /admin 전부 401
   CLAWOPS_ACCOUNT_ID?: string;
@@ -31,15 +35,19 @@ const json = (o: unknown, status = 200) =>
 
 const now = () => Date.now();
 
-const RESERVE_DAILY_MAX = 5; // 예약 전화 하루(KST) 상한: 오발신·반복 호출로 전화비가 새는 것을 막는다
-const SEND_DAILY_MAX = 20; // 문자 발송 하루(KST) 상한(데모 번호 제외): 공개 APK 토큰으로 문자비가 새는 것을 막는다
-const CHAT_DAILY_MAX = 200; // 말동무 AI 대화 하루(KST) 상한: 공개 APK 토큰으로 AI비가 새는 것을 막는다
+// 하루(KST 0시~) 상한 셋. 공개 APK에 든 토큰이 남용돼도 비용이 새지 않게 막는 장치다(README의 값과 같다).
+// 한계: '세고 → 실행하고 → 기록' 순서라 동시 요청이 겹치면 몇 건 넘길 수 있다 (넘으려면 세기와 기록을 한 SQL로 묶거나 기기별 토큰·속도 제한을 둔다)
+const RESERVE_DAILY_MAX = 5; // 예약·주차 문의 전화(inbox kind='reserve' 행 수): 오발신·반복 호출로 전화비가 새는 것을 막는다
+const SEND_DAILY_MAX = 20; // 문자 발송: /car/send가 오늘의 kind='sent' 행(데모 번호 제외)을 센다. 통화 뒤 자동 문자·가족 문자·데모 메일 행도 센다
+const CHAT_DAILY_MAX = 200; // 말동무 AI 대화(kv 'chat_count')
 
+/** kv(key → JSON 값) 읽기. 없으면 null. */
 export async function kvGet(db: D1Database, key: string) {
   const r = await db.prepare("SELECT value FROM kv WHERE key=?").bind(key).first<{ value: string }>();
   return r ? JSON.parse(r.value) : null;
 }
 
+/** kv 쓰기(같은 key면 덮어쓴다). */
 export async function kvPut(db: D1Database, key: string, value: unknown) {
   await db.prepare("INSERT INTO kv(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at").bind(key, JSON.stringify(value), now()).run();
 }
@@ -92,7 +100,7 @@ const fromCols = (n: string) => {
 
 type Card = ReturnType<typeof fromCols> & { call_id: string; summary: string; urgent: number };
 // 같은 통화의 카드는 1장만: 웹훅 재전송, 받아쓰기 카드 뒤 오는 summary.completed는 건너뛴다
-// 한계: 칩은 카드 만든 시점의 차량 맥락. 정확히 하려면 call-context 때 값을 ring meta에 남겨 call_id로 잇기
+// 한계: 칩은 카드를 만든 시점의 차량 맥락이다 (넘으려면 call-context 때 값을 ring meta에 남겨 call_id로 잇는다)
 // from = 발신번호 원문. 바로 연결 목록(settings.direct_numbers)에 있으면 urgent=1·meta.direct (차는 피로·퇴근 중에도 읽음)
 async function saveCallCard(db: D1Database, c: Card, extra: object = {}, from = "", status = "summarized") {
   c = { ...c, summary: guardText("summary", c.summary) }; // LLM 가드: 요약 카드 저장은 전부 여기를 지난다
@@ -108,6 +116,7 @@ async function saveCallCard(db: D1Database, c: Card, extra: object = {}, from = 
   if (ringId) await db.prepare("DELETE FROM inbox WHERE id=?").bind(ringId).run();
 }
 
+// 통화 받아쓰기를 정리시키는 시스템 프롬프트 넷: 손님 통화(SUMMARY)·예약 전화(RESERVE)·주차 문의 전화(PARKING)·주인 통화(TASK). 모두 JSON 한 줄로 답하게 한다.
 const SUMMARY_SYSTEM = "전화 받아쓰기를 운전자가 볼 메모로 정리합니다. 받아쓰기에 있는 내용만 쓰고, 상대가 말하지 않은 것은 없다고도 쓰지 않습니다. 연락 시각을 말했으면 summary에 반드시 넣습니다. '아, 네' 같은 맞장구는 이름이 아니고, 비서가 이름·용건을 되읽고 '맞으실까요?'라고 물었을 때 상대가 맞다고 했으면 비서가 되읽은 말을 쓰고, 상대가 고쳤으면 고친 말을 씁니다. 전화 받아쓰기는 상호·이름을 비슷한 소리의 다른 말로 자주 틀립니다. 맨 끝 [참고 이름 목록]에 발음이 비슷한 이름이 있으면 그 이름으로 고쳐 쓰고(예: 받아쓰기 '한비 물산' → 목록 '한빛물산'), 비슷한 것이 없으면 받아쓰기 그대로 씁니다. 같은 식으로 문맥상 어색한 용건 낱말은 발음이 비슷한 흔한 업무 낱말로 고칩니다(예: '공적 사건' → '견적 건'). JSON 한 줄만 답합니다: {\"caller\":\"상대 이름·소속, 없으면 빈 문자열\",\"summary\":\"존댓말 한두 문장. 예: 김민수 님이 미팅 변경 건으로 전화하셨고 3시까지 연락을 부탁하셨어요. 자료도 보내 달라고 하셨어요.\",\"callback_by\":\"상대가 말한 연락 시각 표현 그대로(예: 3시까지), 없으면 빈 문자열\"}";
 
 const RESERVE_SYSTEM = "AI 비서가 식당·가게에 건 예약 문의 전화 받아쓰기를 운전자가 볼 결과로 정리합니다. 받아쓰기에 있는 내용만 쓰고 없는 내용은 지어내지 않습니다. status는 가게가 예약을 확정했다고 분명히 말했을 때만 ok이고(예약 질문에 '그러세요'·'오세요'로 답한 것도 확정입니다), 안 된다·모르겠다·나중에·직접 연락 같은 말이거나 확정이 불분명하면 need_manual입니다. parking은 가게가 주차 가능이라고 하면 가능, 안 된다고 하면 불가, 말이 없거나 불분명하면 모름입니다. summary는 존댓말 한 문장이고 전화번호는 쓰지 않습니다. JSON 한 줄만 답합니다: {\"status\":\"ok|need_manual\",\"summary\":\"예: 18:30 4명 예약이 확정됐어요. 주차는 가능하대요.\",\"parking\":\"가능|불가|모름\"}";
@@ -116,7 +125,7 @@ const PARKING_SYSTEM = "AI 비서가 가게·주차장에 건 주차 문의 전�
 
 const TASK_SYSTEM = `주인이 비서에게 건 전화 받아쓰기에서 주인이 시킨 일만 뽑습니다. 받아쓰기에 있는 내용만 씁니다. JSON 한 줄만 답합니다: {"tasks":["일 한 건","일 한 건"],"sends":[{"to":"이지은","body":"3시에 도착합니다."}]}. sends에는 주인이 문자를 보내라고 했고, 비서가 받는 사람과 내용을 되읽었고, 그 뒤 주인이 취소하거나 고치지 않은 문자만 넣습니다(고쳤으면 고친 내용으로). sends에 넣은 문자는 tasks에 넣지 않습니다. 비서가 되읽기 전에 끊겼으면 sends에 넣지 않고 tasks에 '이지은에게 문자 / 내용: 3시에 도착합니다.'처럼 넣습니다. 메일과 그 밖의 일은 tasks에 넣습니다. 메일은 '메일: 받는사람 / 제목 / 내용', 그 밖의 일은 '내일 오전 박도윤 님께 견적서 보내기'처럼 짧게 씁니다. 일정이나 전화 내용을 묻기만 한 통화는 {"tasks":[]}로 답합니다.`;
 
-// 받아쓰기 → 메모. 실패는 null(호출한 쪽이 상대 말 그대로 쓴다)
+// 받아쓰기 → 메모(Anthropic API, 10초 제한). dialog는 loadDialog가 전화번호를 [번호]로 가린 글이다. 키 없음·HTTP 오류·JSON 아님은 모두 null(호출한 쪽이 상대 말 그대로 쓴다)
 async function summarizeCall(key: string | undefined, system: string, dialog: string): Promise<{ caller?: string; summary?: string; callback_by?: string; tasks?: string[]; sends?: { to?: string; body?: string }[]; status?: string; parking?: string } | null> {
   if (!key) return null;
   try {
@@ -208,7 +217,7 @@ export function namesFrom(contacts: unknown, schedule: unknown): string[] {
   return [...new Set([...c, ...ev].filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim().slice(0, 30)))].slice(0, 40);
 }
 // 요약 AI가 고치지 못한 상호를 글자 모양(자모)으로 한 번 더 맞춘다. 11-10 실측: '황빛물산'→한빛물산(0.83), '세금 상사'→새봄상사(0.75).
-// 한계: 4글자 이상 한글 이름만, 같은 길이 창만 본다. 사람 이름(3글자)은 오교정 위험이 커서 뺀다.
+// 한계: 4글자 이상 한글 이름만, 같은 길이 창만 본다 (3글자 사람 이름은 오교정 위험이 커서 뺐고, 넘으려면 그 위험을 줄일 기준이 먼저 필요하다)
 function jamo(ch: string) { const i = ch.charCodeAt(0) - 0xac00; return i < 0 || i > 11171 ? [ch, "", ""] : [String(i / 588 | 0), String(i % 588 / 28 | 0), String(i % 28)]; }
 export function fixNames(text: string, names: string[]): string {
   const cands = [...new Set(names.flatMap((n) => n.split(/\s+/)).filter((w) => /^[가-힣]{4,}$/.test(w)))];
@@ -351,7 +360,8 @@ export function statusDone(raw: string): string | null {
   return st.includes("completed") && /^CA[0-9a-f]{20,40}$/i.test(id) ? id : null;
 }
 
-// 걸어 보낸 전화가 연결 안 된 채 끝났을 때(무응답·통화중·실패·취소)의 CallId. 한계: 실제 필드·값 이름 미확인이라 CallStatus·Status 두 키에서 Twilio식 값으로 찾는다. 실통화 웹훅 본문을 보고 맞추기
+// 걸어 보낸 전화가 연결 안 된 채 끝났을 때(무응답·통화중·실패·취소)의 CallId.
+// 한계: 실제 필드·값 이름을 확인하지 못해 CallStatus·Status 두 키에서 Twilio식 값으로 찾는다 (넘으려면 실통화 웹훅 본문을 보고 키와 값을 맞춘다)
 export function statusFailed(raw: string): string | null {
   const st = statusField(raw, "callstatus", "status").toLowerCase();
   return /busy|no.?answer|fail|cancel/.test(st) ? statusField(raw, "callid", "callsid", "call_id") || null : null;
@@ -383,6 +393,7 @@ async function saveNotif(db: D1Database, n: Notif) {
 }
 
 const DAY = 86_400_000;
+/** 보관 정책 SQL [문장, 기준 시각 t로 만든 값]: 웹훅 원문(raw)은 7일 뒤 비우고, inbox 행은 30일 뒤 삭제한다(PRIVACY.md와 같은 값). scheduled가 매일 실행한다. */
 export const retention = (t: number): [string, number][] => [
   ["UPDATE inbox SET raw=NULL WHERE raw IS NOT NULL AND created_at < ?", t - 7 * DAY],
   ["DELETE FROM inbox WHERE created_at < ?", t - 30 * DAY],
@@ -492,6 +503,7 @@ export default {
     // CAR_TOKEN이 비어 있으면 "Bearer undefined"가 통과하지 않게 닫는다
     const authed = !!env.CAR_TOKEN && req.headers.get("authorization") === `Bearer ${env.CAR_TOKEN}`;
 
+    // 차 상태: 방·남은 분·차량 맥락을 kv 'car_context'에 덮어쓴다. 차가 5분마다 다시 올리므로 10분 넘게 갱신이 없으면 대본이 믿지 않는다(freshCtx)
     if (m === "POST" && pathname === "/car/state") {
       if (!authed) return json({ error: "unauthorized" }, 401);
       const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
@@ -596,7 +608,7 @@ export default {
         acq = direct || inBook(await kvGet(env.DB, "contacts"), schedule, from);
         share = parseEtaShare(st?.eta_share) ?? "known";
         if (mode === "ai" && !isOwner && from && !(await kvGet(env.DB, "owner_as_guest"))) {
-          // 한계: 최근 50건만 JS에서 sameNumber로 거른다. 카드가 많아 놓치면 from_number 정규화 컬럼+인덱스로
+          // 한계: 최근 50건만 JS에서 sameNumber로 거르므로 카드가 많으면 오래된 번호를 놓친다 (넘으려면 from_number 정규화 컬럼+인덱스로 SQL에서 찾는다)
           const rows = (await env.DB.prepare("SELECT from_label,from_number FROM inbox WHERE kind='call' AND from_label<>'' AND from_label NOT LIKE '끝번호%' AND from_number IS NOT NULL ORDER BY id DESC LIMIT 50").all<{ from_label: string; from_number: string }>()).results;
           known = rows.find((r) => sameNumber(from, r.from_number))?.from_label;
         }
@@ -609,10 +621,11 @@ export default {
         const instruction = ownerScript({ owner, name, room, eta, schedule, recent, nowMs: now(), passenger: cc?.passenger === true, trip_min: cc?.trip_min });
         return json({ CallContext: { Instruction: instruction, Variables: { room: room ?? "UNKNOWN", owner_mode: "1" } } });
       }
-      // 한계: 한 마디 안내 모드는 지난 통화 카드(known)를 안 찾는다 — 주소록·일정·바로 연결로만 아는 번호
+      // 한계: 한 마디 안내 모드는 지난 통화 카드(known)를 찾지 않아, 아는 번호가 주소록·일정·바로 연결에 있는 번호뿐이다 (넘으려면 위 known 조회를 mode와 무관하게 돌린다)
       const s = pickScript(room, owner, name, etaFor(eta, share, acq || !!known), mode, nextEventAt(schedule, now()), cc, clk, ment, known);
       const callId = field(raw, ["callid", "callsid", "call_id"]);
-      // 멘트·끔: 모델이 끊기를 미루는 일이 있어(장면 9) 멘트 길이만큼 기다렸다가 서버가 통화를 끝낸다. 한계: 고정 12초, 긴 사용자 멘트면 길이 비례로
+      // 멘트·끔: 모델이 끊기를 미루는 일이 있어(장면 9) 멘트 길이만큼 기다렸다가 서버가 통화를 끝낸다.
+      // 한계: 기다림이 고정 12초라 긴 사용자 멘트는 끝나기 전에 끊길 수 있다 (넘으려면 멘트 길이에 비례해 정한다)
       if (mode !== "ai" && CALL_ID.test(callId) && env.CLAWOPS_API_KEY)
         ctx?.waitUntil(new Promise((ok) => setTimeout(ok, HANGUP_MS)).then(() => fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls/${callId}`,
           { method: "POST", headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ Status: "completed" }) }))
@@ -653,7 +666,7 @@ export default {
       const raw = await req.text();
       const sig = await checkSig(env, req.url, req.headers.get("content-type"), raw, req.headers.get("x-signature"));
       console.log("clawops webhook sig=" + sig, "ct=" + req.headers.get("content-type"));
-      if (sig !== "ok") return json({ error: "bad_signature" }, 401); // 11-06 실통화 이벤트가 ok로 카드까지 간 것 확인 뒤 거절로 전환
+      if (sig !== "ok") return json({ error: "bad_signature" }, 401); // 서명이 없거나 틀리거나 키가 없으면 저장도 카드도 없이 거절(실통화 이벤트로 검증이 맞는 것을 확인했다)
       await saveInbox(env.DB, "event", "received", null, raw, { ct: req.headers.get("content-type"), sig, sig_header: req.headers.get("x-signature") });
       // 계정 '통화 받아쓰기'가 꺼져 있어 통화가 끝나면 받아쓰기를 직접 요청한다 → transcript.completed → 받아쓰기로 카드(transcriptCard)
       const callId = sig === "ok" ? transcriptTarget(raw) : null;
@@ -679,7 +692,7 @@ export default {
       return json({ ok: true });
     }
 
-    // 차 앱 '보내기' 버튼: 확인된 문자만 중계로 발송, 결과를 inbox kind='sent'로 기록
+    // 차 카드 버튼(완료·내일 아침에): 카드 행의 status를 바꿔 서버에도 남긴다
     if (m === "POST" && pathname.startsWith("/car/inbox/")) {
       if (!authed) return json({ error: "unauthorized" }, 401);
       const p = parseInboxAction(pathname, (await req.json().catch(() => ({}))) as Record<string, unknown>);
@@ -688,6 +701,7 @@ export default {
       return json({ ok: true });
     }
 
+    // 차 앱 '보내기' 버튼: 확인된 문자만 중계로 발송, 결과를 inbox kind='sent'로 기록. 하루 상한을 넘으면 429(중계 호출 없음)
     if (m === "POST" && pathname === "/car/send") {
       if (!authed) return json({ error: "unauthorized" }, 401);
       const p = parseSend((await req.json().catch(() => ({}))) as Record<string, unknown>);
@@ -716,7 +730,7 @@ export default {
       const day0 = Math.floor((now() + 9 * 3_600_000) / 86_400_000) * 86_400_000 - 9 * 3_600_000; // 오늘 0시(KST)
       const used = await env.DB.prepare("SELECT COUNT(*) AS n FROM inbox WHERE kind='reserve' AND created_at>=?").bind(day0).first<{ n: number }>();
       if ((used?.n ?? 0) >= RESERVE_DAILY_MAX) return json({ ok: false, code: "daily_limit" });
-      // 한계: 시연·심사 중 실제 가게로 전화가 가면 안 된다. O4_LIVE=1일 때만 실제 가게 번호, 그 외엔 항상 주인 번호로 건다
+      // 안전장치: 시연·심사 중 실제 가게로 전화가 가면 안 된다. O4_LIVE=1일 때만 실제 가게 번호, 그 외엔 항상 주인 번호로 건다
       const to = (env.O4_LIVE === "1" ? (await placePhone(env.KAKAO_REST_KEY, place, lat, lng)).phone : env.OWNER_NUMBER)?.replace(/[\s-]/g, "");
       if (!to) return json({ ok: false, code: "no_number" });
       const owner = (await kvGet(env.DB, "settings"))?.owner_label;

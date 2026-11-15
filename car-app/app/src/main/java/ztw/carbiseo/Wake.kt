@@ -14,12 +14,15 @@ import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import java.util.concurrent.LinkedBlockingQueue
 
+// 이름 호출("내비서"): 마이크 → 기기 안 스트리밍 인식 → 끝점마다 이름이 있는 문장만 뒤 문장으로 잘라 넘긴다(Wake 클래스).
+// 이름 뒤 문장을 어떤 의도로 풀지는 RoomService·Drive.kt(carIntent), 한 번 듣기는 Voice.kt다. 순수 함수는 wakeSplit 하나다.
+
+private val DEFAULT_NAMES = setOf("내비서", "네비서") // 인식기가 잘못 받아 적는 꼴을 함께 받는 이름
+
 /**
  * 이름 호출 문장 나누기(순수 함수). 공백을 뺀 text에 이름이 있으면 이름 뒤 문장(없으면 ""), 이름이 없으면 null.
  * 이름의 첫 글자가 '내'·'네'면 둘 다 같은 것으로 본다("네비서야" → "야"). 기본 이름은 인식기가 잘못 적는 꼴도 받는다.
  */
-private val DEFAULT_NAMES = setOf("내비서", "네비서") // 인식기가 잘못 받아 적는 꼴을 함께 받는 이름
-
 fun wakeSplit(text: String, name: String): String? {
     val t = text.filterNot { it.isWhitespace() }
     val n = name.filterNot { it.isWhitespace() }

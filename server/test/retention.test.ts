@@ -1,3 +1,5 @@
+// 이 테스트가 지키는 동작:
+// - 보관 정책: 웹훅 원문(raw)은 7일 뒤 비우고, inbox 행은 30일 뒤 삭제한다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { retention } from "../src/index.ts";

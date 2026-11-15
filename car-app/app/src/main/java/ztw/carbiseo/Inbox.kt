@@ -4,6 +4,10 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
+// inbox(서버가 쌓아 둔 통화·알림·할 일 카드)의 행 모델 InboxItem과 그 위의 순수 함수: 낭독 문장(speechFor)·퇴근 뒤 받은 전화
+// 넘기기(deferNew·carryOver, H7)·할 일 → 문자/메일 초안(taskDraft·mailDraft)·서버에서 지워진 카드 정리(pruneGone).
+// 서버 호출은 Server.kt, 이 함수들을 부르는 폴링·화면 상태는 RoomService.kt다. 먼저 읽을 곳: InboxItem → speechFor → deferNew.
+
 /** 서버 /car/inbox 한 행(쓰는 칼럼만). */
 data class InboxItem(
     val id: Long, val fromLabel: String, val summary: String,
@@ -14,7 +18,7 @@ data class InboxItem(
     val room: String = "", // 서버가 받을 때의 차 방(PARK|DRIVE_WORK|DRIVE_REST|"")
     val fromNumber: String = "", // H15 회신용 전체 번호(화면엔 끝 4자리만). 30일 보관 후 행째 삭제
     val app: String = "", val replyable: Boolean = false, // notif: 폰 알림 앱 이름·답장 가능
-    val direct: Boolean = false, // 서버 바로 연결 목록에 있는 발신자(meta.direct). 쉼·피로 중에도 읽는다
+    val direct: Boolean = false, // 서버 바로 연결 목록에 있는 발신자(meta.direct). 업무 시간 밖(퇴근길)·피로 중에도 읽는다
     val replaces: Long = 0L, // meta.replaces: 이 요약 카드가 대신하는 '전화 왔어요'(ringing) 카드 id. 0 = 없음
     val channel: String = "", // sent: meta.channel ("mail" = 데모 메일함, 그 외 문자)
     val parking: String = "", // reserve: meta.parking ("가능"|"불가"|그 외 = 모름)
@@ -22,7 +26,7 @@ data class InboxItem(
 
 /**
  * H7: 업무 외(퇴근길·저녁·주말)에 받은 통화 = 다음 업무 운전으로 넘긴 건. 반환 id -> 넘긴 날(epochDay).
- * 실시간 항목은 지금 상태(offNow = 쉼 방이거나 업무 시간 밖)로, 재시작 직후 첫 폴링 항목은 받은 시각·서버 방으로 판정한다(어제·오늘 것만).
+ * 실시간 항목은 지금 상태(offNow = 방이 DRIVE_REST이거나 시각이 업무 시간 밖)로, 재시작 직후 첫 폴링 항목은 받은 시각·서버 방으로 판정한다(어제·오늘 것만).
  */
 fun deferNew(fresh: List<InboxItem>, initial: Boolean, offNow: Boolean, today: Long, s: RoomSettings, zone: ZoneId = ZoneId.systemDefault()): Map<Long, Long> {
     val calls = fresh.filter { it.kind == "call" }
@@ -87,7 +91,7 @@ fun mailDraft(text: String): Triple<String, String, String>? {
 /** 서버가 ringing 카드를 요약 카드로 교체한 항목들이 가리키는 옛 카드 id들. 차는 이 카드를 inbox·callFresh·seen 등에서 뺀다. */
 fun replacedIds(items: List<InboxItem>): Set<Long> = items.mapNotNull { it.replaces.takeIf { r -> r > 0 } }.toSet()
 
-/** 교체 요약 카드는 일반 새 전화 문장(speechFor)으로 다시 읽지 않고, 업무·쉼 운전 중에만 "○○님 전화 요약: …" 한 문장씩(최대 3). 끔 모드·정차·판정 전은 카드만. */
+/** 교체 요약 카드는 일반 새 전화 문장(speechFor)으로 다시 읽지 않고, 운전 중(DRIVE_WORK·DRIVE_REST)에만 "○○님 전화 요약: …" 한 문장씩(최대 3). 끔 모드·정차·판정 전은 카드만. */
 fun replaceSpeech(items: List<InboxItem>, room: Room?, mode: String = "ai"): String? {
     if (mode == "off" || (room != Room.DRIVE_WORK && room != Room.DRIVE_REST)) return null
     val d = items.filter { it.kind == "call" && it.replaces > 0 && it.summary.isNotBlank() }.distinctBy { it.id }.take(3)
@@ -112,7 +116,7 @@ fun decodeLocalTasks(s: String?): List<InboxItem> = s.orEmpty().split(",").mapNo
 /** 마지막으로 본 id. 항목이 없으면 그대로. */
 fun nextSince(since: Long, items: List<InboxItem>): Long = maxOf(since, items.maxOfOrNull { it.id } ?: since)
 
-/** 새 항목 -> 읽을 한 문장. PARK(또는 방 미판정)이거나 항목이 없으면 null. 퇴근길(DRIVE_REST)은 급한 전화만 읽는다.
+/** 새 항목 -> 읽을 한 문장. PARK(또는 방 미판정)이거나 항목이 없으면 null. 업무 시간 밖(DRIVE_REST)은 급한 전화·바로 연결 번호만 읽는다.
  *  M7: 응대 모드 '끔'은 무음(카드만), '멘트'는 AI가 받았다고 말하지 않는다. */
 fun speechFor(items: List<InboxItem>, room: Room?, mode: String = "ai"): String? {
     if (mode == "off") return null
@@ -149,8 +153,8 @@ fun itemLine(i: InboxItem, zone: ZoneId = ZoneId.systemDefault()): String {
 fun todayCalls(items: List<InboxItem>, today: java.time.LocalDate, zone: ZoneId = ZoneId.systemDefault(), offsetMs: Long = 0): Int =
     items.count { it.kind == "call" && Instant.ofEpochMilli(it.createdAt + offsetMs).atZone(zone).toLocalDate() == today }
 
-/** 이번 주(월요일 00시~일요일, zone·offsetMs는 todayCalls와 같은 기준) 받은 통화 수 -> (전체, 그중 쉼 방 DRIVE_REST에서 받아 넘긴 수).
- *  한계: 차 메모리의 카드(최근 50건)만 센다 — 한 주에 카드가 50건을 넘으면 적게 나온다. 정확히 하려면 서버 집계. */
+/** 이번 주(월요일 00시~일요일, zone·offsetMs는 todayCalls와 같은 기준) 받은 통화 수 -> (전체, 그중 업무 시간 밖 방 DRIVE_REST에서 받아 넘긴 수).
+ *  한계: 차 메모리의 카드(최근 50건)만 센다 — 한 주에 카드가 50건을 넘으면 적게 나온다 (넘으려면 서버 집계). */
 fun weekCalls(items: List<InboxItem>, today: java.time.LocalDate, zone: ZoneId = ZoneId.systemDefault(), offsetMs: Long = 0): Pair<Int, Int> {
     val monday = today.minusDays(today.dayOfWeek.value - 1L)
     val week = items.filter { i ->

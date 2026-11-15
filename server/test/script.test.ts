@@ -1,3 +1,6 @@
+// 이 테스트가 지키는 동작:
+// - 손님 대본: 방(PARK·DRIVE_WORK·DRIVE_REST)·도착 예정·시간대에 따른 문구와 첫 인사(AI 고지).
+// - 이름·용건 되읽기, 기한·급함은 직접 말했을 때만 생략, 지어내기 금지 같은 대본 규칙 문구가 빠지지 않는다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { pickScript, parseRoom, cleanName, parseEta, nextWorkMorning, ownerScript } from "../src/script.ts";

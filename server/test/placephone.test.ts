@@ -1,3 +1,5 @@
+// 이 테스트가 지키는 동작:
+// - 가게 번호 찾기(placePhone): 휴대폰·유선 구분, 키 없음·결과 없음·상대 서버 오류·잘못된 좌표는 조용히 실패한다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { placePhone } from "../src/index.ts";

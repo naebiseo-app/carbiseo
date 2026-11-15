@@ -1,3 +1,7 @@
+// 이 테스트가 지키는 동작:
+// - 받은 전화 summary.completed → 차 카드(번호는 끝 4자리만), 급함 낱말 판정(부정형 제외).
+// - 통화 종료·상태 통지에서 받아쓰기 요청 대상 CallId를 고른다.
+// - 요약 참고 이름 목록과 상호 자모 교정(fixNames)을 확인한다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { summaryCard, transcriptTarget, statusDone } from "../src/index.ts";

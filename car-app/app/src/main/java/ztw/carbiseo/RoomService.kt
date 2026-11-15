@@ -1,5 +1,7 @@
 /*
  * RoomService — 차 앱의 중심 서비스. 화면(Activity)과 무관하게 돌면서 차 신호로 방(운전·정차 등)을 판정하고, 서버와 주고받고, 음성으로 말하고 듣는다.
+ * 이 파일은 "언제 무엇을 할지"를 엮는 곳이다. 방 판정 규칙은 RoomStateMachine.kt, 순수 판단 함수는 Drive.kt·Inbox.kt·Notif.kt·Alert.kt,
+ * SDK 호출은 CarAdapters.kt, 서버 호출은 Server.kt, 화면은 Screens.kt에 있다.
  *
  * 읽는 순서
  *  1. 상태 변수 (RoomService 필드, 디버그 강제값 forced*) — 서비스 안에서만 쓰는 값. 시험용 강제값은 디버그 빌드 브로드캐스트로만 바뀐다.
@@ -151,7 +153,7 @@ class RoomService : Service() {
                     if (inPark) Server.fetchParkedDone()?.let { ids -> ui.post { onParkDone(ids) } }
                     val r = Server.fetchInbox(since)
                     ui.post {
-                        offline = r == null; r?.let { (items, minId) -> inbox = pruneGone(inbox, minId); onInbox(items) } // 끝나는 대로 다시 시도한다
+                        offline = r == null; r?.let { (items, minId) -> inbox = pruneGone(inbox, minId); onInbox(items) } // 실패(null)면 offline 표시만 하고 다음 폴링이 다시 시도한다
                         // 오프라인 중 상태 전송이 다 실패했으면 서버가 옛 방에 멈춰 있다 → 연결되면 지금 상태를 다시 올린다
                         val cur = machine.room?.let { it.name to sentEta }
                         if (r != null && cur != null && cur != okState) { Log.i("ROOM", "state resync $cur (server had $okState)"); sendState(cur.first, ++stateGen, false) }
@@ -227,13 +229,15 @@ class RoomService : Service() {
         talk.offer(list, favs)?.let(::runTurn)
     }
 
-    /** 묻고 대답 듣기. 지금 말해도 되는 때(경고·통화·다른 대화 중 아님)에만 쓴다. */
+    // 근처 찾기·예약 흐름이 질문과 대답 사이에 들고 있는 값
     private var nearKind: NearKind? = null // 근처 찾기 제안 중인 종류
     private var nearHit: NearPlace? = null // 찾아서 "들를까요?" 하고 묻는 가게
     private var reservePlace: LatLng? = null // 근처 찾기 뒤 예약 흐름이면 그 가게 좌표(callReserve가 destination 대신 쓰고 비운다)
+    /** 지금 새 질문을 해도 되는가: 경고·통화·재현 통화·다른 질문·알림 대화·듣는 중이 아닐 때. */
     private fun canAsk() = !quiet && replayRun == null && pending == Ask.NONE && talk.step == NotifTalk.Step.NONE && !listening
     private var lastAsk = ""
     private val reask = Reask()
+    /** 묻고 대답 듣기. 지금 말해도 되는 때(canAsk)에만 쓴다. */
     private fun askVoice(text: String, a: Ask) { reask.reset(); choice = null; lastAsk = text; pending = a; speaker.speak(text, ::listenNow) }
 
     /** 음성 인식 결과(또는 디버그 SAY) 한 곳 입구. 대기 중인 질문이 있으면 그 대답으로, 아니면 알림 대화로. */
@@ -243,7 +247,7 @@ class RoomService : Service() {
         // Q3: 운전 중 '급해요/화장실'은 어느 대답 대기에서든 먼저 본다(상시 듣기는 없다 — 듣는 중이거나 디버그 SAY일 때만 들어온다)
         if (urgentNeed(said) && machine.room.let { it != null && it != Room.PARK }) { talk.cancel(); askStep = talk.step; return addRestStop(true, true) }
         when (p) {
-            // Q1 조용한 비서: 못 알아들으면 한 번만 다시 묻고, 그다음은 화면 2택(unsure). 번호를 알면 초안을 읽어 주고 "이대로 보낼까요?"(SEND). 모르면 지금처럼 카드만.
+            // Q1 조용한 비서: 못 알아들으면 한 번만 다시 묻고, 그다음은 화면 2택(unsure)
             Ask.LATE, Ask.CALLBACK, Ask.SEND, Ask.REST, Ask.NEAR_FIND, Ask.NEAR_GO, Ask.PARK_CALL, Ask.DEPART -> when (voiceCmd(said)) {
                 Cmd.Yes -> answerYn(p, true)
                 Cmd.No, Cmd.Later -> answerYn(p, false) // '나중에'는 이 질문들엔 '아니'
@@ -508,7 +512,7 @@ class RoomService : Service() {
         askVoice(PARK_MEMO_ASK, Ask.PARK_MEMO)
     }
 
-    /** 음성 인식이 없고(path none) 주행 중이면 대답을 못 받으니 '나중에'(카드로 보관). */
+    /** 음성 인식이 없으면(path none) 대답을 못 받는다: 주행 중이거나 문자 발송 확인(CALLBACK·SEND)이면 '나중에'(카드로 보관), 아니면 화면 버튼을 기다린다. */
     private fun listenNow() {
         if (voice.path == "none") { if (!touchOk() || pending == Ask.CALLBACK || pending == Ask.SEND) heard("나중에"); return }
         if (pending == Ask.DROWSY) drowsyListenAt = SystemClock.elapsedRealtime()
@@ -544,6 +548,8 @@ class RoomService : Service() {
         reask.reset(); choice = null; pending = Ask.INTENT; heard(text)
     } }
 
+    // 한계: 주행 중 큰 버튼은 정차이거나 시속 10km 미만일 때만 받는데, 속도를 못 읽었으면 0으로 봐 받는다
+    // (넘으려면 "주행 중 + 속도 미확인"이면 막는다. README '알려진 제약')
     private fun touchOk() = machine.room == Room.PARK || (adapters.speedKmh ?: 0f) < 10f
 
     /** 과속·주의 경고 중이면 보류했다가 경고가 풀리면 읽는다. */
@@ -564,7 +570,7 @@ class RoomService : Service() {
         val ok = Server.postState(r, eta, ctx)
         Log.i("ROOM", "state $r eta=$eta ctx=$ctx -> ${if (ok) "ok" else "FAIL"}")
         if (ok) ui.post { okState = r to eta }
-        // 한계: 1회 재시도 후 포기(다음 방 변경이 어차피 다시 보냄)
+        // 한계: 30초 뒤 1회 재시도 후 포기한다(다음 방 변경이 어차피 다시 보낸다) (넘으려면 재시도 횟수를 늘린다)
         if (!ok && retry) ui.postDelayed({ if (gen == stateGen) sendState(r, gen, false, eta) }, 30_000)
     }
 
@@ -577,7 +583,8 @@ class RoomService : Service() {
             sig = t
             val a = latch.update(adapters.speedKmh, adapters.limitKmh, adapters.cameraOverspeed, adapters.cautionZone).let { forced ?: it }
             if (a != alert) { alert = a; Log.i("ROOM", "alert $a") }
-            // M9: 블루투스 통화 중이면 차 스피커 낭독이 상대에게 들린다 → 통화 끝날 때까지 보류. 한계: AAOS HFP가 mode에 반영되는지 실차 미확인
+            // M9: 블루투스 통화 중이면 차 스피커 낭독이 상대에게 들린다 → 통화 끝날 때까지 보류.
+            // 한계: AAOS HFP가 mode에 반영되는지 실차 미확인 (넘으려면 실차에서 통화 중 audio.mode 값을 확인한다)
             val inCall = audio.mode == AudioManager.MODE_IN_CALL || audio.mode == AudioManager.MODE_IN_COMMUNICATION
             val q = a != Alert.NONE || busyManeuver(adapters.turnOn, machine.signals.gear, adapters.steerDeg) || inCall
             if (q != quiet) { quiet = q; Log.i("ROOM", "quiet $q"); hold.release(q, machine.room)?.let { speaker.speak(it) } }
@@ -635,17 +642,18 @@ class RoomService : Service() {
                     lateBy(now, t, ev.start)?.let { m -> lateAsked += ev.start; lateEvent = ev to m; askVoice(lateSpeech(m, machine.signals.rain), Ask.LATE) }
                 } }
             }
-            // 도착 10분 전: 그 일정 장소로 가는 중이면 일정마다 한 번 "곧 도착해요". 동승자·피로 모드에선 말하지 않는다. 지각 질문이 나간 일정은 건너뜀(arriveBrief)
+            // 도착 10분 전: 그 일정 장소로 가는 중이면 일정마다 한 번 "곧 도착해요". 동승자 모드에선 말하지 않는다. 지각 질문이 나간 일정은 건너뜀(arriveBrief)
             if (machine.room == Room.DRIVE_WORK && !passenger && canAsk())
                 nextEvent(schedule, System.currentTimeMillis())?.let { ev -> arriveBrief(ev, machine.signals.destination, e, arriveSaid, lateAsked, clock.zone)?.let { sp ->
                     arriveSaid += ev.start; val z = arriveSaid.sorted().takeLast(50).joinToString(","); net.execute { prefs.edit().putString("arrive_said", z).apply() }; say(sp) } }
-            // O4: 식당·카페류 목적지로 출발하면 한 번 "몇 분으로 예약할까요?"(업무·쉼 방 상관없이)
+            // O4: 식당·카페류 목적지로 출발하면 한 번 "몇 분으로 예약할까요?"(운전 중이면 어느 방이든)
             val dn = forcedDest ?: adapters.destName
             if (machine.room.let { it != null && it != Room.PARK } && !passenger && e != null && reservable(dn) && canAsk() && proactive != Proactive.OFF &&
                 reserveOnce.fire(true)) arriveAt(clock.millis(), e, clock.zone).let { t -> reserve = dn!! to t; reservePlace = null; askVoice(reserveSpeech(dn, t), Ask.RESERVE) }
             // 출발 때 한 번: D 기어로 운전이 시작되면(운전 1회당 한 번, 묻든 안 묻든 이때 한 번만 본다) 다음 일정 경로(+에너지 낮으면 충전소·주유소 경유지)를 묻는다
             if (!departAsked && machine.room.let { it != null && it != Room.PARK } && machine.signals.gear == Gear.DRIVE && !passenger && canAsk() && proactive != Proactive.OFF) { // '먼저 말 걸기' 끔이면 출발·예약 질문도 안 함(11-12 결정)
                 departAsked = true
+                // 연료 종류를 읽는 API가 없어서, 연료값만 오고 SoC가 없을 때(또는 디버그로 연료를 강제했을 때)만 엔진차로 본다
                 val fuel = forcedFuel ?: adapters.fuel; val soc = forcedSoc ?: adapters.soc; val ev = forcedFuel == null && (soc != null || fuel == null)
                 val ev0 = nextEvent(schedule, System.currentTimeMillis())
                 departOffer(ev0, machine.signals.destination, soc, fuel, ev, false)?.let { q ->
@@ -684,7 +692,7 @@ class RoomService : Service() {
         net.execute { restStops = runCatching { assets.open("reststops.tsv").bufferedReader().use { parseRestStops(it.readText()) } }.onFailure { Log.w("ROOM", "reststops FAIL $it") }.getOrDefault(emptyList()) } // 실패하면 빈 목록 = 내비 검색 폴백
         net.execute { // 첫 SharedPreferences 로드는 디스크 읽기 → 메인 밖에서
             val p = getSharedPreferences("car_ui", MODE_PRIVATE)
-            val r = p.getInt("rest_min", REST_DEFAULT_MIN).takeIf { m -> m != 1 } ?: REST_DEFAULT_MIN
+            val r = p.getInt("rest_min", REST_DEFAULT_MIN).takeIf { m -> m != 1 } ?: REST_DEFAULT_MIN // 1분은 시연용 선택지라 저장돼 있어도 다시 켜면 기본값으로
             // H9: 동승자 모드는 저장하지 않는다(이번 운전만). M5·H7: 본 카드·넘긴 건은 재시작해도 유지.
             val sn = p.getString("seen", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
             val nd = p.getString("notif_done", "").orEmpty().split(",").mapNotNull { it.toLongOrNull() }.toSet()
@@ -711,7 +719,7 @@ class RoomService : Service() {
             val now = clock.millis()
             if (to == Room.PARK) {
                 parkedAt = now; alightOnce.reset(); restOffer = false; hold.clear(); parkRemind.reset(); chatHistory.clear()
-                // 정차 요약: 이번 실행에 와서 아직 안 알리고 안 본 알림(쉼 방 비즐겨찾기·피로·동승자 등으로 미룬 것)
+                // 정차 요약: 이번 실행에 와서 아직 안 알리고 안 본 알림(업무 시간 밖 방의 비즐겨찾기·동승자 등으로 미룬 것)
                 notifQueue.clear(); talk.cancel(); listening = false; pending = Ask.NONE; reservePlace = null
                 machine.signals.location?.let(::postParked) // 짧은 정차에도 위치는 갱신
                 val pt = parkTasks(cards(), clock.zone); val pn = adapters.arrivedName
@@ -810,7 +818,7 @@ class RoomService : Service() {
             override fun onReceive(c: Context, i: Intent) { forcedSoc = i.getIntExtra("soc", -1).takeIf { it >= 0 }; Log.i("ROOM", "debug soc force=$forcedSoc") }
         }
         // adb shell am broadcast -a ztw.carbiseo.SIGNAL --ei left 4 (초록불까지 남은 초). 5초 넘게 남은 값이 오면 다음 신호로 보고 다시 말할 수 있게.
-        // 한계: 실시간 신호 API는 강릉시만 공개(data.go.kr 15140011, 키 없음). 키 생기면 서버에서 교차로별 남은 초 → 같은 입력으로.
+        // 한계: 실시간 신호 API는 강릉시만 공개(data.go.kr 15140011, 키 없음) (넘으려면 키를 받아 서버에서 교차로별 남은 초를 구해 같은 입력으로 넣는다).
         val sig = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
                 val left = i.getIntExtra("left", -1)
@@ -855,11 +863,11 @@ class RoomService : Service() {
         val drow = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { drowsy.force = true; Log.i("ROOM", "debug drowsy force") }
         }
-        // adb shell am broadcast -a ztw.carbiseo.HEAR (앱 files/hear.pcm을 다음 듣기 때 STT 엔진에 넣기, run-as로 복사, 실측용)
         // adb shell am broadcast -a ztw.carbiseo.CLEARLOCAL (차 안에서 만든 할 일 카드를 비운다. 촬영 전 시험 찌꺼기 정리용)
         val clearLocal = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { inbox = inbox.filter { it.id < LOCAL_ID_BASE }; prefs.edit().remove("local_tasks").apply(); Log.i("ROOM", "debug clear local") }
         }
+        // adb shell am broadcast -a ztw.carbiseo.HEAR (앱 files/hear.pcm을 다음 듣기 때 STT 엔진에 넣기, run-as로 복사, 실측용)
         val hear = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { runCatching { java.io.File(filesDir, "hear.pcm").readBytes() }.onSuccess { Log.i("ROOM", "debug hear ${it.size}B"); voice.armed = it } }
         }
@@ -976,7 +984,7 @@ class RoomService : Service() {
         var etaMin by mutableStateOf<Int?>(null); private set // 목적지까지 남은 분(내비). null = 목적지 없음
         var destName by mutableStateOf<String?>(null); private set
         var ux by mutableStateOf(UxLimits()) // CarAdapters가 규제 바뀔 때마다 넣는다
-        var appFront by mutableStateOf(false) // 앱 창이 앞에 있나(MainActivity가 넣는다). 내비 위 띠를 숨긴다
+        var appFront by mutableStateOf(false) // 앱 창이 앞에 있나(MainActivity가 넣는다). 내비 위 카드를 숨긴다
         var screenOverride by mutableStateOf<String?>(null); private set // 디버그 SCREEN 브로드캐스트(화면 확인용)
         private const val NAVI_PKG = "ai.umos.maps.android.navigation.app" // Pleos 내비 앱(26 실측)
         var restOffer by mutableStateOf(false); private set // S2: 화면에 휴게소 버튼
@@ -990,7 +998,7 @@ class RoomService : Service() {
         var wakeName by mutableStateOf(WAKE_DEFAULT_NAME); private set
         fun setWakeOn(c: Context, on: Boolean) { wakeOn = on; save(c) { putBoolean("wake_on", on) } }
         fun setWakeName(c: Context, n: String) { wakeName = n; save(c) { putString("wake_name", n) } }
-        var passenger by mutableStateOf(false); private set // H3: 켜면 업무 TTS(부재중 낭독)·쉼 방 선언(H1)을 끈다. 휴식 제안(S2)은 안전이라 유지.
+        var passenger by mutableStateOf(false); private set // H3: 켜면 업무 TTS(부재중 낭독)·방 선언(roomSpeech)을 끈다. 휴식 제안(S2)은 안전이라 유지.
         var passengerAt = 0L; private set
         /** H9: 이번 운전만. 저장하지 않고, 30분 넘게 세운 뒤 출발하면 자동 해제. */
         fun togglePassenger(on: Boolean) { passenger = on; passengerAt = clock.millis() }
@@ -1044,7 +1052,7 @@ class RoomService : Service() {
         var sig by mutableStateOf(""); private set
         var inbox by mutableStateOf(listOf<InboxItem>()); private set // id 내림차순
         var alert by mutableStateOf(Alert.NONE); private set
-        var schedule by mutableStateOf(listOf<Event>()); private set // F6 데모 일정
+        var schedule by mutableStateOf(listOf<Event>()); private set // F6 일정(데모 일정, 구글 캘린더를 연결했으면 그 일정)
         var replay by mutableStateOf<ReplayView?>(null); private set // O3 재현 통화 중(null = 통화 아님). 화면 하단 띠가 읽는다
         var offline by mutableStateOf(false); private set // #23 서버 폴링 실패
         var passengerOffer by mutableStateOf(false) // C⑤ 조수석 착석 감지 → "동승자 모드로 바꿀까요?"
@@ -1053,7 +1061,7 @@ class RoomService : Service() {
         var setHomeHere: ((Context) -> Boolean)? = null // 설정 [지금 위치를 집으로] → 현재 위치를 집으로(위치를 모르면 false). 서비스가 살아 있을 때만 있다
         var addHomeFavorite: (() -> Unit)? = null // C① 설정 화면 버튼 → 내비 '집 즐겨찾기 추가' 화면
         var searchInNavi: ((String) -> Unit)? = null // O4: 가게 번호를 못 찾은 예약 카드 → 내비 장소 검색 화면(내비 상세에서 바로 전화)
-        // 폰 알림(35): 쉼 방에도 바로 알릴 발신자(설정, 기본 빈 목록), 대답 대기 단계·듣는 중·화면 버튼 허용(P·저속)·음성 경로
+        // 폰 알림(35): 업무 시간 밖 방에도 바로 알릴 발신자(설정, 기본 빈 목록), 대답 대기 단계·듣는 중·화면 버튼 허용(P·저속)·음성 경로
         var favs by mutableStateOf(setOf<String>())
         var askStep by mutableStateOf(NotifTalk.Step.NONE); private set
         var listening by mutableStateOf(false); private set

@@ -1,3 +1,5 @@
+// 이 테스트가 지키는 동작:
+// - 차 카드 버튼 경로 /car/inbox/<id>의 id(양의 정수)와 action(done·tomorrow만)을 검증한다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseInboxAction } from "../src/index.ts";

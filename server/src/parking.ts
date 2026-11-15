@@ -1,4 +1,7 @@
 // 공공 실시간 주차(공공데이터포털 Parking_v1). 위치는 저장·로그하지 않고, 키·URL은 로그와 응답에 내지 않는다.
+// 맡은 일: 주차장 좌표 표(parking_lots.json)에서 근처 곳을 고르고(nearbyLots) 공공 API의 실시간 면수를 합친다(mergeRealtime).
+// 맡지 않는 일: 인증과 좌표 검증(index.ts의 /car/parking). 실패는 던지지 않고 reason으로 돌려준다.
+// 먼저 읽을 함수: parkingNear.
 export type Lot = [id: string, name: string, lat: number, lng: number]; // parking_lots.json (scripts/parking_index.py가 만든다)
 export type Near = { id: string; name: string; lat: number; lng: number; dist_m: number };
 export type Realtime = { prk_center_id?: string; pkfc_ParkingLots_total?: string; pkfc_Available_ParkingLots_total?: string };
@@ -33,7 +36,7 @@ export async function parkingNear(key: string | undefined, lots: Lot[], lat: num
   const near = nearbyLots(lots, lat, lng);
   if (!near.length) return { reason: "none" };
   try {
-    // 한계: 전체(약 4600곳)를 매번 받는다(약 1초). 느리면 짧은 캐시. 
+    // 한계: 전체(약 4600곳)를 요청마다 받는다(약 1초) (넘으려면 짧은 캐시를 둔다)
     const r = await fetch(`https://apis.data.go.kr/B553881/Parking_v1/PrkRealtimeInfo_v1?serviceKey=${encodeURIComponent(key)}&pageNo=1&numOfRows=5000&format=2`);
     const rows = r.ok ? ((await r.json()) as { PrkRealtimeInfo?: Realtime[] }).PrkRealtimeInfo : undefined;
     if (!Array.isArray(rows)) return { reason: "error" };

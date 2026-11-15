@@ -1,3 +1,6 @@
+// 이 테스트가 지키는 동작:
+// - 문자 중계 호출(relaySend): URL·x-relay-secret·{to, body} 전달과 실패 코드 구분.
+// - 데모 번호(010-0000-000x)는 실제로 보내지 않고 보낸 것으로만 기록한다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { relaySend } from "../src/index.ts";

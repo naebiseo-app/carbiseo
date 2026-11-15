@@ -5,6 +5,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+// 이 테스트가 지키는 동작: 재현 통화 대본의 해석(parseReplay)과 진행(ReplayRun), 줄별 화면·음성 처리(replayAct).
+// 정차 중 도움은 카드로, 운전 중은 귓속말 음성으로 나오고, 동승자 모드에서는 읽지 않고 자막과 카드만 보인다.
 class ReplayTest {
     private val raw = "한빛물산 김민수 과장\t9000\n" +
         "0\tai\t\tAI 비서가 함께 듣습니다\n" +

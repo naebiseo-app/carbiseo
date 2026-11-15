@@ -1,3 +1,4 @@
+# Cloudflare Worker 설정. 토큰·키 같은 비밀값은 여기 두지 않고 `wrangler secret put`으로 넣는다(README '실행 방법 3. 서버').
 name = "carbiseo-api"
 main = "src/index.ts"
 compatibility_date = "2026-10-01"
@@ -9,4 +10,4 @@ database_name = "carbiseo"
 database_id = "6dba3eaa-571e-41a0-b4d4-96fb5c0fcba1"
 
 [triggers]
-crons = ["0 18 * * *"]  # 매일 03시 KST 보관 정책 실행
+crons = ["0 18 * * *"]  # 매일 18:00 UTC = 03:00 KST: index.ts scheduled(구글 일정 동기화·받아쓰기 사전 맞추기·보관 정책)

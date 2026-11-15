@@ -1,3 +1,6 @@
+// 이 테스트가 지키는 동작:
+// - AI가 만든 문장은 120자·금칙어·전화번호 형태 숫자열 검사를 거치고, 실패하면 고정 문구로 바뀐다.
+// - 사용자가 확인한 본문(문자·답장)은 자르지 않고 금칙어만 막는다.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { guardText, isBlocked, FALLBACK } from "../src/guard.ts";

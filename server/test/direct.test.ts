@@ -1,3 +1,6 @@
+// 이 테스트가 지키는 동작:
+// - 바로 연결 목록(direct_numbers): 저장·마스킹·삭제, 전화 오는 순간의 ringing 카드와 요약 카드로의 교체.
+// - 응대 멘트 편집, /car/inbox의 페이지 규칙(오래된 순 50건·more), 서명이 틀린 웹훅 거절을 확인한다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

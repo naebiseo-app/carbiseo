@@ -1,3 +1,7 @@
+// 통화 대본(전화 AI에게 주는 지시문) 만들기와 그 입력 검증.
+// 맡은 일: 손님 대본(pickScript)·주인 대본(ownerScript)·예약·주차 문의 전화 대본(reserveScript·parkingScript), 급함 판정(isUrgent), 방·도착 예정·응대 모드 해석.
+// 맡지 않는 일: DB·HTTP·AI 호출(index.ts). 사용자 입력은 cleanName·cleanMent·parseCarCtx를 거쳐야 대본에 들어가므로 대본 주입을 막는다.
+// 먼저 읽을 함수: pickScript → ownerScript → reserveScript.
 export type Room = "PARK" | "DRIVE_WORK" | "DRIVE_REST";
 export const ROOMS: Room[] = ["PARK", "DRIVE_WORK", "DRIVE_REST"];
 
@@ -26,7 +30,7 @@ const BY_ROOM: Record<Room, string> = {
 
 // 급함 판정(요약 문장). '급한·급합니다·급해요·급히·빨리·당장·즉시' 등, 부정형('급하지 않·안 급·급한 건 아니')은 제외.
 // '발급·지급·공급·월급·언급'처럼 앞 글자가 붙은 '급'은 급함이 아니다(lookbehind).
-// 한계: 낱말 판정. 오판이 잦으면 요약 스키마에 urgent 필드를 두고 그 값을 우선
+// 한계: 낱말 판정이라 오판할 수 있다 (넘으려면 요약 스키마에 urgent 필드를 두고 그 값을 우선한다)
 const URGENT = /(?<![공지발보수배진승특고초중상하월언취파봉급])급(하|한|합|해|히|함|했)|긴급|바로\s*(연락|회신|전화)|즉시|빨리|당장/;
 const NOT_URGENT = /급하지\s*(는\s*)?않|급하진\s*않|안\s*급|급한\s*(건|일|용건|거)?\s*(은|는)?\s*아니|급할\s*(건|거|것|일)?\s*(은|는)?\s*없|빨리\s*(안|않)|서두르지\s*않|천천히/;
 export const isUrgent = (text: string) => URGENT.test(text) && !NOT_URGENT.test(text);
@@ -85,7 +89,6 @@ const mentScript = (eta?: number | null, ment?: string) => {
 // 방을 모르면(차 상태 없음·10분 넘게 갱신 없음) 위치·도착 시각·운전 여부를 말하지 않는 중립 대본.
 const NEUTRAL = "마무리 안내는 하지 않습니다. 운전 중인지, 언제 도착하는지는 말하지 않습니다.";
 
-// nextAt = 다음 일정 시각(ms), DRIVE_WORK에만 한 줄.
 // 쉼 방 약속 '{when}에 연락': 다음 평일 오전(KST). 업무 시작(07시) 전 새벽이면 오늘, 금 저녁·토·일이면 월요일. 차는 그 첫 업무 운전에 '넘긴 전화'를 알린다(H7).
 export function nextWorkMorning(nowMs: number): string {
   const kst = new Date(nowMs + 9 * 3_600_000);
@@ -95,12 +98,16 @@ export function nextWorkMorning(nowMs: number): string {
   return ahead === 0 ? "오늘 오전" : ahead === 1 ? "내일 오전" : "월요일 오전";
 }
 
-// 토·일(KST, 차 offDuty와 같은 기준)엔 쉼 방 문구를 '업무 마침' 대신 '쉬는 날'로. 한계: 공휴일 없음 — 차 settings에 날짜가 생기면 /car/state로
+// 토·일(KST, 차 offDuty와 같은 기준)엔 쉼 방 문구를 '업무 마침' 대신 '쉬는 날'로.
+// 한계: 공휴일은 모른다 (넘으려면 차 settings에 공휴일 날짜를 두고 /car/state로 받는다)
 export const restDay = (nowMs: number) => [0, 6].includes(new Date(nowMs + 9 * 3_600_000).getUTCDay());
 
 // M17: 저녁(18시~)·새벽(07시 전)·주말 정차는 '곧 회신' 대신 쉼 방 약속(차 업무시간 07~18과 같은 기준).
 export const offHours = (nowMs: number) => { const h = new Date(nowMs + 9 * 3_600_000).getUTCHours(); return h < 7 || h >= 18 || restDay(nowMs); };
 
+/** 손님(주인이 아닌 발신자) 통화 대본. room이 null이면 중립 대본, mode가 ai가 아니면 한 마디 안내만 한다.
+ *  eta는 말해도 되는 때만 넘긴다(etaFor). nextAt = 다음 일정 시각(ms), DRIVE_WORK에만 한 줄. known = 같은 번호의 지난 통화 카드 이름.
+ *  PARK는 저녁·새벽·주말이면 쉼 방 약속으로 바꾼다(offHours). */
 export function pickScript(room: Room | null, owner?: string, name?: string, eta?: number | null, mode: Mode = "ai", nextAt?: number | null, cc: Partial<CarCtx> | null = null, nowMs = Date.now(), ment?: string, known?: string): { room: Room | null; instruction: string } {
   const r = room;
   if (mode !== "ai") return { room: r, instruction: fillOwner(mentScript(eta, mode === "ment" ? ment : undefined), owner) };

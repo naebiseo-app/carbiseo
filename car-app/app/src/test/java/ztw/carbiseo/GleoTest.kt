@@ -7,6 +7,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
+// 이 테스트가 지키는 동작: Gleo 버튼 함수 이름이 차 안 의도(CarIntent)로 바뀌는 것(gleoIntent).
+// 스키마(schema.json)의 함수는 3개 이하이며 모두 AndroidManifest에 선언되고 gleoIntent가 알아본다.
 class GleoTest {
     @Test fun 함수_이름이_의도로_바뀐다() {
         assertEquals(CarIntent.RECENT_CALLS, gleoIntent("READ_RECENT_CALLS"))

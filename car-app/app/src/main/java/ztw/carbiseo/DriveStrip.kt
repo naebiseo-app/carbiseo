@@ -33,10 +33,13 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 
-/** 내비 위 띠를 띄울 때: 운전 방이고, 앱이 앞에 없고, 다른 앱 위 권한이 있을 때만. */
+// 내비 위에 띄우는 작은 카드(방 상태·급한 건 수·[말하기]). 언제 띄울지(stripVisible)·어디까지 끌 수 있는지(clampCard)는
+// 순수 함수라 DriveStripTest가 지키고, 창을 만들고 지우는 DriveStrip은 RoomService가 200ms 틱마다 sync로 부른다.
+
+/** 내비 위 카드를 띄울 때: 운전 방이고, 앱이 앞에 없고, 다른 앱 위 권한이 있을 때만. */
 fun stripVisible(room: String?, appFront: Boolean, canOverlay: Boolean) = (room == "DRIVE_WORK" || room == "DRIVE_REST") && !appFront && canOverlay
 
-// 한계: 내비 오른쪽 아래 빈칸(px, 에뮬 2560x1440 실측). 음량·설정 버튼과 현재 위치를 피한다. 실차 값이 다르면 여기만 고친다
+// 한계: 내비 오른쪽 아래 빈칸(px, 에뮬 2560x1440 실측)이다. 음량·설정 버튼과 현재 위치를 피한다 (넘으려면 실차 화면에서 다시 재어 아래 4개 값만 고친다)
 private const val CARD_X = 1800
 private const val CARD_Y = 1020
 private const val CARD_W = 595
@@ -46,7 +49,7 @@ private const val CARD_H = 165
 fun clampCard(x: Int, y: Int, screenW: Int, screenH: Int): Pair<Int, Int> =
     x.coerceIn(0, maxOf(0, screenW - CARD_W)) to y.coerceIn(0, maxOf(0, screenH - CARD_H))
 
-/** 내비 위 카드 창. 메인 스레드에서만. 못 띄우면 로그만 남기고 띠 없이 음성 안내가 계속된다. */
+/** 내비 위 카드 창. 메인 스레드에서만. 못 띄우면 로그만 남기고 카드 없이 음성 안내가 계속된다. */
 class DriveStrip(private val c: Context) : LifecycleOwner, SavedStateRegistryOwner {
     private val life = LifecycleRegistry(this)
     private val saved = SavedStateRegistryController.create(this).apply { performRestore(null) }

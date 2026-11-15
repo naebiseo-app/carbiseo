@@ -5,6 +5,12 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
+// 폰 앱의 서버 쪽 일: 알림 거르기(toMsg)·연락처 정리(normalizeContacts)·하차 응답 읽기(parseParked) 순수 함수와, 서버 호출(Relay).
+// 맡지 않는 일: 알림 수신·답장 전송(Listener.kt), 권한·화면(App.kt). 순수 함수는 RelayTest가 확인한다.
+// 먼저 읽을 것: toMsg(어떤 알림이 서버로 가는가), normalizeContacts(연락처의 무엇이 가는가), 맨 아래 object Relay(서버 호출 목록).
+// 서버로 나가는 것: 메시지 알림의 앱 이름·보낸이·내용, 연락처 이름·휴대폰 번호, 구글 인증 코드, 끝낸 일 id. PRIVACY.md 1·3번과 같다.
+// 서버 주소(SERVER_URL)와 토큰(CAR_TOKEN)은 build.gradle.kts가 BuildConfig로 넣는다. 토큰은 시연용 공용 값이다(PRIVACY.md 5번).
+
 /** 차로 넘길 메시지 알림 1건. key = 폰 알림 키(답장할 때 이 알림의 답장 버튼을 찾는다). */
 data class Msg(val app: String, val sender: String, val text: String, val replyable: Boolean, val key: String)
 
@@ -16,7 +22,12 @@ private val MESSAGE_APPS = mapOf(
     "com.android.mms" to "문자",
 )
 
-/** 메시지형 알림만 Msg로. 묶음 요약·진행 중 알림·보낸이나 내용이 빈 것은 버린다. */
+/**
+ * 메시지형 알림만 Msg로. 묶음 요약·진행 중 알림·보낸이나 내용이 빈 것은 버린다.
+ * 통과한 것은 앱 이름·보낸이(30자까지)·내용(500자까지)이 서버로 간다(Relay.notify). 알림 접근을 끄면 Listener가 불리지 않아 아무것도 나가지 않는다.
+ * 한계: 메시지형이면 앱을 가리지 않고 모두 넘기고, 앱별로 빼는 설정은 없다 (넘으려면 설정 탭에 앱별 끄기를 둔다).
+ * category의 "msg"는 Notification.CATEGORY_MESSAGE 값이다.
+ */
 fun toMsg(pkg: String, key: String, category: String?, messagingStyle: Boolean, summaryOrOngoing: Boolean,
           title: CharSequence?, text: CharSequence?, replyable: Boolean): Msg? {
     if (summaryOrOngoing) return null
@@ -26,7 +37,10 @@ fun toMsg(pkg: String, key: String, category: String?, messagingStyle: Boolean, 
     return Msg(MESSAGE_APPS[pkg] ?: "메시지", s.take(30), t.take(500), replyable, key)
 }
 
-/** 연락처 원본 행 → 서버로 보낼 (이름, 번호). 이름 1~40자, 번호는 01로 시작하는 10~11자리(+82/82는 0으로), 같은 이름은 먼저 온 것만, 최대 3000건. */
+/**
+ * 연락처 원본 행 → 서버로 보낼 (이름, 번호). 이름 1~40자, 번호는 01로 시작하는 10~11자리(+82/82는 0으로), 같은 이름은 먼저 온 것만, 최대 3000건.
+ * 휴대폰 번호 꼴이 아닌 행(유선·형식 오류)은 서버로 보내지 않는다.
+ */
 fun normalizeContacts(rows: List<Pair<String?, String?>>): List<Pair<String, String>> {
     val out = LinkedHashMap<String, String>()
     for ((n, p) in rows) {
@@ -43,7 +57,7 @@ fun normalizeContacts(rows: List<Pair<String?, String?>>): List<Pair<String, Str
 /** 구글 캘린더 연결 상태(서버 GET /phone/google). 구글 토큰은 서버에만 있고 폰에는 두지 않는다. */
 data class GoogleState(val connected: Boolean, val expired: Boolean)
 
-const val GOOGLE_WEB_CLIENT_ID = "859657362107-5v6l2h94epvjabej05s7efl150jk0jej.apps.googleusercontent.com" // 공개값
+const val GOOGLE_WEB_CLIENT_ID = "859657362107-5v6l2h94epvjabej05s7efl150jk0jej.apps.googleusercontent.com" // 서버용 인증 코드를 받을 때 쓰는 OAuth 웹 클라이언트 ID. 비밀이 아닌 공개값이다
 
 /** 설정 행의 (부제, 버튼 이름). 상태를 못 읽었으면(null) 연결 안 됨으로 본다. */
 fun googleLabels(s: GoogleState?): Pair<String, String> = when {
@@ -83,13 +97,17 @@ fun parkedCache(raw: String, done: Long? = null): String = runCatching {
     p.put("tasks", keep); o.toString()
 }.getOrDefault(raw)
 
-/** 서버 호출(블로킹, 백그라운드에서만). 토큰은 차 앱과 같은 CAR_TOKEN. */
+/**
+ * 서버 호출(블로킹, 백그라운드에서만). 토큰은 차 앱과 같은 CAR_TOKEN을 Authorization: Bearer로 보낸다.
+ * 연결·읽기 제한은 5초(연락처·구글은 읽기 15초). 실패는 예외 대신 false·null·빈 목록·Failed로 돌려준다.
+ */
 object Relay {
     private fun open(path: String, method: String) = (URL(BuildConfig.SERVER_URL + path).openConnection() as HttpURLConnection).apply {
         requestMethod = method; connectTimeout = 5000; readTimeout = 5000
         setRequestProperty("Authorization", "Bearer ${BuildConfig.CAR_TOKEN}")
     }
 
+    /** 메시지 알림 1건을 서버로. 앱 이름·보낸이·내용·답장 가능 여부·알림 키를 보낸다. 2xx면 true. */
     fun notify(m: Msg): Boolean = runCatching {
         val c = open("/phone/notify", "POST")
         c.doOutput = true; c.setRequestProperty("Content-Type", "application/json")
@@ -97,7 +115,7 @@ object Relay {
         (c.responseCode in 200..299).also { c.disconnect() }
     }.getOrDefault(false)
 
-    /** 연락처 통째로 교체. 빈 목록이면 서버가 저장분을 지운다. 많을 수 있어 읽기 제한만 15초. */
+    /** 연락처(이름·휴대폰 번호) 통째로 교체. 빈 목록이면 서버가 저장분을 지운다. 많을 수 있어 읽기 제한만 15초. */
     fun contacts(list: List<Pair<String, String>>): Boolean = runCatching {
         val c = open("/phone/contacts", "POST")
         c.readTimeout = 15000
@@ -109,6 +127,7 @@ object Relay {
 
     private fun google(method: String) = open("/phone/google", method).apply { readTimeout = 15000 } // 연결은 서버가 구글과 두 번 오가서 길게
 
+    /** 서버가 가진 구글 연결 상태(연결 여부·만료 여부). 못 읽으면 null. */
     fun googleState(): GoogleState? = runCatching {
         val c = google("GET")
         try {
@@ -126,6 +145,7 @@ object Relay {
         (c.responseCode in 200..299).also { c.disconnect() }
     }.getOrDefault(false)
 
+    /** 연결 끊기. 서버가 구글에 토큰 폐기를 요청하고 데모 일정으로 되돌린다. */
     fun googleDisconnect(): Boolean = runCatching {
         val c = google("DELETE")
         (c.responseCode in 200..299).also { c.disconnect() }

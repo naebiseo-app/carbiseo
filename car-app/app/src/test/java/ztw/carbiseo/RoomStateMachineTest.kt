@@ -9,6 +9,7 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZoneOffset
 
+// 테스트용 시계: ms를 직접 바꿔 시간을 흘린다. 시간대는 UTC(day 0 = 1970-01-01 목요일). 다른 테스트 파일도 이 시계를 쓴다.
 class FakeClock(var ms: Long) : Clock() {
     override fun getZone(): ZoneId = ZoneOffset.UTC
     override fun withZone(z: ZoneId?): Clock = this
@@ -16,6 +17,9 @@ class FakeClock(var ms: Long) : Clock() {
     override fun millis(): Long = ms
 }
 
+// 이 테스트가 지키는 동작: 기어·주행 제한·목적지·시각으로 방(PARK / DRIVE_WORK / DRIVE_REST)을 정하는 RoomStateMachine.
+// 업무 시간 밖(주말·공휴일·업무 끝 이후)과 목적지(집·회사) 규칙, 그리고 P↔D 빠른 반복·목적지 해제·시각 되돌림이
+// 방을 불필요하게 흔들지 않는 디바운스와 유예를 FakeClock으로 확인한다.
 class RoomStateMachineTest {
     private val noon = LocalTime.of(12, 0).toSecondOfDay() * 1000L
     private val clock = FakeClock(noon)
@@ -28,7 +32,7 @@ class RoomStateMachineTest {
     private fun drive() = m.update { copy(gear = Gear.DRIVE, distractionOptimized = true) }
     private fun settle() { clock.ms += 400; m.tick() }     // 디바운스 창 통과
     private fun at(h: Int, min: Int = 0, day: Int = 0) { clock.ms = day * 86_400_000L + LocalTime.of(h, min).toSecondOfDay() * 1000L } // day 0 = 1970-01-01 목요일
-    private fun early() = at(6)                            // 이른 아침: 목적지가 집이면 쉼, 아니면 업무
+    private fun early() = at(6)                            // 이른 아침: 목적지가 집이면 업무 시간 밖, 아니면 업무
 
     @Test fun 공휴일은_평일이어도_쉬는_날() {
         assertEquals(true, dayOff(java.time.LocalDate.of(2026, 12, 25))) // 금요일 성탄절
@@ -109,7 +113,7 @@ class RoomStateMachineTest {
         assertEquals(Room.DRIVE_REST, m.room)
     }
 
-    // H3: 이른 출근(06:50, 목적지 회사)은 업무. 04시 전 새벽은 전날 저녁(쉼).
+    // H3: 이른 출근(06:50, 목적지 회사)은 업무. 04시 전 새벽은 전날 저녁(업무 시간 밖).
     @Test fun 이른_출근은_WORK_새벽4시_전은_REST() {
         at(6, 50); m.update { copy(destination = far) }; drive()
         assertEquals(Room.DRIVE_WORK, m.room)
@@ -119,7 +123,7 @@ class RoomStateMachineTest {
         assertEquals(Room.DRIVE_WORK, m.room)
     }
 
-    // H4: 토·일은 업무 아님(쉼). day 2 = 토, 3 = 일, 4 = 월
+    // H4: 토·일은 업무 아님(업무 시간 밖). day 2 = 토, 3 = 일, 4 = 월
     @Test fun 주말은_REST_월요일은_WORK() {
         at(10, 0, day = 2); m.update { copy(destination = far) }; drive()
         assertEquals(Room.DRIVE_REST, m.room)
@@ -139,7 +143,7 @@ class RoomStateMachineTest {
         assertEquals(true, offDuty(d(8, 10), s))   // 일
     }
 
-    // H3: 아침 집 앞 출발(목적지 없음)은 업무. 예전엔 집 2km 안이면 시각과 무관하게 '퇴근길'이었다.
+    // H3: 아침 집 앞 출발(목적지 없음)은 업무. 집 가까이라는 이유만으로 업무 시간 밖(퇴근길)이 되지 않는다.
     @Test fun 아침_집앞_출발_목적지없음은_WORK() {
         at(8, 30); m.update { copy(location = north(300.0)) }; drive()
         assertEquals(Room.DRIVE_WORK, m.room)
@@ -155,6 +159,7 @@ class RoomStateMachineTest {
         assertEquals(Room.DRIVE_WORK, m.room)
     }
 
+    // DO = distractionOptimized(주행 제한). 기어와 주행 제한 중 하나만 주행을 가리켜도 주행으로 본다.
     @Test fun 기어P여도_DO면_주행() {
         m.update { copy(gear = Gear.PARK, distractionOptimized = true, destination = far) }
         assertEquals(Room.DRIVE_WORK, m.room)
@@ -226,6 +231,7 @@ class RoomStateMachineTest {
         assertEquals(Room.DRIVE_WORK, m.room)                      // 유예 도달: 해제 반영
     }
 
+    // 내비에서 경유지를 추가하면 목적지가 잠깐 비었다 돌아온다. 그 사이에 방이 바뀌지 않아야 한다.
     @Test fun 경유지_추가_취소_잠깐후_복귀면_방_안_바뀜() {
         early()
         m.update { copy(destination = home) }; drive(); settle()
@@ -238,6 +244,7 @@ class RoomStateMachineTest {
         assertEquals(Room.DRIVE_REST, m.room)
     }
 
+    // 정차 중에 사라진 목적지가 유예 시간이 지난 뒤 운전을 시작할 때 다시 살아나지 않아야 한다.
     @Test fun 정차중_해제된_목적지는_운전_시작때_유령으로_안_남는다() {
         early()
         m.update { copy(destination = home, gear = Gear.PARK) }

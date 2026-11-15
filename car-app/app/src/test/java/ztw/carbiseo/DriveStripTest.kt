@@ -5,6 +5,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+// 이 테스트가 지키는 동작: 내비 위 카드(DriveStrip)가 언제 보이는지(stripVisible)와 끌어 옮긴 위치의 화면 안 고정(clampCard).
+// 운전 방에서 앱이 뒤에 있고 오버레이 권한이 있을 때만 보인다.
 class DriveStripTest {
     @Test fun 운전_방에서_앱이_뒤에_있고_권한이_있을때만() {
         for (r in listOf("DRIVE_WORK", "DRIVE_REST")) {

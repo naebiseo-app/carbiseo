@@ -78,19 +78,32 @@ import kotlinx.coroutines.launch
 import java.time.ZoneId
 import java.util.concurrent.Executors
 
+// 폰 앱 '내비서 연결'의 화면·권한·설정 코드. 한 파일에 섞여 있어 읽는 순서를 적는다.
+//  1. MainActivity.onCreate → Root → Onboarding(첫 실행) 또는 Home(홈·기록·설정 탭)
+//  2. onResume → refresh(알림 접근 허용 여부·로컬 기록·하차 정보), syncContactsDaily, refreshGoogle
+//  3. 하차 정보: readParked, finishParked, ParkedCard
+//  4. 연락처 연결: setContacts → sendContacts·deleteContacts
+//  5. 구글 캘린더 연결: connectGoogle → sendGoogle, disconnectGoogle
+//  6. 화면 조각: SetupCard(착신전환·알림 권한), HomeTab, LogTab, SettingsTab, Timeline. 맨 아래 Ic는 아이콘.
+// 맡지 않는 일: 알림 전달·답장(Listener.kt), 서버 호출(Relay.kt), 화면 판정 로직(Model.kt).
+// 이 파일이 서버로 올리는 것: 연락처 이름·휴대폰 번호(설정에서 켠 때만), 구글 인증 코드(연결할 때만), 끝낸 일 id. 알림 전달은 Listener.kt.
+
 // 시안 4B '다크 흐름형' 색
 private val Bg = Color(0xFF101215); private val S1 = Color(0xFF1A1D22); private val S2 = Color(0xFF23272E)
 private val Line = Color(0xFF2E333B); private val Tx = Color(0xFFF2F3F5); private val Mute = Color(0xFFA6ACB4)
 private val Brand = Color(0xFFFF7A33); private val OnBrand = Color(0xFF14161A)
 private val WarmBg = Color(0xFF3A1D10); private val WarmTx = Color(0xFFFFD2BA); private val WarmSub = Color(0xFFE8B79C)
 
+/** "오후 2:12" 꼴 시각. */
 private fun ampm(t: Long, z: ZoneId) = java.time.Instant.ofEpochMilli(t).atZone(z).let { "${if (it.hour < 12) "오전" else "오후"} ${if (it.hour % 12 == 0) 12 else it.hour % 12}:${"%02d".format(it.minute)}" }
 
+/** 단일 액티비티. 화면이 읽는 상태(권한 여부·기록·하차 정보·설정 값)를 필드로 들고 Compose가 읽는다. */
 class MainActivity : ComponentActivity() {
     private var listenerOn by mutableStateOf(false)
     private var events by mutableStateOf(emptyList<Event>())
     private var now by mutableLongStateOf(System.currentTimeMillis())
     private val prefs by lazy { Store.prefs(this) }
+    // 로컬 기록("events")이 바뀌면 화면을 다시 읽는다.
     private val watch = SharedPreferences.OnSharedPreferenceChangeListener { _, k -> if (k == "events") refresh() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -100,7 +113,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(background = Bg, surface = Bg, primary = Brand, onPrimary = OnBrand, onBackground = Tx, onSurface = Tx)) {
                 Surface(Modifier.fillMaxSize(), color = Bg, contentColor = Tx) {
-                    // 폰 폭에서 한글이 음절 단위로 끊겨 '요' 한 글자만 다음 줄로 넘어가던 것: 어절 단위 줄바꿈(API 33+, 그 아래는 기존대로). 어절 규칙은 한국어 로캘에서만 켜져 글자 로캘을 ko로 고정
+                    // 한글을 어절 단위로 줄바꿈한다(API 33+, 그 아래는 기본 동작). 음절 단위면 폰 폭에서 '요' 한 글자만 다음 줄로 넘어간다.
+                    // 어절 규칙은 한국어 로캘에서만 켜져 글자 로캘을 ko로 고정한다.
                     ProvideTextStyle(LocalTextStyle.current.copy(lineBreak = LineBreak.Paragraph.copy(wordBreak = LineBreak.WordBreak.Phrase), localeList = LocaleList("ko"))) { Root() }
                 }
             }
@@ -111,6 +125,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() { prefs.unregisterOnSharedPreferenceChangeListener(watch); super.onStop() }
     override fun onResume() { super.onResume(); refresh(); syncContactsDaily(); refreshGoogle() } // 설정 화면에서 돌아오면 권한 상태를 다시 읽는다
 
+    /** 알림 접근 허용 여부와 로컬 기록을 다시 읽고, 하차 정보는 서버에서 다시 받는다(readParked). */
     private fun refresh() {
         listenerOn = getSystemService(NotificationManager::class.java).isNotificationListenerAccessGranted(ComponentName(this, Listener::class.java))
         events = Store.events(this); now = System.currentTimeMillis()
@@ -122,7 +137,10 @@ class MainActivity : ComponentActivity() {
     private var parkedHide by mutableStateOf(emptySet<Long>()) // 틱을 누른 일. 서버 응답 전 읽기가 되살리지 못하게 parked와 따로 둔다
     private var parkedMsg by mutableStateOf("")
 
-    /** 서버 응답 원문 저장본(오프라인·지하 주차장에서도 위치를 보이려고). 앞서 저장본으로 먼저 그리고, 서버가 답하면 판정(parkedNext)대로 바꾼다. */
+    /**
+     * 하차 정보 읽기. 서버 응답 원문 저장본(오프라인·지하 주차장에서도 위치를 보이려고)으로 먼저 그리고, 서버가 답하면 판정(parkedNext)대로 바꾼다.
+     * 서버로는 읽기 요청만 하고 올리는 것은 없다. 저장본에는 위치·주소·메모·할 일 제목이 남고 전화번호는 뺀다(parkedCache).
+     */
     private fun readParked() {
         parkedMsg = ""
         if (parked == null) prefs.getString("parked", null)?.let(::parseParked)?.let { parked = it }
@@ -135,12 +153,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** 틱을 누른 일을 먼저 숨기고 서버에 끝냈다고 알린다(보내는 것은 일 id뿐). 실패하면 되살리고 안내 문구를 띄우고, 성공하면 저장본에서도 뺀다. */
     private fun finishParked(id: Long) {
         parkedHide += id; parkedMsg = ""
         net.execute { if (Relay.parkedDone(id)) prefs.getString("parked", null)?.let { prefs.edit().putString("parked", parkedCache(it, id)).apply() } else runOnUiThread { parkedHide -= id; parkedMsg = "끝내지 못했어요. 다시 눌러 주세요" } }
     }
 
     // ───────── 연락처 연결 ─────────
+    // 설정 탭에서 사용자가 켠 때만 동작한다. 켜면 연락처 읽기 권한을 묻고, 허용되면 이름·휴대폰 번호를 서버에 올린다.
+    // 끄면 서버 사본을 지운다. 권한을 거부하면 꺼진 채로 둔다.
     private val net = Executors.newSingleThreadExecutor() // 네트워크는 메인 스레드 밖에서
     private val contactsOn by lazy { pref("contactsOn") }
     private val askContacts = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
@@ -154,13 +175,17 @@ class MainActivity : ComponentActivity() {
         else askContacts.launch(Manifest.permission.READ_CONTACTS)
     }
 
-    /** 서버분을 지운다. 실패하면 표시를 남겨 다음에 앱을 열 때 다시 지운다. */
+    /** 서버분을 지운다(빈 목록을 올리면 서버가 저장분을 지운다). 실패하면 표시(contactsDelete)를 남겨 다음에 앱을 열 때 다시 지운다. */
     private fun deleteContacts() {
         prefs.edit().putBoolean("contactsDelete", true).apply()
         net.execute { if (Relay.contacts(emptyList())) prefs.edit().remove("contactsDelete").apply() }
     }
 
-    /** 폰 연락처를 읽어 서버로(이름·번호는 로그에 남기지 않는다). 성공한 시각만 저장해 실패하면 다음에 다시 보낸다. */
+    /**
+     * 폰 연락처의 이름·전화번호만 읽어 서버로 올린다(이름·번호는 로그에 남기지 않는다).
+     * 휴대폰 번호 꼴이 아닌 행은 normalizeContacts가 버리고, 읽기에 실패하면 아무것도 올리지 않는다.
+     * 성공한 시각만 저장해, 실패하면 다음에 앱을 열 때 다시 보낸다.
+     */
     private fun sendContacts() {
         val r = contentResolver
         net.execute {
@@ -173,7 +198,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 켜져 있고 권한이 있으면 앱을 열 때 하루 1번만 다시 보낸다. 권한이 회수됐으면 끄고 서버분도 지운다. */
+    /**
+     * 켜져 있고 권한이 있으면, 마지막으로 보낸 지 24시간이 지났을 때 앱을 열면서 다시 보낸다. 권한이 회수됐으면 끄고 서버분도 지운다.
+     * 꺼진 상태에서는 지우기 실패 표시가 남아 있을 때만 다시 지운다.
+     */
     private fun syncContactsDaily() {
         if (!contactsOn.value) { if (prefs.getBoolean("contactsDelete", false)) deleteContacts(); return }
         if (!hasContactsPermission()) { setContacts(false); return }
@@ -182,6 +210,8 @@ class MainActivity : ComponentActivity() {
 
     // ───────── 구글 캘린더 연결 ─────────
     // 구글이 폰에 서버용 인증 코드를 주면 서버로 넘기기만 한다. 토큰은 폰에 저장하지 않는다.
+    // 요청 범위는 일정 읽기 전용(calendar.events.readonly)이다. 연결을 끊으면 서버가 토큰 폐기를 요청한다(Relay.googleDisconnect).
+    // googleState가 null이면 아직 서버 상태를 못 읽은 것이고, 연결 안 됨으로 그린다(googleLabels).
     private val googleState = mutableStateOf<GoogleState?>(null)
     private val googleMsg = mutableStateOf("")
     private val askGoogle = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { r ->
@@ -204,6 +234,7 @@ class MainActivity : ComponentActivity() {
         googleMsg.value = ""
         val req = AuthorizationRequest.builder().setRequestedScopes(listOf(Scope("https://www.googleapis.com/auth/calendar.events.readonly")))
             .requestOfflineAccess(GOOGLE_WEB_CLIENT_ID).build()
+        // 처음이면 구글 동의 화면(pendingIntent)을 거쳐 askGoogle로, 이미 허용돼 있으면 바로 인증 코드를 서버로 넘긴다.
         Identity.getAuthorizationClient(this).authorize(req)
             .addOnSuccessListener { r ->
                 val pi = r.pendingIntent
@@ -220,12 +251,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // 처리할 앱이 없어 startActivity가 실패해도 앱이 죽지 않게 한다.
     private fun open(i: Intent) = runCatching { startActivity(i) }
+    // 알림 접근은 앱이 직접 켤 수 없어 시스템 설정 화면을 연다.
     private fun openListenerSettings() = open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
     private fun openDialer() = open(Intent(Intent.ACTION_DIAL, Uri.parse("tel:")))
     private fun openWeb(url: String) = open(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
 
-    /** 첫 실행·설정 값(앱 전용 저장소). */
+    /**
+     * 첫 실행·설정 값(앱 전용 저장소). 키: onboarded, dialerOpened, forwardDone, carrier, contactsOn, contactsAt, contactsDelete.
+     * 같은 저장소에 parked(하차 저장본)와 events(로컬 기록, Store)도 있다. 전화번호는 저장하지 않는다.
+     */
     private fun pref(k: String) = mutableStateOf(prefs.getBoolean(k, false))
     private val onboarded by lazy { pref("onboarded") }; private val dialerOpened by lazy { pref("dialerOpened") }
     private val forwardDone by lazy { pref("forwardDone") }
@@ -288,7 +324,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 착신전환·알림 권한 카드. 첫 실행과 설정 탭이 같이 쓴다. */
+    /** 착신전환·알림 권한 카드. 첫 실행과 설정 탭이 같이 쓴다. 착신전환은 폰이 확인할 수 없어 사용자가 직접 켠 것으로 표시한다(forwardDone). */
     @Composable private fun SetupCard() {
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(S1).padding(horizontal = 18.dp, vertical = 4.dp)) {
             val c = carrier.value
@@ -310,6 +346,7 @@ class MainActivity : ComponentActivity() {
                 LinkButton("$c 고객센터", Modifier.weight(1f)) { openWeb(CARRIERS.getValue(c)) }
             }
             HorizontalDivider(color = Line)
+            // 알림 접근은 앱이 켜고 끌 수 없어 누르면 시스템 설정 화면을 연다. 꺼져 있으면 홈 배너가 경고로 바뀐다(banner).
             ToggleRow(Ic.bell, "알림 읽기 권한", if (listenerOn) "켜짐 · 카톡·문자를 차에서 읽어 줘요" else "꺼짐 · 눌러서 설정 화면에서 켜 주세요", listenerOn) { openListenerSettings() }
         }
     }
@@ -402,7 +439,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** 2a 위치 먼저: 주차 위치 카드(차 화면 링과 같은 조각 링) + 남은 일. 치수는 시안 그대로. */
+    /**
+     * 2a 위치 먼저: 주차 위치 카드(차 화면 링과 같은 조각 링) + 남은 일. 치수는 시안 그대로.
+     * 지도 열기는 geo: 인텐트로 지도 앱에 좌표만 넘기고, 전화 아이콘은 다이얼러만 연다(바로 걸지 않는다).
+     */
     @Composable private fun ParkedCard(p: Parked, z: ZoneId) {
         val (tasks, total) = parkedLeft(p, parkedHide)
         Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
@@ -537,10 +577,12 @@ class MainActivity : ComponentActivity() {
             item { SetupCard() }
             item {
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(S1).padding(horizontal = 18.dp, vertical = 4.dp)) {
+                    // 켜면 이름·휴대폰 번호가 서버에 올라가고 끄면 지운다(setContacts).
                     ToggleRow(Ic.msg, "연락처 연결", "이름으로 문자를 보낼 때 번호를 찾아요. 휴대폰 번호와 이름이 내비서 서버에 저장되고, 끄면 지워요.", contactsOn.value) { setContacts(it) }
                 }
             }
             item {
+                // 연결돼 있으면 끊기, 연결 안 됨·만료면 (다시) 연결.
                 val (sub, action) = googleLabels(googleState.value)
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(S1).padding(horizontal = 18.dp, vertical = 14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -554,6 +596,7 @@ class MainActivity : ComponentActivity() {
                     LinkButton(action, Modifier.fillMaxWidth().padding(top = 10.dp)) { if (googleState.value?.connected == true && !googleState.value!!.expired) disconnectGoogle() else connectGoogle() }
                 }
             }
+            // 개인정보 안내 한 줄. 서버로 나가는 것의 전체 목록은 PRIVACY.md에 있다.
             item { Text("통화 내용은 요약만 차에 남고, 원본 녹음은 저장하지 않아요. 알림은 메시지 앱 이름과 보낸 사람만 이 폰에 기록돼요.", color = Mute, fontSize = 13.sp, lineHeight = 20.sp, modifier = Modifier.padding(horizontal = 4.dp)) }
             item {
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(S1).padding(18.dp)) {
@@ -566,8 +609,11 @@ class MainActivity : ComponentActivity() {
 
 /** 시안의 선 아이콘(24 격자, 굵기 1.8, 둥근 끝)을 그대로 벡터로. */
 private object Ic {
+    /** 둥근 사각형 path 문자열(왼쪽 위 x·y, 폭, 높이, 모서리 반지름). */
     private fun rr(x: Float, y: Float, w: Float, h: Float, r: Float) = "M${x + r} ${y}h${w - 2 * r}a$r $r 0 0 1 $r ${r}v${h - 2 * r}a$r $r 0 0 1 -$r ${r}h-${w - 2 * r}a$r $r 0 0 1 -$r -${r}v-${h - 2 * r}a$r $r 0 0 1 $r -${r}z"
+    /** 원 path 문자열(중심 cx·cy, 반지름 r). */
     private fun circ(cx: Float, cy: Float, r: Float) = "M${cx - r} ${cy}a$r $r 0 1 0 ${2 * r} 0a$r $r 0 1 0 -${2 * r} 0z"
+    /** path 문자열 → 선 아이콘 벡터. 선은 검정이고 색은 쓰는 쪽의 tint가 정한다. */
     private fun v(d: String) = ImageVector.Builder(defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f)
         .addPath(addPathNodes(d), stroke = SolidColor(Color.Black), strokeLineWidth = 1.8f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round).build()
 

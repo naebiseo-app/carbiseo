@@ -1,9 +1,14 @@
 package ztw.carbiseo
 
+// 주행 보조의 순수 함수 모음(Android를 모르므로 DriveTest가 그대로 검증한다). 위에서 아래로 대략 이런 순서다:
+// 집 문턱·휴식·근처 찾기·먼저 말 걸기(offerDue) → 주차 메모·하차 카드 → [말하기] 의도(carIntent) → 일정·지각 예측(lateBy)
+// → 문자·예약 문장 → 휴게소 목록(nearestRestStop) → 짧은 정차·트립 시간 차이 → 피로·졸음 확인 → 권한·주행 제한(UxLimits).
+// 이 함수들을 언제 부르는지(틱·폴링)는 RoomService.kt, 신호를 모으는 곳은 CarAdapters.kt다. 먼저 읽을 곳: carIntent, lateBy, drowsyRisk.
+
 const val HOME_SOON_MIN = 5
 const val HOME_SOON_SPEECH = "오늘 일은 여기까지예요. 곧 도착합니다"
 
-/** H1 집 문턱: 쉼 방 + 목적지가 집 + 남은 분 ≤ 5. */
+/** H1 집 문턱: 업무 시간 밖 방(DRIVE_REST) + 목적지가 집 + 남은 분 ≤ 5. */
 fun homeSoon(room: Room?, dest: LatLng?, s: RoomSettings, etaMin: Int?): Boolean =
     room == Room.DRIVE_REST && dest != null && distanceM(dest, s.home) <= s.homeDestRadiusM && etaMin != null && etaMin <= HOME_SOON_MIN
 
@@ -16,8 +21,8 @@ class Once {
 
 /**
  * C⑤ 조수석 착석: 서비스 시작 때 처음 온 값을 기준선(빈 좌석)으로 잡고, 기준선과 달라지면 "탔다"로 본다.
- * 그래서 값이 반전돼 오는 에뮬(빈 좌석 = true)에서도 시작 즉시 띠가 뜨지 않고, 콘솔로 바꾸는 순간에만 뜬다.
- * 한계: 시동 직후 이미 앉아 있던 동승자는 못 잡는다(그 사람이 내리면 띠가 한 번 잘못 뜸). 실차 값 방향이 확인되면 기준선 대신 그 값을 쓴다.
+ * 그래서 값이 반전돼 오는 에뮬(빈 좌석 = true)에서도 시작 즉시 동승자 확인 띠("동승자 모드로 바꿀까요?")가 뜨지 않고, 콘솔로 바꾸는 순간에만 뜬다.
+ * 한계: 시동 직후 이미 앉아 있던 동승자는 못 잡는다(그 사람이 내리면 띠가 한 번 잘못 뜬다) (넘으려면 실차 값 방향을 확인해 기준선 대신 그 값을 쓴다).
  */
 class SeatEdge {
     private var base: Boolean? = null
@@ -50,7 +55,7 @@ fun urgentNeed(said: String?): Boolean {
     return "답장" !in n && ("급해" in n || "화장실" in n)
 }
 
-/** 근처 찾기 제안: 배고파·커피·기름. code는 서버 /car/nearby의 카카오 category_group_code. */
+/** 근처 찾기 제안: 배고파·커피·기름·충전. code는 서버 /car/nearby의 카카오 category_group_code. */
 enum class NearKind(val code: String, val label: String) { FOOD("FD6", "식당"), CAFE("CE7", "카페"), GAS("OL7", "주유소"), CHARGE("CS2", "충전소") }
 private val NEAR_FOOD = Regex("배고|출출|허기|뭐먹지|밥먹(자|고싶|을|으러)|밥집|근처식당|식당찾|맛집|먹을데|먹을곳")
 private val NEAR_CAFE = Regex("커피(마시|한잔|먹고|사)|근처카페|카페찾|카페가")
@@ -90,7 +95,10 @@ fun offerDue(level: Proactive, lastOfferMs: Long?, now: Long): Boolean =
 fun mealOffer(word: String) = "$word 시간이에요. 근처 식당 찾아드릴까요?"
 fun chargeOffer(soc: Int) = "배터리가 ${soc}퍼센트 남았어요. 근처 충전소 찾아드릴까요?"
 
-/** 출발 때 한 번 묻기(D 기어 운전 시작): 다음 일정에 좌표가 있고 내비가 그 장소로 안 가는 중이며 이 운전에서 아직 안 물었으면 질문 문장, 아니면 null. 에너지가 CHARGE_OFFER_SOC 이하면 충전소(엔진차는 주유소) 경유 문구를 붙인다. */
+/**
+ * 출발 때 한 번 묻기(D 기어 운전 시작): 다음 일정에 좌표가 있고 내비가 그 장소로 안 가는 중이며 이 운전에서 아직 안 물었으면
+ * 질문 문장, 아니면 null. 에너지가 CHARGE_OFFER_SOC 이하면 충전소(엔진차는 주유소) 경유 문구를 붙인다.
+ */
 fun departOffer(next: Event?, dest: LatLng?, soc: Int?, fuelPct: Int?, isEv: Boolean, alreadyAsked: Boolean): String? {
     if (alreadyAsked || next == null || next.at.lat == 0.0 || headingTo(dest, next)) return null
     val base = "다음 일정 ${ro(next.place)} 안내할까요?"
@@ -118,7 +126,7 @@ const val PARK_MEMO_SPEECH = "주차 위치를 적어 뒀어요"
 
 /** 하차 카드의 남은 일 한 줄. kind = task(할 일)|call(회신할 전화). sub = 시각 + 출처. */
 data class ParkTask(val id: Long, val title: String, val sub: String, val kind: String)
-/** total = 8건으로 자르기 전 전체 남은 일 수. hasLocation = 차가 위치를 알았나(주소만 없을 수 있다). work = 직전 주행 방이 업무 방이었나. */
+/** total = 8건으로 자르기 전 전체 남은 일 수. hasLocation = 차가 위치를 알았나(주소만 없을 수 있다). work = 직전 주행 방이 업무 운전(DRIVE_WORK)이었나. */
 data class ParkCard(val memo: String, val place: String?, val savedAt: Long, val tasks: List<ParkTask>, val total: Int = tasks.size, val hasLocation: Boolean = false, val work: Boolean = true) {
     /** 폰에서 끝낸 일을 뺀다. 목록에서 뺀 만큼 total도 줄인다(목록 밖 일은 모르니 그대로). */
     fun without(ids: Set<Long>): ParkCard = tasks.filter { it.id !in ids }.let { left -> if (left.size == tasks.size) this else copy(tasks = left, total = maxOf(left.size, total - (tasks.size - left.size))) }
@@ -169,7 +177,11 @@ fun parkingSpeech(lots: List<ParkLot>, canCall: Boolean): String {
     return if (lots.isNotEmpty()) listOfNotNull("근처 주차장이 다 찼어요", call).joinToString(", ") else call ?: PARK_NO_INFO_SPEECH
 }
 
-/** F5 차 음성 입구: [말하기]로 한 마디 듣고 키워드로만 가른다(LLM 없음). 급해·화장실(Q3) > 아까 전화 > 예약(인원은 partyOf로 따로 읽는다) > 일정 > 주차 메모 > 주차 자리 문의 > 근처 찾기. */
+/**
+ * F5 차 음성 입구: [말하기]로 한 마디 듣고 키워드로만 가른다(LLM 없음).
+ * 우선순위(carIntent의 when 순서): 급해·화장실(Q3) > 아까 전화 > 일정 > 예약(인원은 partyOf로 따로 읽는다) > 주차 메모 > 주차 자리 문의 > 근처 찾기.
+ * "일정"이 "예약"보다 먼저라, 한 문장에 둘 다 있으면 일정으로 읽는다.
+ */
 enum class CarIntent { RECENT_CALLS, URGENT, NEXT_EVENT, RESERVE, PARK_MEMO, PARKING, NEARBY, UNKNOWN }
 private val RECENT_CALL_WORDS = Regex("아까전화|전화뭐|누구전화|최근전화|최근통화|부재중|전화온거|전화왔")
 fun carIntent(said: String?): CarIntent {
@@ -309,7 +321,7 @@ fun readiness(offline: Boolean, forwardOk: Boolean, mode: String): String = when
     else -> "AI가 대신 받는 중"
 }
 
-/** F6 데모 일정 1건(서버 /car/schedule). start = epoch ms. */
+/** F6 일정 1건(서버 /car/schedule: 데모 일정, 구글 캘린더를 연결했으면 그 일정). start = epoch ms. */
 data class Event(val title: String, val start: Long, val place: String, val at: LatLng, val contact: String = "", val contactNumber: String = "")
 
 /** F7: 아직 시작 안 한 일정 중 가장 이른 것. */
@@ -320,7 +332,10 @@ const val LATE_DONE_SPEECH = "정차하시면 보내기 버튼을 눌러 주세�
 fun lateSpeech(min: Int, rain: Boolean = false) = "${if (rain) "비가 와서 " else ""}다음 일정에 약 ${min}분 늦을 것 같아요. 늦는다고 문자 보낼까요?"
 const val TRAFFIC_SLACK_MS = 10 * 60_000L
 const val TRAFFIC_OFFER_SPEECH = "앞이 많이 막혀요. 다음 일정 상대에게 늦을 수 있다고 알릴까요?"
-/** 정체 먼저 말 걸기: 경로가 크게 막히고(HEAVY), 다음 일정에 상대 연락처가 있고, 그 일정 지각 질문을 아직 안 했고, 먼저 말 걸기 차례일 때. 도착 예상(arrivalMs)이 일정보다 넉넉히 이르면 늦을 일이 없으니 묻지 않는다(모르면 묻는다). 방·동승자 조건은 부르는 쪽이 본다. */
+/**
+ * 정체 먼저 말 걸기: 경로가 크게 막히고(HEAVY), 다음 일정에 상대 연락처가 있고, 그 일정 지각 질문을 아직 안 했고, 먼저 말 걸기 차례일 때.
+ * 도착 예상(arrivalMs)이 일정보다 TRAFFIC_SLACK_MS(10분) 넘게 일찍이면 늦을 일이 없으니 묻지 않는다(모르면 묻는다). 방·동승자 조건은 부르는 쪽이 본다.
+ */
 fun trafficOfferDue(level: Proactive, worst: String?, next: Event?, lateAsked: Set<Long>, lastOfferMs: Long?, now: Long, arrivalMs: Long? = null): Boolean =
     worst == "HEAVY" && next != null && next.start !in lateAsked && (arrivalMs == null || arrivalMs + TRAFFIC_SLACK_MS >= next.start) && next.contactNumber.ifBlank { next.contact }.isNotBlank() && offerDue(level, lastOfferMs, now)
 
@@ -340,8 +355,10 @@ fun tripCheckDue(next: Event?, dest: LatLng?, lateAsked: Set<Long>, lastCheckMs:
 /** F4 오탐 줄이기: 지금 가는 목적지가 그 일정 장소(1km 안)일 때만 지각을 묻는다. 목적지를 모르면 묻지 않는다. */
 fun headingTo(dest: LatLng?, e: Event): Boolean = dest != null && distanceM(dest, e.at) <= LATE_DEST_RADIUS_M
 
-/** F4: 지연 문자 초안 = 할 일 카드 본문(taskDraft 형식). 연락처가 일정에 있으면 번호로 들어간다. */
-/** min = null(정체 먼저 말 걸기: 지각 분을 모를 때)이면 분 수 없이. rain이면 앞에 이유 한 구절. */
+/**
+ * F4: 지연 문자 초안 = 할 일 카드 본문(taskDraft 형식). 연락처가 일정에 있으면 번호로 들어간다.
+ * min = null(정체 먼저 말 걸기: 지각 분을 모를 때)이면 분 수 없이. rain이면 앞에 이유 한 구절.
+ */
 fun lateTask(e: Event, min: Int?, rain: Boolean = false) = "${e.title} 일정 지연 알림${e.contactNumber.ifBlank { e.contact }.let { if (it.isNotBlank()) " $it" else "" }} / 내용: 운전 중${if (rain) "인데 비가 와서" else "이라"} ${if (min != null) "약 ${min}분 " else ""}늦을 것 같습니다. 죄송합니다."
 
 /** 문자 음성 발송: 휴대폰 번호(01x로 시작 10~11자리)일 때만 숫자만 돌려준다(보내기 시트와 같은 기준). 아니면 null = 카드만. 유선은 문자를 못 받는다. */
@@ -373,7 +390,10 @@ const val RESERVE_FAIL_SPEECH = "전화를 걸지 못했어요. 할 일에 남�
 const val RESERVE_LIMIT_SPEECH = "오늘 예약 전화는 다 썼어요, 직접 전화해 주세요."
 fun reserveCallSpeech(name: String) = "${name}에 전화해 볼게요"
 
-/** 서버가 알려 준 예약 전화 결과(inbox kind=reserve 행) 한 문장. calling이면 null(아직 통화 중). ok면 요약 + 주차 가능 여부(meta.parking), 그 밖(need_manual 등)은 요약(거절·무응답 사유), 없으면 직접 확인. */
+/**
+ * 서버가 알려 준 예약 전화 결과(inbox kind=reserve 행) 한 문장. calling이면 null(아직 통화 중).
+ * ok면 요약 + 주차 가능 여부(meta.parking), 그 밖(need_manual 등)은 요약(거절·무응답 사유), 없으면 직접 확인.
+ */
 fun reserveResultSpeech(place: String, i: InboxItem): String? = when (i.status) {
     "", "calling" -> null
     "ok" -> sentences(i.summary.ifBlank { "${place} 예약을 마쳤어요" }, when { "주차" in i.summary -> null; i.parking == "가능" -> "주차 가능해요"; i.parking == "불가" -> "주차는 안 돼요"; else -> null })
@@ -384,7 +404,11 @@ private val PARTY_UNITS = listOf("한", "두", "세", "네", "다섯", "여섯",
 private val PARTY_COUNTED = Regex("""(\d{1,2})(?:명|분|인|사람)|(스물|열)?(한|두|세|네|다섯|여섯|일곱|여덟|아홉)?(?:명|분|인|사람)""")
 private val PARTY_BARE = Regex("""(\d{1,2}|열|다섯|여섯|일곱|여덟|아홉)(?:이요|이에요|이서|이|요)?""")
 private fun koNum(tens: String, unit: String) = (when (tens) { "열" -> 10; "스물" -> 20; else -> 0 }) + PARTY_UNITS.indexOf(unit) + 1 // unit이 비면 indexOf = -1 → +0
-/** 대답·말에서 예약 인원(1~20)을 읽는다: "두 명"·"2명"·"열두 분"·"혼자". '네'·'일곱 시'를 인원으로 오해하지 않게 수사는 명·분·인·사람이 붙을 때만 읽고, 말 전체가 숫자나 다섯 이상 수사 하나뿐이면("다섯이요") 그것도 읽는다. 못 읽으면 null. */
+/**
+ * 대답·말에서 예약 인원(1~20)을 읽는다: "두 명"·"2명"·"열두 분"·"혼자".
+ * '네'·'일곱 시'를 인원으로 오해하지 않게 수사는 명·분·인·사람이 붙을 때만 읽고,
+ * 말 전체가 숫자나 다섯 이상 수사 하나뿐이면("다섯이요") 그것도 읽는다. 못 읽으면 null.
+ */
 fun partyOf(said: String?): Int? {
     val n = said.orEmpty().replace(Regex("""[\s.,!?]"""), "")
     if ("혼자" in n) return 1
@@ -392,12 +416,13 @@ fun partyOf(said: String?): Int? {
     return counted ?: PARTY_BARE.matchEntire(n)?.groupValues?.get(1)?.let { w -> w.toIntOrNull() ?: if (w == "열") 10 else PARTY_UNITS.indexOf(w) + 1 }?.takeIf { it in 1..20 }
 }
 
-/** 하차: 기어 P + 운전석 문 위치값이 0보다 큼(열림). 값을 모르면 false. 한계: 열림 > 0은 문서 미확인(에뮬 실측으로 조정) */
+/** 하차: 기어 P + 운전석 문 위치값이 0보다 큼(열림). 값을 모르면 false. 한계: 열림 > 0은 문서 미확인(에뮬 실측으로 조정) (넘으려면 실차 값으로 확인). */
 fun gotOff(gear: Gear, driverDoorPos: Int?): Boolean = gear == Gear.PARK && (driverDoorPos ?: 0) > 0
-/** 앞유리 와이퍼가 켜져 있으면 비로 본다(WiperState 이름 "ON"). */
+/** 앞유리 와이퍼가 켜져 있으면 비로 본다(WiperState 이름 "ON"). 한계: "ON" 외의 값(간헐 등)은 비로 보지 않는다 (넘으려면 실차 와이퍼 값을 확인한다). */
 fun rainByWiper(wiperState: String?): Boolean = wiperState == "ON"
-/** 내비 정체 단계(TrafficCongestionType 이름) 중 가장 심한 것. 모르면 null. */
+// 정체 단계를 덜 심한 순으로 나열한 것(뒤로 갈수록 심하다)
 private val TRAFFIC_ORDER = listOf("FAST", "MODERATE", "SLOW", "HEAVY")
+/** 내비 정체 단계(TrafficCongestionType 이름) 중 가장 심한 것. 모르면 null. */
 fun worstTraffic(types: List<String>): String? = types.filter { it in TRAFFIC_ORDER }.maxByOrNull { TRAFFIC_ORDER.indexOf(it) }
 /** 예약 전화 결과 카드. 할 일로 남겨 정차 때 다시 볼 수 있게 한다. */
 fun reserveResultTask(name: String, result: String, parking: Boolean = false) = "$name ${if (parking) "주차 문의" else "예약"} / 내용: $result"
@@ -426,8 +451,8 @@ fun roomSpeech(r: Room): String? = when (r) {
     Room.PARK -> null
 }
 
+const val BIG_STEER_DEG = 90f // 이 각도(도) 이상이면 큰 조향
 /** C④ 조작 중(깜빡이·후진·큰 조향)엔 말 걸지 않는다. 끝나면 보류분을 읽는다. */
-const val BIG_STEER_DEG = 90f
 fun busyManeuver(turn: Boolean, gear: Gear, steerDeg: Float?): Boolean =
     turn || gear == Gear.REVERSE || (steerDeg != null && kotlin.math.abs(steerDeg) >= BIG_STEER_DEG)
 
@@ -442,12 +467,12 @@ fun fatigueSpeech(gear: Gear): String =
     if (gear == Gear.PARK) "두 시간째 운전 중이에요, 쉬어 가시려면 휴게소 버튼을 누르세요." else "두 시간째 운전 중이에요, 다음 휴게소에서 쉬어 가세요."
 fun fatigued(room: Room?, tripMin: Int?): Boolean = room != null && room != Room.PARK && (tripMin ?: 0) >= FATIGUE_MIN
 
-/**
+/*
  * 졸음 확인(카메라 없음): 운전 시간·시각으로 위험을 추정하고, 위험이면 15분마다 "졸리진 않으세요?"를 물어 대답이 늦거나 없는 횟수로 본다.
  * 위험 = 120분 이상, 또는 60분 이상이면서 02:00~05:59·14:00~15:59. 판정만 하는 순수 함수(주행 중인지는 호출부가 본다).
  */
 const val DROWSY_CHECK_MS = 15 * 60_000L
-const val DROWSY_RETRY_MS = 5 * 60_000L // 졸음 의심이면 5분마다 다시
+const val DROWSY_RETRY_MS = 5 * 60_000L // 연속 2번 '느림/무응답'(ALERT)이 된 뒤에는 5분마다 다시
 const val DROWSY_SLOW_MS = 6_000L // 듣기 시작~인식 결과까지(말하는 시간·인식 지연 약 2초 포함) 이보다 늦으면 '느림'
 fun drowsyRisk(tripMin: Int?, hour: Int): Boolean = tripMin != null && (tripMin >= FATIGUE_MIN || tripMin >= 60 && (hour in 2..5 || hour in 14..15))
 const val DROWSY_OPEN_SPEECH = "운전이 길어졌어요. 졸리면 말 걸어 주세요, 이야기 상대 해 드릴게요."

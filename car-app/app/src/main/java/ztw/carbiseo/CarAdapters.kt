@@ -47,6 +47,10 @@ import android.os.HandlerThread
 import android.os.Looper
 import java.lang.reflect.Proxy
 
+// Pleos Vehicle·NaviHelper와 AAOS(UxRestrictions·속도) 신호를 한곳에서 받아 RoomStateMachine에 넘기고, 나머지 값은 필드로 노출한다.
+// SDK 호출은 이 파일에만 모았다(README의 'Pleos SDK 사용 표'가 이 파일을 가리킨다). 신호로 무엇을 할지는 RoomService.kt·Drive.kt가 정한다.
+// 먼저 읽을 곳: start → initGearAndUx(기어·주행 제한·속도) → attachVehicleExtras(나머지 차량값) → initNavi(목적지·위치·즐겨찾기).
+
 /**
  * 차량 신호 -> RoomStateMachine.update. SDK 콜백은 어느 스레드로 올지 몰라 전부 메인으로 넘긴다.
  * 충전 상태: Pleos Vehicle 2.3.2 EvBattery에 "충전 중" 읽기/구독 API가 없어(SOC, 충전스위치 제어, 포트열림뿐) 연결하지 않음 -> charging=false 고정.
@@ -80,8 +84,8 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
     var telltale: String? = null; private set // 빨간색·켜짐 경고등 종류
     var driverDoorPos: Int? = null; private set // 운전석(ROW_1_LEFT) 문 위치값. 0 = 닫힘 가정. null = 모름/권한 없음
     var forcedDoor: Int? = null // 디버그 브로드캐스트 DOOR로 주입(-1 = 해제)
-    var trafficWorst: String? = null; private set // 경로 정체 중 가장 심한 단계(FAST/MODERATE/SLOW/HEAVY). 지각 판단엔 아직 안 씀
-    var congestionTime: Long? = null; private set // RouteStateInfo.trafficStatus.summary.totalCongestionTime 원값(단위 미확인)
+    var trafficWorst: String? = null; private set // 경로 정체 중 가장 심한 단계(FAST/MODERATE/SLOW/HEAVY). 지각 분(lateBy)엔 안 쓰고 정체 먼저 말 걸기에 쓴다
+    var congestionTime: Long? = null; private set // RouteStateInfo.trafficStatus.summary.totalCongestionTime 원값(단위 미확인). 지금은 읽기만 하고 쓰는 곳은 없다
     // 내비 앱은 부팅 후 자기 화면(지도)을 한 번 그리기 전까지 SDK 요청을 전부 버린다("navi not ready", 에뮬 실측). 첫 응답이 오면 준비된 것.
     var naviReady = false; private set
     private var tripEta: Int? = null // requestTrip 응답(분). takeTripEta로 한 번만 읽는다
@@ -110,7 +114,8 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
     private fun initGearAndUx() {
         val v = Vehicle(ctx).also { vehicle = it }
         v.initialize()
-        // SDK가 첫 호출 때 kotlin-reflect로 클래스 메타데이터를 디스크에서 읽어 메인을 1.3초 막는다(StrictMode 실측) → 붙이기는 루퍼 있는 백그라운드 스레드에서(맨 Thread면 SDK 응답이 안 온다, 에뮬 실측). 콜백은 전부 ui.post.
+        // SDK가 첫 호출 때 kotlin-reflect로 클래스 메타데이터를 디스크에서 읽어 메인을 1.3초 막는다(StrictMode 실측).
+        // → 붙이기는 루퍼 있는 백그라운드 스레드에서 한다(맨 Thread면 SDK 응답이 안 온다, 에뮬 실측). 콜백은 전부 ui.post.
         bg.postDelayed({
             runCatching {
                 v.getGear().registerGearSelection(object : GearSelectionListener {
@@ -145,7 +150,7 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
             })
         }.onFailure { Log.w(TAG, "steer attach FAIL $it") }
         runCatching {
-            // 한계: 단위를 분으로 가정(콘솔 usage_time_min과 같은 값이 오는지 에뮬 실측으로 확인). 초로 오면 /60
+            // 한계: 단위를 분으로 가정한다(콘솔 usage_time_min과 같은 값이 오는지 에뮬 실측으로 확인) (넘으려면 실차에서 단위를 확인하고, 초로 오면 /60)
             val onTrip = { t: Int? -> Log.i(TAG, "tripTime raw=$t"); ui.post { tripMin = t }; Unit }
             // 에뮬 실측: Current는 ERROR_NOT_SUPPORTED_PROPERTY, 콘솔 TRIP_DRIVING_TIME(0x21410450)은 Cumulative 쪽
             val l = object : DrivingTimeListener {
@@ -217,7 +222,7 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
         })
     }
 
-    // 속도: Pleos Vehicle SDK엔 없음 -> 공식 FAQ대로 AAOS PERF_VEHICLE_SPEED(m/s). CAR_SPEED 권한이 늦게 허용될 수 있어 실패 시 5초 뒤 재시도.
+    // 속도: Pleos Vehicle SDK엔 없음 -> 공식 FAQ대로 AAOS PERF_VEHICLE_SPEED(m/s). CAR_SPEED 권한이 늦게 허용될 수 있어 권한 거부(SecurityException)면 5초 뒤 재시도.
     private fun attachSpeed() {
         runCatching {
             val pm = (car as Car).getCarManager(Car.PROPERTY_SERVICE) as CarPropertyManager
@@ -273,7 +278,7 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
                 set { copy(destination = if (none) null else LatLng(i.latitude, i.longitude)) }
             }
             override fun onCurrentLocationInfo(i: CurrentLocationInfo) { naviAnswered(); set { copy(location = forcedLocation ?: LatLng(i.latitude, i.longitude)) } }
-            // 취소/종료만 목적지 해제로 본다. 경유지 추가 직후의 취소->재개 깜빡임은 상태머신 2초 유예가 흡수한다.
+            // 취소/종료만 목적지 해제로 본다. 경유지 추가 직후의 취소->재개 깜빡임은 상태머신의 목적지 해제 유예(destGraceMs, 10초)가 흡수한다.
             override fun onRouteCancelled() { Log.i(TAG, "onRouteCancelled"); ui.post { etaMin = null; destName = null }; set { copy(destination = null) } }
             override fun onRouteEnded() { ui.post { etaMin = null; destName = null }; set { copy(destination = null) } }
             override fun onDestinationChanged() { n.getDestinationInfo() }
@@ -292,7 +297,7 @@ class CarAdapters(private val ctx: Context, private val m: RoomStateMachine) {
             // 0 이하 = 제한속도 모름. 목록이 비면 경고/주의구간 해제로 본다.
             override fun onCurrentRoadSpeedLimit(l: Int) { ui.post { limitKmh = l.takeIf { it > 0 } } }
             override fun onCameraAlert(a: List<CameraAlert>) { val o = a.any { it.isOverSpeed || it.isOverSectionAvrSpeed }; ui.post { cameraOverspeed = o } }
-            // 한계: 남은 거리 단위를 m로 가정(문서 미확인), 에뮬 실측으로 조정
+            // 한계: 남은 거리 단위를 m로 가정한다(문서 미확인, 에뮬 실측으로 조정) (넘으려면 실차 값으로 단위를 확인한다). 300m 이내를 주의구간으로 본다
             override fun onCautionPointInfo(p: List<CautionPoint>) { val z = p.any { it.remainDistance in 0..300 }; ui.post { cautionZone = z } }
             // C①: 내비 즐겨찾기 '집'·'회사'로 방 판정. 집이 없으면 최근 목적지에서 찾고, 그래도 없으면 기존 설정 유지.
             override fun onBookmarkInfo(l: List<BookmarkInfo>) {

@@ -1,3 +1,6 @@
+// 이 테스트가 지키는 동작:
+// - 폰 알림(parseNotify)과 차 음성 답장(parseReply)의 입력 검증: 필수 값·길이·confirmed=true.
+// - 관리 페이지 알림 폼과 보낼 답장 목록은 입력을 이스케이프한다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseNotify, parseReply } from "../src/notif.ts";

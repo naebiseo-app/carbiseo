@@ -4,18 +4,29 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-// 화면 로직(순수 함수). 안드로이드 API를 쓰지 않아 단위 시험으로 확인한다.
+// 화면 로직(순수 함수). 안드로이드 API를 쓰지 않아 단위 시험(ModelTest)으로 확인한다.
+// 맡는 일: 앱이 한 일의 로컬 기록(Event) 저장 형식·집계, 홈 배너 문구, 첫 실행 단계, 하차 정보(Parked) 읽은 뒤 처리.
+// 맡지 않는 일: 화면 그리기·권한(App.kt), 알림 전달(Listener.kt), 서버 호출과 응답 해석(Relay.kt).
+// 먼저 읽을 것: banner(홈 배너 판정), step(첫 실행 순서), parkedNext(서버 읽기가 실패했을 때 저장본 처리).
+// 개인정보: 기록에는 앱 이름과 보낸이만 남기고 메시지 내용은 저장하지 않는다.
 
-/** 앱이 실제로 한 일 1건. 메시지 내용은 저장하지 않는다(앱 이름·보낸이만). */
+/**
+ * 앱이 실제로 한 일 1건. 메시지 내용은 저장하지 않는다(앱 이름·보낸이만).
+ * SENT 서버로 전달 성공, SEND_FAIL 전달 실패, REPLIED 음성 답장을 알림의 답장 버튼으로 보냄, REPLY_FAIL 답장을 못 보냄.
+ */
 enum class Kind { SENT, SEND_FAIL, REPLIED, REPLY_FAIL }
 data class Event(val at: Long, val kind: Kind, val app: String, val who: String)
 
-const val MAX_EVENTS = 300 // 한계: 하루 300건 넘으면 오래된 것부터 잘려 '오늘' 숫자가 줄어든다. 넘는 사용자가 생기면 날짜별 카운터로.
+// 한계: 전체 기록이 300건을 넘으면 오래된 것부터 잘린다. 하루에 300건을 넘게 보내면 '오늘' 숫자가 실제보다 적다 (넘으려면 날짜별 카운터를 따로 둔다).
+const val MAX_EVENTS = 300
 
+// 저장 형식이 탭·줄바꿈 구분이라 값 속의 탭·줄바꿈은 공백으로 바꾼다.
 private fun clean(s: String) = s.replace('\t', ' ').replace('\n', ' ')
 
+/** 한 줄에 기록 1건: 시각, 종류, 앱 이름, 보낸이를 탭으로 잇는다. */
 fun encode(es: List<Event>): String = es.joinToString("\n") { "${it.at}\t${it.kind}\t${clean(it.app)}\t${clean(it.who)}" }
 
+/** encode의 역. 칸 수·시각·종류가 맞지 않는 깨진 줄은 버린다. */
 fun decode(s: String?): List<Event> = s.orEmpty().lines().mapNotNull { l ->
     val p = l.split('\t')
     if (p.size != 4) return@mapNotNull null
@@ -28,7 +39,9 @@ fun decode(s: String?): List<Event> = s.orEmpty().lines().mapNotNull { l ->
 fun add(es: List<Event>, e: Event): List<Event> = (listOf(e) + es).take(MAX_EVENTS)
 
 private fun day(t: Long, z: ZoneId) = Instant.ofEpochMilli(t).atZone(z).toLocalDate()
+/** now와 같은 날(기기 시간대)의 기록만. */
 fun today(es: List<Event>, now: Long, z: ZoneId): List<Event> = es.filter { day(it.at, z) == day(now, z) }
+/** 오늘 서버로 전달에 성공한 알림 수(실패·답장은 세지 않는다). */
 fun sentToday(es: List<Event>, now: Long, z: ZoneId) = today(es, now, z).count { it.kind == Kind.SENT }
 
 fun hm(t: Long, z: ZoneId): String = DateTimeFormatter.ofPattern("HH:mm").format(Instant.ofEpochMilli(t).atZone(z))
@@ -46,10 +59,14 @@ fun line(e: Event): Pair<String, String> = when (e.kind) {
     Kind.REPLY_FAIL -> "음성 답장을 보내지 못함" to "${e.app} · 알림이 이미 지워졌어요"
 }
 
-/** 상단 배너. 폰은 차 연결·방을 모른다. 아는 것(권한, 서버 전달 결과)만 말한다. */
+/** 홈 상단 배너의 톤. WARN 주의(알림 읽기 꺼짐·전달 실패), ACTIVE 오늘 전달함, IDLE 대기. */
 enum class Tone { WARN, ACTIVE, IDLE }
 data class Banner(val title: String, val sub: String, val tone: Tone)
 
+/**
+ * 홈 상단 배너. 폰은 차 연결·방을 모른다. 아는 것(권한, 서버 전달 결과)만 말한다.
+ * 순서: 알림 읽기가 꺼짐 → 경고, 가장 최근 전달이 실패 → 경고, 오늘 전달한 적 있음 → 전달 중, 그 밖에는 대기.
+ */
 fun banner(listenerOn: Boolean, es: List<Event>, now: Long, z: ZoneId): Banner {
     if (!listenerOn) return Banner("알림 읽기가 꺼져 있어요", "눌러서 켜면 메시지를 차로 보낼 수 있어요", Tone.WARN)
     val lastSend = es.firstOrNull { it.kind == Kind.SENT || it.kind == Kind.SEND_FAIL }
@@ -85,7 +102,13 @@ val CARRIERS = linkedMapOf(
     "LG U+" to "https://www.lguplus.com",
 )
 
-/** 차가 올린 하차 정보(서버 GET /phone/parked). address는 서버가 못 찾으면 "". number는 서버가 그때그때 붙인 발신 번호(없으면 null; 서버 kv엔 없고, 폰은 오프라인용 저장본에 응답 원문째 남는다). sub = 제목 아래 보조 줄(시각·출처, 없으면 null). total = 자르기 전 전체 남은 일 수. */
+/**
+ * 차가 올린 하차 정보(서버 GET /phone/parked).
+ * address: 서버가 주소를 못 찾으면 "".
+ * number: 서버가 그때그때 붙인 발신 번호(없으면 null). 서버 kv에는 없고, 폰의 오프라인용 저장본에서도 parkedCache가 뺀다.
+ * sub: 제목 아래 보조 줄(시각·출처, 없으면 null).
+ * total: 자르기 전 전체 남은 일 수.
+ */
 data class ParkedTask(val id: Long, val title: String, val number: String?, val sub: String? = null)
 data class Parked(val lat: Double, val lng: Double, val address: String, val memo: String, val at: Long, val tasks: List<ParkedTask>, val total: Int = tasks.size)
 

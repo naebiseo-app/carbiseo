@@ -1,3 +1,6 @@
+// 이 테스트가 지키는 동작:
+// - 발신번호 추출·비교, 주인 대본(일정·최근 전화 포함, 4000자 이하), 응대 모드별 대본.
+// - 주인 통화 요약은 요청마다 할 일 카드 1장이 되고, 문자 발송 입력은 번호 10~11자리·내용 길이를 검증한다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { callerNumber, hhmm, nextEventAt, ownerScript, parseMode, pickScript, sameNumber } from "../src/script.ts";

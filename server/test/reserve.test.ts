@@ -1,3 +1,7 @@
+// 이 테스트가 지키는 동작:
+// - AI 예약·주차 문의 전화: 입력 검증, O4_LIVE가 아니면 항상 주인 번호로 발신, 결과 웹훅으로 같은 행 갱신.
+// - 요약이 저장된 통화만 녹음을 지운다(keep_recordings면 남김).
+// - 하루(KST) 상한: 예약·주차 전화 5건, 문자 20건(데모 번호 제외), 말동무 200회.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

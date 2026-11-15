@@ -1,3 +1,6 @@
+// 이 테스트가 지키는 동작:
+// - 말동무 /car/chat: 키 없음·API 실패·금칙어는 고정 문구, 졸음 말은 AI 없이 휴식 권유로 답한다.
+// - 입력 text 200자·history 마지막 6개, 답은 문장 단위로 110자 안까지만 남긴다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.ts";

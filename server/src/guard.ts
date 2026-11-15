@@ -1,4 +1,7 @@
-// LLM 가드(설계 §6): AI가 만든 문장은 저장 전에 길이 120자·금칙어 검사. 실패하면 고정 문구로 대체.
+// LLM 가드(설계 §6): AI가 만든 문장이 저장·발송되기 전의 마지막 관문.
+// 맡은 일: 길이 120자·금칙어·전화번호 형태 숫자열을 검사하고, 통과하지 못하면 고정 문구(FALLBACK)로 바꾼다.
+// 맡지 않는 일: 문장 생성(AI 호출은 index.ts). 사용자가 확인한 본문(문자·답장)은 자르지 않고 금칙어만 막는다(numbers=false).
+// 먼저 읽을 함수: guardText → isBlocked → clip.
 export const MAX_AI_TEXT = 120;
 export const FALLBACK = { summary: "통화 내용을 정리하지 못했어요. 직접 확인해 주세요.", draft: "초안을 만들지 못했어요.", chat: "잠깐 연결이 안 돼요. 조금 뒤에 다시 말씀해 주세요." } as const;
 
@@ -9,7 +12,7 @@ export const BANNED_WORDS = ["씨발", "시발", "씹", "병신", "개새끼", "
 export function isBlocked(text: string, numbers = true): boolean {
   const flat = text.replace(/\s+/g, "");
   if (BANNED_WORDS.some((w) => flat.includes(w))) return true;
-  // 한계: 시각·날짜(8자리)는 통과하려고 공백 구분("010 0000 0000")과 한글 숫자(공일공)는 못 잡음
+  // 한계: 공백으로 나눈 번호("010 0000 0000")와 한글 숫자(공일공)는 못 잡는다 (넘으려면 공백을 이어 붙여 검사하되, 시각·날짜(8자리)가 걸리지 않게 9자리 기준은 유지해야 한다)
   return numbers && (text.match(/\d(?:[.-]?\d)+/g) ?? []).some((m) => m.replace(/\D/g, "").length >= 9);
 }
 

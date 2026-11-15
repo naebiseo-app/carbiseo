@@ -1,3 +1,7 @@
+// 이 테스트가 지키는 동작:
+// - /mcp/<비밀값>은 도구 없는 최소 MCP 응답만 한다.
+// - 통화 뒤 받아쓰기로 카드를 만든다(손님 통화 1장, 주인 통화는 시킨 일마다 할 일 카드, 재전송은 한 번만).
+// - 주인 통화의 자동 문자는 이름이 정확히 같을 때만 보내고, 전화번호는 외부 AI로 보내지 않는다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

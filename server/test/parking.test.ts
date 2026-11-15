@@ -1,3 +1,6 @@
+// 이 테스트가 지키는 동작:
+// - 공공 실시간 주차: 반경 1000m 안 최대 3곳을 거리순으로 고르고 실시간 면수를 합친다.
+// - 키 없음·근처 없음·API 실패를 구분하고, 근처 후보가 없으면 API를 부르지 않는다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.ts";

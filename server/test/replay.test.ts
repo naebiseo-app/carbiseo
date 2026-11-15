@@ -1,3 +1,6 @@
+// 이 테스트가 지키는 동작:
+// - 재현 통화의 빈 시간 계산: 평일 업무시간 안, 일정·이동시간·도착 전 시각 제외, 둘째는 첫째보다 3시간 뒤.
+// - 재현 대본: 고지가 맨 앞, 시각 오름차순, 도움 카드는 120자 이하이며 가드를 거친다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { demoSchedule, encodeReplay, freeSlots, MEET_AT, replayScript, slotLabel, travelMin, type DemoEvent } from "../src/admin.ts";

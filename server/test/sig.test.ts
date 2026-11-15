@@ -1,3 +1,5 @@
+// 이 테스트가 지키는 동작:
+// - ClawOps 웹훅 서명 대상 문자열 = URL + 파라미터를 키 사전순으로 key+value 이어붙인 것(폼·JSON 모두).
 import test from "node:test";
 import assert from "node:assert/strict";
 import { signData } from "../src/index.ts";

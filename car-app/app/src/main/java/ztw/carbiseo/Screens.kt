@@ -7,7 +7,7 @@
  *  3. 경고·방 배경 (AlertBanner, AlertFrame, RoomScreen, BgImage) — 과속·주의 표시와 사용자 배경 그림.
  *  4. 공통 부품 (press, Pill, Round, MicIcon, dial, talk, dayTime, head) — 누름 효과, 버튼, 아이콘, 카드 머리 글.
  *  5. 정차 화면 (Park, ParkCardScreen, SegRing, Rail, NextEvent, Focus, Queue, PassengerOffer, PassengerToggle) — 오늘 요약, 지금 처리할 카드 1건, 하차 카드.
- *  6. 첫 실행 안내 (saveMode, FirstRun, Field, ModeButtons) — 이름·응대 방식·착신 전환을 차례로 입력받는다.
+ *  6. 첫 실행 안내 (saveMode, FirstRun, Field, ModeButtons) — 이름·응대 방식, 착신 전환, 방해 금지 3단계. 마지막에 권한을 요청한다.
  *  7. 보내기·권한 (Sheet, RestButton, rememberPermAsk, missingPerms, speak) — 문자 보내기 확인, 휴게소 버튼, 권한 요청.
  *  8. 운전 화면 (ringState, driveNow, RoomBadge, Drive, Ring, MoonIcon) — 링 하나와 듣기 버튼만 둔 단순한 화면.
  *  9. 설정 화면 (Settings, NameField) — 정차 중에만 열리는 배경·이름 호출·휴식 제안·먼저 말 걸기 설정.
@@ -237,7 +237,8 @@ private fun AskBar(m: Modifier) {
     }
 }
 
-/** 차 상태 경고: 상단 한 줄(내용을 밀어 내림) + 방 화면 테두리. 나타날 때 300ms 페이드 1회, 이후 고정(깜빡임 없음). */
+// 차 상태 경고: 상단 한 줄(내용을 밀어 내림) + 방 화면 테두리. 나타날 때 300ms 페이드 1회, 이후 고정(깜빡임 없음).
+// 색은 과속이 빨강, 그 밖의 경고는 주황.
 private fun alertColor(a: Alert) = if (a == Alert.OVERSPEED) Color(0xFFE53935) else Color(0xFFFF8F00)
 
 @Composable
@@ -331,7 +332,7 @@ private fun dial(ctx: Context, n: String) {
 }
 internal fun talk(ctx: Context) { ctx.startService(Intent(ctx, RoomService::class.java).setAction(RoomService.ACTION_TALK)) }
 private fun time(ms: Long) = hhmm.format(Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()))
-/** 다음 일정 시각: 오늘이 아니면 "내일"·"요일"을 붙인다(밤에 잡힌 일정이 "00:00"만 보이던 문제). */
+/** 다음 일정 시각: 오늘이 아니면 "내일"·"요일"을 붙여, 다른 날 일정이 시각만으로 읽히지 않게 한다. */
 private fun dayTime(ms: Long): String {
     val z = RoomService.clock.zone
     val d = Instant.ofEpochMilli(ms).atZone(z).toLocalDate().toEpochDay() - Instant.ofEpochMilli(RoomService.clock.millis()).atZone(z).toLocalDate().toEpochDay()
@@ -711,7 +712,7 @@ private val MODES = listOf(
 )
 private val TITLES = listOf("님", "과장", "대표", "직접 입력")
 
-// ── 5A 첫 실행(H13): 왼쪽 입력 3단계(①이름·호칭·응대 방식 ②착신 전환 ③방해 금지), 오른쪽 '상대가 듣게 될 첫 마디' ──
+// ── 5A 첫 실행(H13): 왼쪽 입력 3단계(①이름·호칭·응대 방식 ②착신 전환 ③방해 금지 안내, 끝에 권한 요청), 오른쪽 '상대가 듣게 될 첫 마디' ──
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FirstRun() {
@@ -932,7 +933,7 @@ private fun ringState(rest: Boolean, offline: Boolean, forwardOk: Boolean, mode:
     else -> Triple("전화\n대신 받는 중", recent?.let { "방금 ${head(it).first}" } ?: "용건을 받아 정리해요", true)
 }
 
-/** 주행 화면과 내비 위 띠가 같이 읽는 값. hear = [듣기] 버튼이 읽을 문장, at = 도착 시각(목적지 없으면 null). */
+/** 주행 화면과 내비 위 카드가 같이 읽는 값. hear = [듣기] 버튼이 읽을 문장, at = 도착 시각(목적지 없으면 null). */
 internal class DriveNow(val rest: Boolean, val acc: Color, val n: Int, val title: String, val sub: String, val ready: Boolean, val at: String?, val hear: String)
 internal fun driveNow(r: String): DriveNow {
     val rest = r == "DRIVE_REST"
@@ -945,6 +946,7 @@ internal fun driveNow(r: String): DriveNow {
         if (rest) recentCallsSpeech(cards) else if (urgent.none { it.kind == "call" }) "급한 전화는 없어요" else recentCallsSpeech(urgent).replaceFirst("최근 전화", "급한 전화"))
 }
 
+// 운전 화면의 방 이름표. 표시 문구는 '쉼 방'·'업무 방'으로 roomName()의 '업무 시간 밖'·'업무 운전'과 다르다.
 @Composable
 private fun RoomBadge(r: String) {
     val rest = r == "DRIVE_REST"
@@ -956,7 +958,7 @@ private fun RoomBadge(r: String) {
     }
 }
 
-// ── 2B 운전 화면 '다크 링': 업무 방 = 주황 열린 링, 쉼 방 = 청록 닫힌 링. 조작은 듣기 1개(+휴게소 S2) ──
+// ── 2B 운전 화면 '다크 링': 업무 운전 = 주황 열린 링, 업무 시간 밖 = 청록 닫힌 링. 조작은 듣기 1개(+휴게소 S2) ──
 @Composable
 private fun Drive(r: String) {
     val ctx = LocalContext.current
@@ -966,7 +968,7 @@ private fun Drive(r: String) {
         Column(Modifier.weight(1f).fillMaxHeight().padding(vertical = 20.dp)) {
             RoomBadge(r)
             Text("${d.n}", Modifier.padding(top = 56.dp), color = acc, fontSize = 200.sp, lineHeight = 170.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-10).sp)
-            // H7: 쉼 방의 업무 건은 다음 첫 업무 운전에 '어제 넘긴 건'으로 말하고 P 화면 맨 앞에 묶는다
+            // H7: 업무 시간 밖에 온 업무 건은 다음 첫 업무 운전에 '어제 넘긴 건'으로 말하고 P 화면 맨 앞에 묶는다
             Text(if (rest) "다음 출근길에 알려 드릴 업무" else "급한 건", Modifier.padding(top = 16.dp), color = DTx, fontSize = 38.sp, fontWeight = FontWeight.Bold)
             d.at?.let { t ->
                 HorizontalDivider(Modifier.padding(top = 44.dp), thickness = 2.dp, color = Color(0xFF2A2F36))
@@ -1155,7 +1157,7 @@ private fun Settings(prefs: SharedPreferences, onBg: () -> Unit, onClose: () -> 
         }, Tall, enabled = family.isEmpty() || family.length in 10..11, colors = ButtonDefaults.buttonColors(containerColor = ParkAcc)) {
             Text("가족 번호 저장", fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
-        // 바로 연결: 입력한 번호들로 목록을 통째로 바꾼다(원본은 서버에만, 앱엔 가려진 표시). 쉼·피로 중에도 이 번호의 전화는 차가 읽는다.
+        // 바로 연결: 입력한 번호들로 목록을 통째로 바꾼다(원본은 서버에만, 앱엔 가려진 표시). 업무 시간 밖·피로 중에도 이 번호의 전화는 차가 읽는다.
         var direct by rememberSaveable { mutableStateOf("") }
         var directLabels by rememberSaveable { mutableStateOf(prefs.getString("direct_labels", "") ?: "") }
         val directList = parseDirect(direct)

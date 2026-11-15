@@ -1,3 +1,6 @@
+// 이 테스트가 지키는 동작:
+// - 데모 메일함 /car/mail(confirmed 필수, 실제 발송 없음)과 가족 번호 설정(응답엔 끝 4자리만).
+// - 가족 도착 문자는 하루 한 번만 보내고, 주인 대본에 메일 안내가 들어간다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.ts";

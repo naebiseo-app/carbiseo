@@ -5,10 +5,15 @@ import org.junit.Test
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
+// 이 테스트가 지키는 동작(Model.kt 순수 함수):
+// - 기록(Event)은 저장했다 읽어도 그대로이고, 깨진 줄은 버려지며, 최대 MAX_EVENTS건까지만 남는다.
+// - 홈 배너·첫 실행 버튼·날짜 이름·타임라인 문구는 폰이 아는 것(권한, 서버 전달 결과)만으로 정해진다.
+// - 하차 정보: 서버 읽기가 실패하면 저장본을 그대로 보이고, '없음'일 때만 지우며, 틱으로 숨긴 일은 total에서도 뺀다.
 class ModelTest {
     private val z = ZoneId.of("Asia/Seoul")
+    // 2026년 11월 d일 h시 m분(서울)의 epoch 밀리초.
     private fun t(d: Int, h: Int, m: Int = 0) = ZonedDateTime.of(2026, 11, d, h, m, 0, 0, z).toInstant().toEpochMilli()
-    private val now = t(1, 17, 41)
+    private val now = t(1, 17, 41) // 기준 시각: 11월 1일 17:41
 
     @Test fun 기록은_저장했다_그대로_읽힌다_탭과_줄바꿈은_지운다() {
         val es = listOf(Event(1, Kind.SENT, "카카오톡", "팀\t단톡\n방"), Event(2, Kind.REPLIED, "문자", "김부장"))
@@ -20,7 +25,7 @@ class ModelTest {
     @Test fun 오늘_보낸_알림만_센다_최대개수로_자른다() {
         val es = listOf(Event(t(1, 9), Kind.SENT, "a", "b"), Event(t(1, 10), Kind.SEND_FAIL, "a", "b"),
             Event(t(1, 11), Kind.REPLIED, "a", "b"), Event(t(10, 23, 59).minus(10L * 86_400_000), Kind.SENT, "a", "b"))
-        assertEquals(1, sentToday(es, now, z))
+        assertEquals(1, sentToday(es, now, z)) // 오늘의 SENT 1건만(실패·답장·10월 31일 것은 제외)
         var big = emptyList<Event>(); repeat(MAX_EVENTS + 5) { big = add(big, Event(it.toLong(), Kind.SENT, "a", "b")) }
         assertEquals(MAX_EVENTS, big.size); assertEquals((MAX_EVENTS + 4).toLong(), big.first().at)
     }
@@ -50,6 +55,7 @@ class ModelTest {
         assertEquals("음성 답장 보냄" to "카카오톡 · 팀 단톡방에게", line(Event(0, Kind.REPLIED, "카카오톡", "팀 단톡방")))
     }
 
+    // 폰 저장본으로 쓰는 서버 응답 원문 예.
     private val saved = """{"parked":{"lat":1,"lng":2,"memo":"B2","tasks":[{"id":5,"title":"a","number":"010-0000-0000"}]}}"""
     private val live = Parked(3.0, 4.0, "", "", 0, emptyList())
 

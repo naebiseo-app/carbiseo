@@ -1,9 +1,12 @@
 import { guardText, FALLBACK } from "./guard.ts";
 import { isUrgent } from "./script.ts";
 
-// F6 데모 모드: 관리 페이지(/admin)용 순수 함수. 이름·장소는 전부 가상.
+// F6 데모 모드: 관리 페이지(/admin)용 순수 함수(DB·네트워크 없음). 이름·장소는 전부 가상.
+// 맡은 일: Basic 인증 검사(basicOk), 관리 페이지 HTML(adminPage), 데모 일정(demoSchedule), 재현 통화 대본·빈 시간 계산(replayScript·freeSlots).
+// 맡지 않는 일: 경로 처리·DB 저장(index.ts의 /admin/*).
+// 먼저 읽을 함수: basicOk → replayScript → freeSlots.
 
-// Basic 인증(브라우저 기본 로그인 창). 사용자 이름은 무엇이든, 비밀번호 = ADMIN_TOKEN.
+// Basic 인증(브라우저 기본 로그인 창). 사용자 이름은 무엇이든, 비밀번호 = ADMIN_TOKEN. 토큰이 설정되지 않았으면 항상 거절한다(설정 누락 때 관리 페이지가 열리지 않게).
 export function basicOk(header: string | null, token: string | undefined): boolean {
   if (!token || !header?.startsWith("Basic ")) return false;
   try {
@@ -38,7 +41,7 @@ export function demoSchedule(nowMs: number): DemoEvent[] {
   ];
 }
 
-// 장소 간 이동(분): 직선거리 ÷ 평균 30km/h. 한계: 도로·정체 무시, 실제 경로가 필요하면 내비 ETA로 교체
+// 장소 간 이동(분, 올림): 직선거리 ÷ 평균 30km/h. 한계: 도로·정체를 무시한다 (넘으려면 내비 ETA로 바꾼다)
 export function travelMin(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const r = Math.PI / 180;
   const h = Math.sin(((b.lat - a.lat) * r) / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(((b.lng - a.lng) * r) / 2) ** 2;
@@ -48,7 +51,7 @@ export function travelMin(a: { lat: number; lng: number }, b: { lat: number; lng
 
 const hm = (ms: number) => new Date(ms + 9 * 3_600_000).toISOString().slice(11, 16);
 
-// ── 재현 통화(원문③답변 추천·④사실 정정·⑤빈 날짜). 통화 망이 없어 서버가 대본을 차에 내려 주고 차가 상대 대사를 읽는다. ──
+// ── 재현 통화(도움 카드 세 가지: 추천 답변·사실 정정·빈 시간). 통화 망이 없어 서버가 대본을 차에 내려 주고 차가 상대 대사를 읽는다. ──
 const KST = 9 * 3_600_000, HOUR = 3_600_000, MIN = 60_000, DAY = 86_400_000;
 const WORK_FROM = 9, WORK_TO = 18; // 미팅은 업무시간(KST 09~18시, 주말 제외) 안에서만
 export const MEET_MIN = 60; // 제안할 미팅 길이·일정 1건의 길이(일정에 끝 시각이 없어 같은 값으로 가정)
@@ -69,7 +72,8 @@ export function slotLabel(ms: number, nowMs: number): string {
 }
 
 /** 미팅 시작 후보 n개(기본 2). 조건: 업무시간 안·평일, 차가 도착한 뒤(지금+eta_min), 일정과 안 겹침(일정 앞뒤로 미팅 장소까지 이동시간 포함).
- *  둘째는 첫째보다 3시간 이상 뒤. 30분 단위로 4일 앞까지 찾는다. 한계: 이동은 직선거리 ÷ 30km/h, 현재 위치는 무시 */
+ *  둘째는 첫째보다 3시간 이상 뒤. 30분 단위로 오늘 포함 4일 안에서 찾는다.
+ *  한계: 이동은 직선거리 ÷ 30km/h이고 현재 위치는 무시한다 (넘으려면 travelMin 자리에 경로 시간을 쓴다) */
 export function freeSlots(s: DemoEvent[], nowMs: number, etaMin: number | null, n = 2): number[] {
   const earliest = nowMs + (etaMin ?? 0) * MIN, len = MEET_MIN * MIN;
   const ev = s.filter((e) => e.start + len > nowMs).map((e) => { const go = travelMin(e, MEET_AT) * MIN; return { from: e.start - go, to: e.start + len + go }; });
@@ -147,6 +151,7 @@ export function mailsHtml(rows: MailRow[]): string {
   }).join("") + "</ul>";
 }
 
+/** 관리 페이지 전체 HTML. msg는 맨 위에 한 줄로 보이고(이스케이프), replies·mails는 최근 목록. stt-dict·resummarize·demo-clock은 화면에 폼이 없고 POST로 직접 부른다. */
 export function adminPage(msg = "", replies: ReplyRow[] = [], mails: MailRow[] = []): string {
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>내비서 데모</title>

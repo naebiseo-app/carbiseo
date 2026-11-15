@@ -1,5 +1,8 @@
 package ztw.carbiseo
 
+// 앱의 진입점 둘: 부팅 뒤 서비스를 띄우는 BootReceiver와 화면(App())을 올리는 MainActivity.
+// 판정·음성·서버 통신은 모두 RoomService가 하고, 이 파일은 서비스를 시작하고 앞/뒤 상태(appFront)만 알린다.
+
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -10,7 +13,10 @@ import android.os.StrictMode
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 
-/** H1: 부팅·업데이트 뒤 서비스 자동 시작. 한계: 잠긴 부팅(LOCKED_BOOT_COMPLETED)은 안 받는다 — prefs가 사용자 잠금 해제 뒤에야 열려서. */
+/**
+ * H1: 부팅·업데이트 뒤 서비스 자동 시작.
+ * 한계: 잠긴 부팅(LOCKED_BOOT_COMPLETED)은 안 받는다 — prefs가 사용자 잠금 해제 뒤에야 열려서 (넘으려면 prefs를 기기 보호 저장소로 옮겨야 한다).
+ */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(c: Context, i: Intent) {
         Log.i("ROOM", "boot ${i.action} -> start service")

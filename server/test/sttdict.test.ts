@@ -1,3 +1,5 @@
+// 이 테스트가 지키는 동작:
+// - 받아쓰기 핫워드는 일정·연락처 낱말과 업무 낱말을 합치고, 한 글자·특수문자는 뺀다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { hotwords, WORK_WORDS } from "../src/sttdict.ts";

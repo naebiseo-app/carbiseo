@@ -1,3 +1,7 @@
+// 이 테스트가 지키는 동작:
+// - 구글 일정을 데모 일정 모양으로 바꾸고, 장소 이름을 좌표로 찾는다(모호한 장소는 찾지 않는다).
+// - 연결·동기화·만료·끊기: 마지막 시도 5분 안에는 구글을 안 부르고, 실패하면 기존 일정을 유지한다.
+// - 토큰은 응답으로 나가지 않는다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

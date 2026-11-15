@@ -1,9 +1,14 @@
+// 구글 캘린더 연결과 일정 동기화. 폰이 보낸 인증 코드를 서버가 토큰으로 바꿔 kv 'google'에 두고(토큰은 폰·응답으로 안 나간다),
+// 앞으로 7일 일정을 kv 'schedule'에 데모 일정(DemoEvent) 모양으로 넣는다. 연결이 없거나 동기화가 실패하면 기존 일정을 그대로 둔다.
+// 맡은 일: 코드 교환(connectGoogle)·끊기(disconnectGoogle)·동기화(syncCalendar·syncIfStale)·장소 이름 → 좌표(placeCoord).
+// 맡지 않는 일: 경로와 인증(index.ts의 /phone/google·/car/schedule).
+// 먼저 읽을 함수: syncCalendar → fillEvents.
 import { demoSchedule, type DemoEvent } from "./admin.ts";
 import { kvGet, kvPut, numberFor } from "./index.ts";
 
 export const GOOGLE_CLIENT_ID = "859657362107-5v6l2h94epvjabej05s7efl150jk0jej.apps.googleusercontent.com"; // 웹 클라이언트 ID는 공개값
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
-const SYNC_GAP = 5 * 60_000;
+const SYNC_GAP = 5 * 60_000; // syncIfStale이 구글을 다시 부르는 최소 간격
 
 type Env = { DB: D1Database; GOOGLE_CLIENT_SECRET?: string; KAKAO_REST_KEY?: string };
 type Google = { refresh_token: string; synced_at?: number; tried_at?: number; expired?: boolean };
@@ -22,8 +27,8 @@ export function toEvents(items: any[]): DemoEvent[] {
 // 이름만으로 어디인지 알 수 없는 장소는 찾지 않는다(엉뚱한 곳으로 지각 경고가 나간다)
 const VAGUE = /^(집|우리집|본가|회사|사무실|학교|온라인|화상|줌|zoom|https?:.*)$/i;
 
+// 한계: 차 위치 없이 전국 검색이라 "스타벅스"는 아무 지점이 나온다 (넘으려면 구글 장소 자동완성처럼 주소가 오는 입력을 쓴다)
 /** 장소 이름 → 좌표. 카카오 키워드 검색, 없으면 주소 검색. 못 찾으면 null(차는 좌표 0인 일정의 지각 계산을 건너뛴다). */
-// 한계: 차 위치 없이 전국 검색이라 "스타벅스"는 아무 지점이 나온다. 구글 장소 자동완성을 쓰면 주소가 와서 괜찮다.
 export async function placeCoord(key: string | undefined, place: string): Promise<{ lat: number; lng: number } | null> {
   if (!key || !place || VAGUE.test(place)) return null;
   for (const api of ["keyword", "address"]) {
@@ -66,6 +71,7 @@ export async function connectGoogle(env: Env, code: string, nowMs: number): Prom
   return { status: 200, body: { ok: true } };
 }
 
+/** 폰 화면용 상태: 연결 여부·마지막 동기화 시각·토큰 만료 여부. 토큰 값은 내지 않는다. */
 export async function googleStatus(env: Env) {
   const g: Google | null = await kvGet(env.DB, "google");
   return { connected: !!g, synced_at: g?.synced_at ?? null, expired: !!g?.expired };
@@ -79,11 +85,11 @@ export async function disconnectGoogle(env: Env, nowMs: number) {
   await kvPut(env.DB, "schedule", demoSchedule(nowMs));
 }
 
-/** 구글 일정 7일치를 kv "schedule"로. 연결이 없거나 실패하면 기존 일정을 그대로 둔다. */
+/** 구글 일정 7일치(최대 20건)를 kv "schedule"로. 연결이 없거나 실패하면 기존 일정을 그대로 둔다. */
 export async function syncCalendar(env: Env, nowMs: number): Promise<void> {
   const g: Google | null = await kvGet(env.DB, "google");
   if (!g || g.expired) return;
-  await kvPut(env.DB, "google", { ...g, tried_at: nowMs });
+  await kvPut(env.DB, "google", { ...g, tried_at: nowMs }); // 성공 전에 시도 시각부터 남겨, 실패해도 5분 안에는 다시 부르지 않는다
   try {
     const t = await tokenPost(env, { grant_type: "refresh_token", refresh_token: g.refresh_token });
     if (!t.ok) {

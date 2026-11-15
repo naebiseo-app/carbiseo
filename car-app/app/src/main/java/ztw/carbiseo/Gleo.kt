@@ -5,6 +5,9 @@ import android.content.Context
 import android.content.Intent
 import org.json.JSONObject
 
+// Gleo(Pleos 음성 비서)가 부르는 함수 이름을 앱 음성 의도(CarIntent)로 바꾸고, 그 호출을 받는 수신기.
+// 의도를 실제로 처리해 읽는 일은 RoomService(`RoomService.gleo`), 의도 종류는 Drive.kt의 CarIntent.
+
 private const val GLEO_PREFIX = "ztw.carbiseo." // 에뮬 Gleo 4.2는 action에 패키지를 붙여 보낸다(공식 예시는 안 붙임)
 
 /** Gleo 함수 이름(assets/schema.json) → 음성 의도. */

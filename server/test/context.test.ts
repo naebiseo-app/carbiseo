@@ -1,3 +1,7 @@
+// 이 테스트가 지키는 동작:
+// - 차 폴링 SQL은 시각이 안 된 행 앞에서 멈춰 그 뒤 행을 건너뛰지 않는다.
+// - 차량 맥락은 형식이 틀린 값을 버리고, 차 상태가 10분 넘게 오래되면 중립 대본을 쓴다.
+// - 운전 시간·동승자에 관한 응대 규칙을 확인한다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";

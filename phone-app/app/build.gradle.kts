@@ -1,11 +1,16 @@
+// phone-app 모듈 설정. 서버 주소·토큰을 BuildConfig로 넣고, Compose 화면과 구글 로그인(서버용 인증 코드) 의존성을 둔다.
+// 먼저 읽을 곳: defaultConfig의 buildConfigField 두 줄(SERVER_URL, CAR_TOKEN).
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
-// car-app과 같은 방식: 현대차공모전/.env 의 CAR_TOKEN(없으면 빈 문자열)을 BuildConfig로만 주입. 값은 소스에 두지 않는다.
+// car-app과 같은 방식: 저장소 루트 .env의 CAR_TOKEN(없으면 빈 문자열)을 BuildConfig로만 주입한다. 값은 소스에 두지 않는다.
+// 이 토큰은 시연용 공용 값이라 공개한 APK에서 꺼낼 수 있다(PRIVACY.md 5번).
 val envLines = file("../../.env").takeIf { it.exists() }?.readLines().orEmpty()
+// .env에서 `k=값` 줄의 값을 꺼내고 양쪽 따옴표(코드 34 = 큰따옴표, 39 = 작은따옴표)를 뗀다. 없으면 빈 문자열.
 fun env(k: String) = envLines.firstOrNull { it.startsWith("$k=") }?.substringAfter("=")?.trim()?.trim { it.code == 34 || it.code == 39 } ?: ""
 android {
     namespace = "ztw.carbiseo.phone"
     compileSdk = 34
     defaultConfig { applicationId = "ztw.carbiseo.phone"; minSdk = 28; targetSdk = 34; versionCode = 1; versionName = "0.1"
+        // 서버(Cloudflare Workers) 주소.
         buildConfigField("String", "SERVER_URL", "\"https://carbiseo-api.wondi81.workers.dev\"")
         buildConfigField("String", "CAR_TOKEN", "\"${env("CAR_TOKEN")}\"")
     }

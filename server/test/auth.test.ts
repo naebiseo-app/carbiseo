@@ -1,3 +1,7 @@
+// 이 테스트가 지키는 동작:
+// - 차 경로 인증: CAR_TOKEN이 비어 있으면 'Bearer undefined'도 거절하고, 틀린 토큰은 401이다.
+// - forCar가 ring·event 행의 원문(raw·meta)을 차로 내리지 않는다.
+// - loadDialog의 재시도(한 번)와 /admin POST의 다른 출처 거절(403)을 확인한다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker, { forCar, loadDialog } from "../src/index.ts";

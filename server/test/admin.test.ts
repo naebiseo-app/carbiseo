@@ -1,3 +1,6 @@
+// 이 테스트가 지키는 동작:
+// - 관리 페이지 Basic 인증: 비밀번호가 ADMIN_TOKEN과 같을 때만 통과하고, 토큰이 없으면 전부 거절한다.
+// - 가짜 수신 입력 검증과 급함 판정, 데모 일정(지금 이후 3건·가짜 번호)을 확인한다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { basicOk, demoSchedule, parseFakeCall } from "../src/admin.ts";

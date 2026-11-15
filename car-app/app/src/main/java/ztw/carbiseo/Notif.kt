@@ -1,6 +1,9 @@
 package ztw.carbiseo
 
 // 폰 알림 읽어주기(35 설계). 서버 inbox kind='notif' = 폰 메시지 알림(app·보낸이·내용·답장 가능).
+// 이 파일은 순수 함수만 둔다: 광고 거르기(isAd)·방별로 지금 알릴 것(notifNow)·낭독 문장·음성 의도(voiceCmd)·대화 상태(NotifTalk).
+// 알림을 서버에서 받아 오고 실제로 읽고 답장을 보내는 일은 RoomService.kt, 폰 쪽 수집·전달은 phone-app이다.
+// 먼저 읽을 곳: notifNow → NotifTalk(제안 → 낭독 → 답장 되읽기 → 확인). 낭독 직전 숫자 읽기(spellDigits)도 여기 있다.
 
 private const val KO_DIGITS = "공일이삼사오육칠팔구"
 // 번호 맥락만: ****1234·끝자리 6000·010-1234-5678·01012345678. 시각(15:30)·분(25분)·금액(5000원)은 걸리지 않는다.
@@ -36,11 +39,11 @@ const val CALLBACK_DONE_SPEECH = "할 일에 문자를 준비해 뒀어요. 보�
 /** 설정 문자열 "엄마, 아빠" → 이름 집합. */
 fun parseFavs(s: String) = s.split(",", "，").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
 
-/** 광고성: 앱·보낸이 이름에 '광고', 또는 본문이 '(광고)'로 시작(정보통신망법 표기). 한계: 표기만 본다, 스팸 판정은 안 한다. */
+/** 광고성: 앱·보낸이 이름에 '광고', 또는 본문이 '(광고)'로 시작(정보통신망법 표기). 한계: 표기만 본다, 스팸 판정은 안 한다 (넘으려면 본문 기준의 별도 판정이 필요하다). */
 fun isAd(i: InboxItem) = "광고" in i.app || "광고" in i.fromLabel || i.summary.trimStart().startsWith("(광고)")
 
-/** 지금 바로 알릴 알림. 업무 방 = 광고 외 전부, 쉼 방 = 즐겨찾기 발신자만(나머지는 정차 요약), 판정 전 = 없음(카드).
- *  정차(P)도 음성으로 묻는다(서서 화면 보다 신호 놓치지 않게): 퇴근 시각(off)이면 쉼 규칙, 아니면 업무 규칙. */
+/** 지금 바로 알릴 알림. 업무 운전 = 광고 외 전부, 업무 시간 밖(DRIVE_REST) = 즐겨찾기 발신자만(나머지는 정차 요약), 판정 전 = 없음(카드).
+ *  정차(P)도 음성으로 묻는다(서서 화면 보다 신호 놓치지 않게): 업무 시간 밖(off)이면 업무 시간 밖 규칙, 아니면 업무 운전 규칙. */
 fun notifNow(items: List<InboxItem>, room: Room?, favs: Set<String>, off: Boolean = false): List<InboxItem> = items.filter { it.kind == "notif" && !isAd(it) }.filter {
     when (room) { Room.DRIVE_WORK -> true; Room.DRIVE_REST -> it.fromLabel in favs; Room.PARK -> !off || it.fromLabel in favs; null -> false }
 }

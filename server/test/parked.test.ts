@@ -1,3 +1,7 @@
+// 이 테스트가 지키는 동작:
+// - 하차 정보(/car/parked)는 마지막 1건만 저장하고, 좌표는 카카오로 주소를 찾되 실패해도 저장한다.
+// - 할 일은 8개·메모는 40자로 자르고, 폰에서 끝낸 일은 폰 조회에서 빠지며 차로 전달된다.
+// - 번호는 kv에 저장하지 않고 조회 때 inbox에서 찾는다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

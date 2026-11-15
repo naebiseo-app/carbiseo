@@ -1,3 +1,6 @@
+// 이 테스트가 지키는 동작:
+// - 관리 스위치(owner-as-guest·demo-clock·keep-recordings)와 reset-inbox는 ADMIN_TOKEN 인증 뒤에만 동작한다.
+// - owner-as-guest를 켜면 주인 번호도 손님 대본, inbox가 비면 min_id는 null이다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.ts";

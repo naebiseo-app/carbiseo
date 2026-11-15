@@ -4,11 +4,16 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** 서버 호출. 블로킹이라 반드시 백그라운드 스레드에서 부른다. 실패는 false/null. */
+// 차 앱이 서버(Cloudflare Workers, /car/* 경로)와 주고받는 HTTP 호출을 한곳에 모았다. 경로·응답 형식의 서버 쪽은 server/src/index.ts다.
+// 받은 JSON을 해석하는 판단(어느 카드를 읽을지 등)은 Inbox.kt·Drive.kt·RoomService.kt가 하고, 이 파일은 요청과 변환만 한다.
+// 먼저 읽을 곳: open(공통 연결·인증) → post / postJson(요청 두 종류) → fetchInbox(5초 폴링이 부르는 핵심 호출).
+
+/** 서버 호출. 블로킹이라 반드시 백그라운드 스레드에서 부른다. 실패는 false/null(목록을 돌려주는 함수는 빈 목록, 함수별 KDoc 참고). */
 object Server {
     private fun open(path: String, method: String) = (URL(BuildConfig.SERVER_URL + path).openConnection() as HttpURLConnection).apply {
         requestMethod = method; connectTimeout = 5000; readTimeout = 5000
-        // 심사용 공유 시연 토큰이다. 공개 APK에서 꺼낼 수 있으므로 이 토큰으로 읽히는 서버 자료는 가명 시연 카드뿐이게 운영한다. 공개 기간 뒤 교체하고, 상용에서는 기기별 발급 토큰으로 바꾼다(README '알려진 제약').
+        // 한계: 심사용 공유 시연 토큰이다. 공개 APK에서 꺼낼 수 있으므로 이 토큰으로 읽히는 서버 자료는 가명 시연 카드뿐이게 운영하고, 공개 기간 뒤 교체한다
+        // (넘으려면 상용에서 기기별 발급 토큰으로 바꾼다. README '알려진 제약').
         setRequestProperty("Authorization", "Bearer ${BuildConfig.CAR_TOKEN}")
     }
 
@@ -113,18 +118,25 @@ object Server {
         } finally { c.disconnect() }
     }.getOrNull()
 
-    /** AI 예약 전화 요청. 결과 = (서버 inbox 행 id, 실패 code). 성공이면 id(kind=reserve, 결과는 이 행이 calling에서 바뀐다), 실패·네트워크 오류면 id null(code: no_number·call_failed·daily_limit, 네트워크 오류는 빈 문자열). */
+    /**
+     * AI 예약 전화 요청. 결과 = (서버 inbox 행 id, 실패 code).
+     * 성공이면 id(kind=reserve, 결과는 이 행이 calling에서 바뀐다), 실패·네트워크 오류면 id null
+     * (code: no_number·call_failed·daily_limit, 네트워크 오류는 빈 문자열).
+     */
     fun reserve(place: String, arrive: String, party: Int, lat: Double, lng: Double): Pair<Long?, String> {
         val j = postJson("/car/reserve", JSONObject().put("place", place).put("arrive", arrive).put("party", party).put("lat", lat).put("lng", lng))
         return (if (j?.optBoolean("ok") == true) j.optLong("id", 0L) else null) to (j?.str("code") ?: "")
     }
 
-    /** 주차 기록(하차 카드의 차 쪽 데이터): 위치·메모·안 끝난 할 일(wire id, 제목, 보조 줄)과 자르기 전 전체 건수. 결과 = (성공 여부, 서버가 찾은 주소 — 없으면 null). */
+    /**
+     * 주차 기록(하차 카드의 차 쪽 데이터): 위치·메모·안 끝난 할 일(wire id, 제목, 보조 줄)과 자르기 전 전체 건수.
+     * 결과 = (성공 여부, 서버가 찾은 주소 — 없으면 null).
+     */
     fun postParked(lat: Double, lng: Double, memo: String, tasks: List<ParkTask>, total: Int): Pair<Boolean, String?> {
         val j = postJson("/car/parked", JSONObject().put("lat", lat).put("lng", lng).put("memo", memo).put("total", total).put("tasks", org.json.JSONArray(tasks.map { JSONObject().put("id", it.id).put("title", it.title).put("sub", it.sub) })))
         return (j?.optBoolean("ok") == true) to j?.str("address")?.ifEmpty { null }
     }
-    /** 폰에서 끝낸 할 일 wire id들. 실패 null. */
+    /** 폰에서 끝낸 할 일 wire id들(서버에 마지막 1건만 두는 주차 기록의 done). 실패 null. */
     fun fetchParkedDone(): List<Long>? = runCatching {
         val c = open("/car/parked", "GET")
         try {
@@ -132,6 +144,7 @@ object Server {
             JSONObject(c.inputStream.bufferedReader().readText()).getJSONArray("done").let { a -> List(a.length()) { a.getLong(it) } }
         } finally { c.disconnect() }
     }.getOrNull()
+    /** 주차 기록 지우기(2분 넘게 세운 뒤 다시 출발할 때). */
     fun clearParked(): Boolean = post("/car/parked", JSONObject().put("clear", true))
 
     /** 근처 가까운 순 최대 15곳(서버가 카카오 카테고리 검색). 못 찾았거나 실패하면 빈 목록. 좌표는 이 호출에만 쓴다. */
@@ -159,6 +172,7 @@ object Server {
         return (if (j?.optBoolean("ok") == true) j.optLong("id", 0L) else null) to (j?.str("code") ?: "")
     }
 
+    /** 다음 일정 목록(데모 일정, 구글 캘린더를 연결했으면 그 일정). 실패 null. */
     fun fetchSchedule(): List<Event>? = runCatching {
         val c = open("/car/schedule", "GET")
         try {

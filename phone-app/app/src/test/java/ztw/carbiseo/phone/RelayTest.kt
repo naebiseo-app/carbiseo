@@ -5,7 +5,12 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+// 이 테스트가 지키는 동작(Relay.kt 순수 함수):
+// - toMsg: 메시지형 알림만 앱 이름을 붙여 넘기고, 묶음 요약·빈 값은 버리며, 내용 길이를 자른다.
+// - normalizeContacts: 휴대폰 번호 꼴만 정리해 남기고, 같은 이름 중복과 3000건 초과를 막는다.
+// - 하차 정보 응답: '없음'과 '읽지 못함'을 가르고, 저장본에서는 전화번호를 빼고 끝낸 일을 뺀다.
 class RelayTest {
+    // 알림 1건을 toMsg에 넣는 도우미. 기본값은 보낸이·내용이 있고 답장 버튼이 있는 일반 알림.
     private fun m(pkg: String, cat: String? = null, style: Boolean = false, summary: Boolean = false, title: String? = "김부장", text: String? = "회의 자료 보냈어요", reply: Boolean = true) =
         toMsg(pkg, "k", cat, style, summary, title, text, reply)
 

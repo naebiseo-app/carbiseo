@@ -1,6 +1,12 @@
 package ztw.carbiseo
 
-/** O3 재현 통화: 서버가 내려 준 대본의 한 줄. who = ai(고지)·peer(상대)·driver(운전자, 자막만)·hint(도움: 추천 답변·사실 정정·빈 시간). t = 시작 후 ms. */
+// O3 재현 통화(시연용): 서버가 내려 준 대본 문자열을 해석(parseReplay)하고, 시각에 맞춰 한 줄씩 꺼내(ReplayRun)
+// 줄마다 할 일(replayAct)을 정하는 순수 함수만 둔다. 대본을 받아 오고 읽고 화면에 올리는 일은 RoomService.
+
+/**
+ * O3 재현 통화: 서버가 내려 준 대본의 한 줄.
+ * who = ai(고지)·peer(상대)·driver(운전자, 자막만)·hint(도움: 추천 답변·사실 정정·빈 시간). t = 시작 후 ms.
+ */
 data class ReplayLine(val t: Long, val who: String, val label: String, val text: String)
 data class ReplayScript(val title: String, val endMs: Long, val lines: List<ReplayLine>)
 

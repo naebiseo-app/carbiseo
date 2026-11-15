@@ -1,3 +1,6 @@
+// 이 테스트가 지키는 동작:
+// - 근처 찾기(nearby): 허용 category(FD6·CE7·OL7·CS2)와 좌표만 받고, 최대 15곳을 가까운 순으로 돌려준다.
+// - 키 없음·허용 밖 입력·결과 없음·상대 서버 오류를 구분한다.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { nearby } from "../src/index.ts";
