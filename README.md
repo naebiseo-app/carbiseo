@@ -83,7 +83,7 @@ flowchart LR
 | NaviHelper `requestNavigationScreen(SearchPlace / AddHomeFavorite)` | 앞쪽 휴게소를 모를 때 내비 검색, 설정의 "내비 즐겨찾기에 집 추가" | `RoomService.kt` |
 | NaviHelper `onCurrentRoadSpeedLimit` / `onCameraAlert` / `onCautionPointInfo` | 과속·주의 경고 테두리, 경고 중 음성 보류 | `CarAdapters.kt`, `Alert.kt` |
 | TextToSpeech `Mode.ON_DEVICE` `speak` | 방 전환 안내, 부재중 한 줄 낭독, 휴식·집 문턱 안내, 폰 알림 묶음·낭독 (실패 시 Android TTS로 대체) | `Speaker.kt` |
-| SpeechToText `Mode.ON_DEVICE` `request` / `ResultListener` (ko_KR) | 음성 대답: 폰 알림("읽어줘"·"답장 …라고 해 줘"·"응"·"나중에"), 지각 문자·회신 문자·예약 초안·휴식 경유지의 "응/아니", 정차 화면 [말하기]("아까 전화"·"다음 일정"·"급해요"). 안 되면 Android 인식 → P·저속 화면 버튼 | `Voice.kt`, `Notif.kt`, `RoomService.kt` |
+| SpeechToText `Mode.ON_DEVICE` `request` / `ResultListener` (ko_KR) | 음성 대답: 폰 알림("읽어줘"·"답장 …라고 해 줘"·"응"·"나중에"), 지각 문자·회신 문자·예약 초안·휴식 경유지의 "응/아니", 정차 화면 [말하기]("아까 전화"·"다음 일정"·"급해요"). 안 되면 P·저속 화면 버튼만(다른 음성 인식기로 넘어가지 않는다) | `Voice.kt`, `Notif.kt`, `RoomService.kt` |
 | AAOS `CarUxRestrictionsManager` (리플렉션) | 주행 화면 제한(DO) 여부 → 방 판정 보조 | `CarAdapters.kt` |
 | AAOS `CarPropertyManager` `PERF_VEHICLE_SPEED` | 속도(Pleos Vehicle SDK에 없음) → 과속 판정 | `CarAdapters.kt` |
 
@@ -223,7 +223,7 @@ GitHub Releases [v1.0-submit](https://github.com/naebiseo-app/carbiseo/releases/
 - **트립 주행시간 미지원**: 에뮬에서 `getTrip*DrivingTime` 3종이 모두 `ERROR_NOT_SUPPORTED_PROPERTY`. 앱이 잰 연속 운전 시간으로 대신하고, 실차에서 SDK 값이 오면 그것을 우선 쓴다(단위는 실차에서 확정).
 - **경고등(실차 확장)**: `getTelltalesInfo`는 `PRIVATE_CAR_SAFETY` 권한이 필요한데 1차 APK에는 넣지 않았다(앱마켓 권한 심사·에뮬 미지원). 에뮬에서는 SecurityException으로 실패하고 조회를 멈춘다. 경고등 안내는 실측하지 못했다.
 - **졸음 확인**: 대답 지연은 졸음 판정이 아니라 참고 신호다(음성 지연으로 졸음을 판정하는 검증 논문은 찾지 못함). 6초 기준은 에뮬 인식 지연(약 2초)을 넣어 정한 값이라 실차 마이크에서 다시 확인해야 한다.
-- **음성 인식**: SpeechToText는 기기 안(ON_DEVICE) 모드만 쓴다(서버 모드는 콘솔 '준비 중'). 로캘을 `ko`로 주면 엔진이 거절해 `ko_KR`(Locale.KOREA)로 준다(TTS도 같이 바꿔 에뮬 엔진 오류가 사라짐). 에뮬에서는 녹음된 음성 파일을 넣어 "읽어줘" 인식을 확인했지만 결과가 불안정했고(4번 중 1번), 10-31 재시험에서는 결과가 오지 않았다. 실제 마이크 음성은 확인하지 못했다. 대화 흐름은 인식 결과를 디버그로 넣어(`SAY`) 확인했고, 시연 영상에도 그렇게 표기한다.
+- **음성 인식**: SpeechToText는 기기 안(ON_DEVICE) 모드만 쓴다(서버 모드는 콘솔 '준비 중'). 로캘을 `ko`로 주면 엔진이 거절해 `ko_KR`(Locale.KOREA)로 준다(TTS도 같이 바꿔 에뮬 엔진 오류가 사라짐). 에뮬에서는 녹음된 음성 파일을 넣어 "읽어줘" 인식을 확인했지만 결과가 불안정했고(4번 중 1번), 10-31 재시험에서는 결과가 오지 않았다. 실제 마이크 음성은 확인하지 못했다. 대화 흐름은 인식 결과를 디버그로 넣어(`SAY`) 확인했고, 시연 영상에도 그렇게 표기한다. SpeechToText가 안 될 때 다른 음성 인식기로 넘어가지 않고 화면 버튼만 받는다(11-15에 Android 기본 인식기 대체 경로를 뺐다 — 차량 마이크 음성이 기기 밖 인식 서비스로 나갈 길을 두지 않기 위해서다).
 - **폰 알림**: 아이폰은 다른 앱 알림을 읽을 수 없어(애플 정책) 안드로이드 폰만. 메시지 답장은 그 알림이 폰에 떠 있어야 보낼 수 있다.
 - **휴게소 목록**: NaviHelper에 장소 검색 API가 없어 졸음쉼터 253곳·고속도로 휴게소 92곳(일부 근사 좌표) 목록(`assets/reststops.tsv`)을 앱에 넣어 둔다. 휴게소 좌표는 공식 좌표 파일이 없어 OpenStreetMap에서 가져왔다.
 - **충전 중 판정**: SDK에 충전 중 읽기 API가 없어 기어 P로만 판단한다.

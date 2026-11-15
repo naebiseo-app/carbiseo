@@ -16,7 +16,7 @@
 | `Alert.kt` | 과속·주의구간 판정(`alertFor`, 해제 히스테리시스 `AlertLatch`)과 조용히 할 때 음성을 모아 두는 `SpeechHold`. |
 | `Speaker.kt` | Pleos TextToSpeech(ON_DEVICE, ko_KR)로 읽고, 실패하면 Android TTS로 대체. 다 읽은 뒤 할 일(`then`)을 받아 음성 대답 듣기로 잇는다. |
 | `Notif.kt` | 폰 알림 순수 함수: 광고 판정, 방별로 지금 알릴 알림(`notifNow`), 묶음 문장, 음성 의도 키워드(`voiceCmd`), 제안→낭독→답장 되읽기→확인 대화(`NotifTalk`). |
-| `Voice.kt` | 한 마디 듣기. Pleos SpeechToText(ON_DEVICE) → 안 되면 Android SpeechRecognizer → 둘 다 없으면 화면 버튼만. 10초 안에 못 들으면 '못 들음'. |
+| `Voice.kt` | 한 마디 듣기. Pleos SpeechToText(ON_DEVICE)만 쓴다 → 안 되면 화면 버튼만(다른 음성 인식기로 넘어가지 않는다). 10초 안에 못 들으면 '못 들음'. |
 | `Screens.kt` | Compose 화면. 운전 화면(링), 정차 화면의 카드([완료]·[내일 아침에])·일정·문자 보내기 시트·[말하기], 휴식 버튼, 첫 실행 3단계, 설정(호칭·응대 방식 2택·휴식 기준·업무 끝 시각·바로 연결 번호·안내 멘트·배경). 상태는 `RoomService` companion에서 읽는다. |
 | `Replay.kt` | 재현 통화 대본 해석과 진행(순수 함수): 상대 대사·도움 카드(추천 답변·사실 정정·빈 시간)를 시각에 맞춰 내보내고, 정차면 카드·운전 중이면 귓속말 음성. |
 | `Background.kt` | 사용자 배경 이미지 정책(정차 중에만 움직임)과 이름 검증. |
