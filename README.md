@@ -11,8 +11,8 @@
 | `server/` | Cloudflare Workers + D1. TypeScript 8개 파일 | `src/script.ts`(응대 대본) → `src/index.ts`(경로별 처리, `fetch` 맨 위에 경로 목차) → `src/guard.ts`(AI 문장 검사) |
 | `phone-app/` | 안드로이드 폰 연결 앱(메시지 알림 전달·하차 카드) | `Relay.kt`, `Listener.kt` |
 | `sms-relay/` | 문자 중계 함수 1개(Vercel 서울 리전) | `api/send.js` |
-| `docs/ARCHITECTURE.md` | 파일별 역할과 데이터 흐름 4가지 | — |
-| `docs/DECISIONS.md` | 만들면서 갈림길마다 고른 것과 그 이유, 하지 않기로 한 것 | — |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 파일별 역할과 데이터 흐름 4가지 | — |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | 만들면서 갈림길마다 고른 것과 그 이유, 하지 않기로 한 것 | — |
 
 - 아래 [Pleos SDK·차량 데이터 사용 표](#pleos-sdk차량-데이터-사용-표)가 SDK 호출과 파일을 잇는 색인이다.
 - 코드 주석의 `F6`·`H7`·`O4`·`B안` 같은 표기는 개발 중 쓴 설계 항목 번호이고, `11-06` 같은 날짜는 그 동작을 실측한 날이다. `한계:`로 시작하는 주석은 일부러 단순하게 둔 곳과 그 한도를 적은 것이다.
@@ -199,7 +199,7 @@ npm run deploy
 | 대상 | 명령 | 현재 |
 |---|---|---|
 | 차 앱 단위 테스트(방 판정·부재중·주행 기능·피로·졸음 확인·지각·경고·도착 예정·배경·폰 알림·재현 통화) | `cd car-app && ./gradlew testDebugUnitTest --max-workers=2` | 176개 (11-12 집계) |
-| 서버(대본·서명 검증·인증·관리자·보관 정책·요약·주인 통화·재현·중계·스위치·폰 알림·바로 연결·가족 문자·AI 문장 가드·카드 동작·예약 전화·근처 찾기·하차 정보·구글 캘린더·주차) | `cd server && npm test` | 193개 (11-15 집계) |
+| 서버(대본·서명 검증·인증·관리자·보관 정책·요약·주인 통화·재현·중계·스위치·폰 알림·바로 연결·가족 문자·AI 문장 가드·카드 동작·예약 전화·근처 찾기·하차 정보·구글 캘린더·주차) | `cd server && npm test` | 194개 (11-15 집계) |
 | 휴대폰 연결 앱(메시지 알림 거르기·화면 로직) | `cd phone-app && ./gradlew testDebugUnitTest --max-workers=2` | 18개 (11-12 집계) |
 
 ## 개인정보
@@ -231,7 +231,7 @@ GitHub Releases [v1.0-submit](https://github.com/naebiseo-app/carbiseo/releases/
 - **착신 전환**: 010 무응답 → 서비스 070 착신 실통화(통신사 조건부 착신전환)와 발신번호 전달은 검증하지 못했다(2차에서 시연). 서비스 070으로 직접 건 통화는 실통화로 확인했다.
 - **AI 예약 전화**: 실제 가게로는 걸지 않는다. `O4_LIVE`가 꺼진 동안 수신 번호는 시험 번호(`OWNER_NUMBER`)로 고정되고, 통화 시험은 개발자 휴대폰을 가게 역할로 했다. AI 주차 문의 전화도 같은 규칙이다.
 - **주차 빈자리 범위**: 공공데이터 실시간 항목 4,634곳 중 좌표를 붙인 곳은 677곳이고, 그중 값이 실제로 바뀌는 곳은 측정 때마다 수십 곳(11-08 36곳, 11-09 14시 10분 간격 16곳)이다. 값이 멈춘 곳은 숫자가 맞지 않을 수 있고, '0'이 만차인지 미보고인지는 가리지 못했다. 대부분의 목적지에서는 "가게에 주차 자리 물어볼까요?"(AI 전화)로 넘어간다. 배포본에서 차가 조회한 실측은 아직이다.
-- **구글 캘린더**: 구글 앱이 시험(Testing) 단계라 등록한 시험 사용자만 로그인되고 토큰이 7일 뒤 만료된다. 심사 환경에서는 데모 일정으로 동작한다. 일정 장소 좌표는 차 위치 없이 전국 검색이라 체인점 이름("스타벅스" 등)은 다른 지점이 잡힐 수 있다.
+- **구글 캘린더**: 구글 앱이 시험(Testing) 단계라 등록한 시험 사용자만 로그인되고 토큰이 7일 뒤 만료된다. 심사 환경에서는 데모 일정(지금부터 1·3·5시간 뒤 3건)으로 동작하고, 3건이 모두 지나면 서버가 그때 기준으로 다시 깐다. 일정 장소 좌표는 차 위치 없이 전국 검색이라 체인점 이름("스타벅스" 등)은 다른 지점이 잡힐 수 있다.
 - **하차 감지**: 운전석 문 위치값 0 = 닫힘, 0보다 크면 열림으로 가정했다(에뮬 콘솔에서 1 수신). `CAR_DOORS`·`CAR_WINDOWS` 권한은 공개 문서끼리 설명이 달라 실차 확인이 필요하다. 와이퍼는 간헐 모드를 비로 보는지 확인하지 못했다.
 - **공용 시연 토큰**: 공개 APK에서 꺼낼 수 있다. 영향 범위와 출시 전 대책(기기별 발급 토큰)은 '실행 방법 3. 서버'에 적었다.
 - **Gleo 수신기**: Gleo가 보내는 Action을 받으려고 `GleoReceiver`를 공개(exported)로 두었고 보낸 앱을 확인하지 않는다. 같은 기기의 다른 앱이 이 방송을 보내면 최근 전화·다음 일정을 차 안에서 소리 내어 읽거나 휴게소 경유지를 넣게 할 수 있다(문자·전화 발신은 이 경로로 나가지 않고, 응답 방송에도 내용을 싣지 않는다). 출시 전에 Gleo 서명 권한으로 보낸 쪽을 제한한다.
@@ -249,7 +249,7 @@ GitHub Releases [v1.0-submit](https://github.com/naebiseo-app/carbiseo/releases/
 - 일정: Google Calendar API(읽기 전용, 사용자가 연결했을 때만)
 - 차량·내비·음성 기능: Pleos SDK(현대자동차그룹) — 공모전 제공 SDK 약관에 따름
 - 이름 호출 음성 인식: sherpa-onnx(k2-fsa) — Apache License 2.0 / 한국어 모델 `sherpa-onnx-streaming-zipformer-korean-2024-06-16`, 원본 [icefall KsponSpeech 모델](https://huggingface.co/johnBamma/icefall-asr-ksponspeech-pruned-transducer-stateless7-streaming-2024-06-12) — Apache License 2.0. 이 음성 모델은 한국지능정보사회진흥원의 사업결과인 AI Hub 「한국어 음성」(KsponSpeech) 데이터로 학습됨(AI Hub 이용정책에 따른 출처 표기)
-- 주요 라이브러리(Gradle 의존성): Jetpack Compose(BOM 2024.09.03)·Material3·Activity Compose 1.9.3·Kotlin 1.9.25 — Apache License 2.0 / JUnit 4.13.2(테스트 전용) — Eclipse Public License 1.0
+- 주요 라이브러리(Gradle 의존성): Jetpack Compose(BOM 2024.09.03)·Material3·Activity Compose 1.9.3·Kotlin 1.9.25 — Apache License 2.0 / JUnit 4.13.2(테스트 전용) — Eclipse Public License 1.0 / 휴대폰 연결 앱의 구글 로그인: Google Play services Auth 22.0.0 — Android Software Development Kit License
 
 ## 라이선스
 이 저장소는 공모전 심사를 위해 공개한다. 별도 라이선스를 붙이지 않았으므로 저작권은 작성자에게 있고, 심사·열람 밖의 복제·재배포는 허락하지 않는다. 포함한 오픈소스와 데이터는 위 출처의 각 라이선스를 따른다.

@@ -108,4 +108,9 @@ export async function syncCalendar(env: Env, nowMs: number): Promise<void> {
 export async function syncIfStale(env: Env, nowMs: number): Promise<void> {
   const g: Google | null = await kvGet(env.DB, "google");
   if (g && nowMs - (g.tried_at ?? 0) >= SYNC_GAP) await syncCalendar(env, nowMs).catch(() => {});
+  // 구글 연결이 없거나 만료된 서버는 데모 일정으로 돈다. 데모 일정이 전부 지났으면 지금 기준으로 다시 깐다(며칠 뒤에 설치해도 '다음 일정'이 비지 않게).
+  if (!g || g.expired) {
+    const s: DemoEvent[] = (await kvGet(env.DB, "schedule")) ?? [];
+    if (!s.some((e) => e.start > nowMs)) await kvPut(env.DB, "schedule", demoSchedule(nowMs));
+  }
 }

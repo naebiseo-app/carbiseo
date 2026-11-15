@@ -188,8 +188,9 @@ test("/car/schedule: 마지막 시도 5분 안이면 구글을 안 부르고, 5�
 test("연결이 없으면 구글 호출 0, 일정 그대로(scheduled 포함)", async () => {
   const calls = google();
   const env = mkEnv();
-  await env.DB.prepare("INSERT INTO kv(key,value,updated_at) VALUES('schedule',?,0)").bind(JSON.stringify([{ x: 1 }])).run();
-  assert.deepEqual(((await (await call(env, "GET", "/car/schedule")).json()) as any).items, [{ x: 1 }]);
+  const ev = [{ x: 1, start: Date.now() + 3_600_000 }]; // 앞으로 남은 일정이 있으면 손대지 않는다
+  await env.DB.prepare("INSERT INTO kv(key,value,updated_at) VALUES('schedule',?,0)").bind(JSON.stringify(ev)).run();
+  assert.deepEqual(((await (await call(env, "GET", "/car/schedule")).json()) as any).items, ev);
   await worker.scheduled({}, env);
   assert.equal(calls.length, 0);
 });
@@ -204,4 +205,16 @@ test("연결 끊기: revoke가 실패해도 google 삭제, 일정은 데모로",
   const s = await kv(env, "schedule");
   assert.equal(s.length, 3);
   assert.equal(s[0].title, "한빛물산 납품 미팅");
+});
+
+test("구글 연결이 없고 데모 일정이 전부 지났으면 /car/schedule이 지금 기준 데모 일정으로 다시 깐다(앞으로 남은 일정은 건드리지 않는다)", async () => {
+  const env = mkEnv();
+  const put = (v: unknown) => env.DB.prepare("INSERT OR REPLACE INTO kv(key,value,updated_at) VALUES('schedule',?,0)").bind(JSON.stringify(v)).run();
+  await put([{ title: "지난 일정", start: Date.now() - 86_400_000, place: "판교역" }]);
+  const past = await (await call(env, "GET", "/car/schedule")).json() as any;
+  assert.equal(past.items.length, 3);
+  assert.ok(past.items.every((e: any) => e.start > Date.now()));
+  await put([{ title: "남은 일정", start: Date.now() + 3_600_000, place: "판교역" }]);
+  const kept = await (await call(env, "GET", "/car/schedule")).json() as any;
+  assert.deepEqual(kept.items.map((e: any) => e.title), ["남은 일정"]);
 });
