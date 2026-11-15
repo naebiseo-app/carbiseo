@@ -134,8 +134,9 @@ flowchart LR
 
 ## 실행 방법
 ### 1. 에뮬레이터
-- Pleos Connect SDK Emulator(Android API 34 Pleos 이미지)를 실행한다.
-- APK 설치: [GitHub Releases](https://github.com/naebiseo-app/carbiseo/releases/tag/v1.0-submit)의 `naebiseo-car-release.apk`(태그 v1.0-submit)를 받아 `adb install -r -g naebiseo-car-release.apk`
+- **테스트 환경(개발·확인에 쓴 에뮬레이터)**: Pleos Connect SDK Emulator. 시스템 이미지 `system-images;android-34;pleos_car_emulator;x86_64` revision 1(42dot, Android 14 Automotive), 기기 프로필 `Pleos_Connect_v2_0`. **화면 규격 2560×1440(가로), 160dpi**, RAM 4GB. 다른 화면 규격에서는 확인하지 않았다.
+- 위 에뮬레이터를 실행한다.
+- APK 설치: [GitHub Releases](https://github.com/naebiseo-app/carbiseo/releases/tag/v1.0-submit)의 `naebiseo_naebiseo_release.apk`(태그 v1.0-submit)를 받아 `adb install -r -g naebiseo_naebiseo_release.apk`
 - 차 화면 하단 앱 목록에서 **내비서**를 연다. 명령으로 열 땐 `adb shell monkey -p ztw.carbiseo -c android.intent.category.LAUNCHER 1`. 상단 알림에 "내비서 실행 중 — 방: ○○"이 뜨고, 내비를 앞에 띄워도 판정은 포그라운드 서비스에서 계속된다.
 - 방 바꿔 보기: `adb forward tcp:8088 tcp:8088` 후 `http://127.0.0.1:8088/`(Virtual Console)에서 기어 P ↔ D, 내비에서 목적지를 집/다른 곳으로.
 - 로그: `adb logcat -s ROOM ROOMADP`
@@ -212,7 +213,7 @@ npm run deploy
 - 통화 요약 정확도를 위해 연락처·일정의 이름과 상호(전화번호는 빼고)를 요약 AI(Anthropic API)에 참고 이름 목록으로 함께 보내고, 통화 서비스(ClawOps)의 받아쓰기 낱말 사전에도 업무 낱말과 함께 올린다(`server/src/index.ts` `namesFrom`, `server/src/sttdict.ts`).
 
 ## APK
-GitHub Releases [v1.0-submit](https://github.com/naebiseo-app/carbiseo/releases/tag/v1.0-submit)의 `naebiseo-car-release.apk` (release 빌드, minSdk 28 / targetSdk 34, applicationId `ztw.carbiseo`). 음성 모델이 들어 있어 238MB라 저장소에는 넣지 않는다.
+GitHub Releases [v1.0-submit](https://github.com/naebiseo-app/carbiseo/releases/tag/v1.0-submit)의 `naebiseo_naebiseo_release.apk` (release 빌드, minSdk 28 / targetSdk 34, applicationId `ztw.carbiseo`). 파일명은 공모전 규칙 `팀명_앱이름_release.apk`를 따랐고, 개인 참가라 팀명 자리에도 앱 이름을 썼다. 음성 모델이 들어 있어 238MB라 저장소에는 넣지 않는다.
 
 권한: `STT_SERVICE`, `RECORD_AUDIO`, `CAR_DRIVE`, `CAR_LIGHTS`, `CAR_SEATS`, `CAR_ENERGY`, `CAR_SAFETY`, `CAR_DOORS`(운전석 문), `CAR_WINDOWS`(와이퍼), `NAVI_ROUTE`, `NAVI_ROUTE_SEARCH`, `NAVI_CUSTOM_MAP`, `TTS_SERVICE`, `CAR_SPEED`, `FOREGROUND_SERVICE`·`FOREGROUND_SERVICE_SPECIAL_USE`, `FOREGROUND_SERVICE_MICROPHONE`(이름 호출), `SYSTEM_ALERT_WINDOW`(내비 위 카드), `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`, `INTERNET`.
 
