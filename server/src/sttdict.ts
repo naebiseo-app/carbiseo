@@ -9,7 +9,7 @@ export const WORK_WORDS = ["견적서", "견적", "납품", "발주", "계약서
 
 export function hotwords(contacts: unknown, schedule: unknown): string[] {
   const words = namesFrom(contacts, schedule).flatMap((n) => n.split(/\s+/)).filter((w) => /^[가-힣A-Za-z0-9]{2,20}$/.test(w));
-  return [...new Set([...words, ...WORK_WORDS])].slice(0, 80); // ponytail: 80개 상한, 연락처가 많으면 앞쪽만. 통화 상대 빈도순이 필요하면 그때
+  return [...new Set([...words, ...WORK_WORDS])].slice(0, 80); // 한계: 80개 상한, 연락처가 많으면 앞쪽만. 통화 상대 빈도순이 필요하면 그때
 }
 
 export async function syncDict(env: E): Promise<string> {

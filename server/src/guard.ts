@@ -9,7 +9,7 @@ export const BANNED_WORDS = ["씨발", "시발", "씹", "병신", "개새끼", "
 export function isBlocked(text: string, numbers = true): boolean {
   const flat = text.replace(/\s+/g, "");
   if (BANNED_WORDS.some((w) => flat.includes(w))) return true;
-  // ponytail: 시각·날짜(8자리)는 통과하려고 공백 구분("010 0000 0000")과 한글 숫자(공일공)는 못 잡음
+  // 한계: 시각·날짜(8자리)는 통과하려고 공백 구분("010 0000 0000")과 한글 숫자(공일공)는 못 잡음
   return numbers && (text.match(/\d(?:[.-]?\d)+/g) ?? []).some((m) => m.replace(/\D/g, "").length >= 9);
 }
 

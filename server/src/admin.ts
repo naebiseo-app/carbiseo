@@ -38,7 +38,7 @@ export function demoSchedule(nowMs: number): DemoEvent[] {
   ];
 }
 
-// 장소 간 이동(분): 직선거리 ÷ 평균 30km/h. ponytail: 도로·정체 무시, 실제 경로가 필요하면 내비 ETA로 교체
+// 장소 간 이동(분): 직선거리 ÷ 평균 30km/h. 한계: 도로·정체 무시, 실제 경로가 필요하면 내비 ETA로 교체
 export function travelMin(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const r = Math.PI / 180;
   const h = Math.sin(((b.lat - a.lat) * r) / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(((b.lng - a.lng) * r) / 2) ** 2;
@@ -69,7 +69,7 @@ export function slotLabel(ms: number, nowMs: number): string {
 }
 
 /** 미팅 시작 후보 n개(기본 2). 조건: 업무시간 안·평일, 차가 도착한 뒤(지금+eta_min), 일정과 안 겹침(일정 앞뒤로 미팅 장소까지 이동시간 포함).
- *  둘째는 첫째보다 3시간 이상 뒤. 30분 단위로 4일 앞까지 찾는다. ponytail: 이동은 직선거리 ÷ 30km/h, 현재 위치는 무시 */
+ *  둘째는 첫째보다 3시간 이상 뒤. 30분 단위로 4일 앞까지 찾는다. 한계: 이동은 직선거리 ÷ 30km/h, 현재 위치는 무시 */
 export function freeSlots(s: DemoEvent[], nowMs: number, etaMin: number | null, n = 2): number[] {
   const earliest = nowMs + (etaMin ?? 0) * MIN, len = MEET_MIN * MIN;
   const ev = s.filter((e) => e.start + len > nowMs).map((e) => { const go = travelMin(e, MEET_AT) * MIN; return { from: e.start - go, to: e.start + len + go }; });

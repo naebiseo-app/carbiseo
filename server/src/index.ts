@@ -11,7 +11,7 @@ interface Env {
   DB: D1Database;
   CAR_TOKEN: string;
   CALL_CONTEXT_SECRET: string;
-  CLAWOPS_SIGNING_KEY?: string; // 아직 없으면 서명 검증은 'nokey'로 기록만
+  CLAWOPS_SIGNING_KEY?: string; // 없으면 서명 검증이 'nokey'라 /clawops/events는 전부 401(기록·카드 없음)
   ADMIN_TOKEN?: string; // 없으면 /admin 전부 401
   CLAWOPS_ACCOUNT_ID?: string;
   CLAWOPS_API_KEY?: string;
@@ -92,7 +92,7 @@ const fromCols = (n: string) => {
 
 type Card = ReturnType<typeof fromCols> & { call_id: string; summary: string; urgent: number };
 // 같은 통화의 카드는 1장만: 웹훅 재전송, 받아쓰기 카드 뒤 오는 summary.completed는 건너뛴다
-// ponytail: 칩은 카드 만든 시점의 차량 맥락. 정확히 하려면 call-context 때 값을 ring meta에 남겨 call_id로 잇기
+// 한계: 칩은 카드 만든 시점의 차량 맥락. 정확히 하려면 call-context 때 값을 ring meta에 남겨 call_id로 잇기
 // from = 발신번호 원문. 바로 연결 목록(settings.direct_numbers)에 있으면 urgent=1·meta.direct (차는 피로·퇴근 중에도 읽음)
 async function saveCallCard(db: D1Database, c: Card, extra: object = {}, from = "", status = "summarized") {
   c = { ...c, summary: guardText("summary", c.summary) }; // LLM 가드: 요약 카드 저장은 전부 여기를 지난다
@@ -160,9 +160,14 @@ async function sendText(env: Env, to: string, body: string, label: string, callI
 }
 
 // 받아쓰기 조회 → 말한 것(상대 쪽)·번호 가린 대화. 첫 화자 = AI 소개. aiSays가 있으면 그 글이 들어 있는 첫 화자를 AI로(걸어 보낸 전화는 가게가 먼저 말할 수 있다)
-async function loadDialog(env: Env, id: string, aiSays?: string) {
-  const r = await fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls/${id}/transcript`, { headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}` } });
-  const segs = ((await r.json()) as { segments?: { speaker: string; text: string }[] }).segments ?? [];
+// 조회가 두 번(대기 없이) 다 실패하면 던진다 — 빈 대화로 처리하면 '말씀 없이 끊긴 전화' 카드가 생기고 녹음이 지워지므로, 던져서 카드도 안 만들고 녹음도 남기는 것이 의도
+export async function loadDialog(env: Env, id: string, aiSays?: string) {
+  const get = async () => {
+    const r = await fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls/${id}/transcript`, { headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}` }, signal: AbortSignal.timeout(10000) });
+    if (!r.ok) throw new Error(`transcript ${r.status}`);
+    return (await r.json()) as { segments?: { speaker: string; text: string }[] };
+  };
+  const segs = (await get().catch(get)).segments ?? [];
   const ai = (aiSays && segs.find((s) => s.text.includes(aiSays))?.speaker) || segs[0]?.speaker;
   const said = segs.filter((s) => s.speaker !== ai).map((s) => s.text).join(" ");
   const dialog = segs.map((s) => `${s.speaker === ai ? "비서" : "상대"}: ${s.text}`).join("\n").replace(/\d[\d -]{7,}\d/g, "[번호]"); // 전화번호는 외부 AI로 보내지 않는다
@@ -203,7 +208,7 @@ export function namesFrom(contacts: unknown, schedule: unknown): string[] {
   return [...new Set([...c, ...ev].filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim().slice(0, 30)))].slice(0, 40);
 }
 // 요약 AI가 고치지 못한 상호를 글자 모양(자모)으로 한 번 더 맞춘다. 11-10 실측: '황빛물산'→한빛물산(0.83), '세금 상사'→새봄상사(0.75).
-// ponytail: 4글자 이상 한글 이름만, 같은 길이 창만 본다. 사람 이름(3글자)은 오교정 위험이 커서 뺀다.
+// 한계: 4글자 이상 한글 이름만, 같은 길이 창만 본다. 사람 이름(3글자)은 오교정 위험이 커서 뺀다.
 function jamo(ch: string) { const i = ch.charCodeAt(0) - 0xac00; return i < 0 || i > 11171 ? [ch, "", ""] : [String(i / 588 | 0), String(i % 588 / 28 | 0), String(i % 28)]; }
 export function fixNames(text: string, names: string[]): string {
   const cands = [...new Set(names.flatMap((n) => n.split(/\s+/)).filter((w) => /^[가-힣]{4,}$/.test(w)))];
@@ -297,7 +302,6 @@ export function taskTexts(raw: string): string[] {
 }
 export const taskText = (raw: string) => taskTexts(raw).join(" / ");
 
-/** /car/send 본문 검증(중계와 같은 한도). 수신번호 숫자 10~11자리, 내용 1~1000자, confirmed=true 필수. */
 // 설계 29: 차 카드 버튼 결과(완료·내일 아침에)를 서버 행에도 남긴다. 경로 /car/inbox/<id>, 본문 {action}
 export function parseInboxAction(path: string, b: Record<string, unknown>): { id: number; status: string } | null {
   const id = Number(path.slice("/car/inbox/".length));
@@ -305,6 +309,7 @@ export function parseInboxAction(path: string, b: Record<string, unknown>): { id
   return Number.isInteger(id) && id > 0 && status ? { id, status } : null;
 }
 
+/** /car/send 본문 검증(중계와 같은 한도). 수신번호 숫자 10~11자리, 내용 1~1000자, confirmed=true 필수. */
 export function parseSend(b: Record<string, unknown>) {
   const to = String(b.to_number ?? "").replace(/-/g, "");
   const body = typeof b.body === "string" ? b.body.trim() : "";
@@ -333,7 +338,6 @@ export async function relaySend(env: Pick<Env, "SMS_RELAY_URL" | "SMS_RELAY_SECR
   }
 }
 
-/** 받은 전화의 AI 통화가 끝났으면 그 CallId. */
 // 상태 통지 본문(폼 또는 JSON)에서 '끝난 통화'의 CallId. 키 대소문자 무시.
 const statusField = (raw: string, ...ks: string[]) => {
   let o: Record<string, unknown> = {};
@@ -347,12 +351,13 @@ export function statusDone(raw: string): string | null {
   return st.includes("completed") && /^CA[0-9a-f]{20,40}$/i.test(id) ? id : null;
 }
 
-// 걸어 보낸 전화가 연결 안 된 채 끝났을 때(무응답·통화중·실패·취소)의 CallId. ponytail: 실제 필드·값 이름 미확인이라 CallStatus·Status 두 키에서 Twilio식 값으로 찾는다. 실통화 웹훅 본문을 보고 맞추기
+// 걸어 보낸 전화가 연결 안 된 채 끝났을 때(무응답·통화중·실패·취소)의 CallId. 한계: 실제 필드·값 이름 미확인이라 CallStatus·Status 두 키에서 Twilio식 값으로 찾는다. 실통화 웹훅 본문을 보고 맞추기
 export function statusFailed(raw: string): string | null {
   const st = statusField(raw, "callstatus", "status").toLowerCase();
   return /busy|no.?answer|fail|cancel/.test(st) ? statusField(raw, "callid", "callsid", "call_id") || null : null;
 }
 
+/** 받은 전화의 AI 통화가 끝났으면 그 CallId. */
 export function transcriptTarget(raw: string) {
   const f = new URLSearchParams(raw);
   return f.get("Event") === "agent.disconnected" && f.get("Direction") !== "outbound" ? f.get("CallId") || null : null;
@@ -365,6 +370,10 @@ export function transcriptTarget(raw: string) {
 export const INBOX_PAGE = 50;
 export const INBOX_SQL =
   "SELECT * FROM inbox WHERE id>?1 AND (?1>0 OR IFNULL(kind,'')<>'event') AND id < COALESCE((SELECT MIN(id) FROM inbox WHERE id>?1 AND created_at>?2), 9e18) ORDER BY CASE WHEN ?1=0 THEN -id ELSE id END LIMIT 51";
+
+/** 차로 내려보낼 때 웹훅 원문을 뺀다. ring·event 행은 차가 '왔다'는 사실만 쓰는데 원문에는 발신번호·서명이 들어 있다. */
+export const forCar = <T extends { kind?: unknown }>(rows: T[]) =>
+  rows.map((r) => (r.kind === "ring" || r.kind === "event" ? { ...r, raw: null, meta: null } : r));
 
 // 폰 알림 1건 → inbox kind='notif'. 방은 받을 때의 차 방(카드 칩·판단 참고용)
 async function saveNotif(db: D1Database, n: Notif) {
@@ -438,7 +447,7 @@ const DROWSY = /졸려|졸리|졸음|피곤|잠와|잠온/;
 const DROWSY_REPLY = "졸리시면 위험해요. 가까운 휴게소나 졸음쉼터에서 잠깐 쉬어 가세요.";
 
 /** 정차 중(PARK)엔 "운전 중" 전제를 빼고 그 말을 하지 않게 한다(회귀 11-09: P에서 "운전 중이시니" 답). */
-export const chatSystemParked = () => CHAT_SYSTEM.replace("운전 중이므로", "지금은 차를 세워 둔 상태입니다. 운전 중이라는 말은 하지 말고") ;
+export const chatSystemParked = () => CHAT_SYSTEM.replace("운전 중이므로", "지금은 차를 세워 둔 상태입니다. 운전 중이라는 말은 하지 말고");
 
 /** 말동무 답이 길면 문장 단위로 110자 안까지만 남긴다(가드 120자에 걸려 고정 문구로 바뀌지 않게). */
 export function chatCut(t: string): string {
@@ -472,9 +481,16 @@ export async function carChat(key: string | undefined, text: string, history: { 
 
 export default {
   async fetch(req: Request, env: Env, ctx?: { waitUntil(p: Promise<unknown>): void }): Promise<Response> {
+    // 경로 목차(위에서부터 아래로)
+    // /car/*  차 앱(CAR_TOKEN) — state·settings·inbox(+/<id>)·send·reserve·parked·parking·mail·family-eta·reply·config·place-phone·nearby·chat·schedule
+    // /phone/* 폰 앱(CAR_TOKEN) — parked(+/done)·notify·contacts·replies·google
+    // /clawops/* 전화 사업자 웹훅 — call-context·status는 경로 비밀값(CALL_CONTEXT_SECRET), events는 서명(CLAWOPS_SIGNING_KEY)
+    // /mcp/<비밀값> 통화 중 AI의 MCP 연결(도구 없음)
+    // /admin/* 시연 관리 페이지(ADMIN_TOKEN, 브라우저 Basic 로그인) — fake-call·fake-notif·reset-*·owner-as-guest·stt-dict·resummarize·keep-recordings·demo-clock·replay
     const { pathname } = new URL(req.url);
     const m = req.method;
-    const authed = req.headers.get("authorization") === `Bearer ${env.CAR_TOKEN}`;
+    // CAR_TOKEN이 비어 있으면 "Bearer undefined"가 통과하지 않게 닫는다
+    const authed = !!env.CAR_TOKEN && req.headers.get("authorization") === `Bearer ${env.CAR_TOKEN}`;
 
     if (m === "POST" && pathname === "/car/state") {
       if (!authed) return json({ error: "unauthorized" }, 401);
@@ -538,7 +554,7 @@ export default {
       const since = Number(new URL(req.url).searchParams.get("since") ?? 0) || 0;
       const rows = (await env.DB.prepare(INBOX_SQL).bind(since, now()).all()).results;
       const more = since > 0 && rows.length > INBOX_PAGE;
-      const results = rows.slice(0, INBOX_PAGE);
+      const results = forCar(rows.slice(0, INBOX_PAGE));
       // min_id: 서버에 남은 가장 작은 id(비었으면 null). 차는 이보다 작은 카드를 지운다(관리자 비우기·30일 삭제 반영)
       const min = await env.DB.prepare("SELECT MIN(id) AS m FROM inbox").first<{ m: number | null }>();
       return json({ items: results, min_id: min?.m ?? null, more });
@@ -580,7 +596,7 @@ export default {
         acq = direct || inBook(await kvGet(env.DB, "contacts"), schedule, from);
         share = parseEtaShare(st?.eta_share) ?? "known";
         if (mode === "ai" && !isOwner && from && !(await kvGet(env.DB, "owner_as_guest"))) {
-          // ponytail: 최근 50건만 JS에서 sameNumber로 거른다. 카드가 많아 놓치면 from_number 정규화 컬럼+인덱스로
+          // 한계: 최근 50건만 JS에서 sameNumber로 거른다. 카드가 많아 놓치면 from_number 정규화 컬럼+인덱스로
           const rows = (await env.DB.prepare("SELECT from_label,from_number FROM inbox WHERE kind='call' AND from_label<>'' AND from_label NOT LIKE '끝번호%' AND from_number IS NOT NULL ORDER BY id DESC LIMIT 50").all<{ from_label: string; from_number: string }>()).results;
           known = rows.find((r) => sameNumber(from, r.from_number))?.from_label;
         }
@@ -593,10 +609,10 @@ export default {
         const instruction = ownerScript({ owner, name, room, eta, schedule, recent, nowMs: now(), passenger: cc?.passenger === true, trip_min: cc?.trip_min });
         return json({ CallContext: { Instruction: instruction, Variables: { room: room ?? "UNKNOWN", owner_mode: "1" } } });
       }
-      // ponytail: 한 마디 안내 모드는 지난 통화 카드(known)를 안 찾는다 — 주소록·일정·바로 연결로만 아는 번호
+      // 한계: 한 마디 안내 모드는 지난 통화 카드(known)를 안 찾는다 — 주소록·일정·바로 연결로만 아는 번호
       const s = pickScript(room, owner, name, etaFor(eta, share, acq || !!known), mode, nextEventAt(schedule, now()), cc, clk, ment, known);
       const callId = field(raw, ["callid", "callsid", "call_id"]);
-      // 멘트·끔: 모델이 끊기를 미루는 일이 있어(장면 9) 멘트 길이만큼 기다렸다가 서버가 통화를 끝낸다. ponytail: 고정 12초, 긴 사용자 멘트면 길이 비례로
+      // 멘트·끔: 모델이 끊기를 미루는 일이 있어(장면 9) 멘트 길이만큼 기다렸다가 서버가 통화를 끝낸다. 한계: 고정 12초, 긴 사용자 멘트면 길이 비례로
       if (mode !== "ai" && CALL_ID.test(callId) && env.CLAWOPS_API_KEY)
         ctx?.waitUntil(new Promise((ok) => setTimeout(ok, HANGUP_MS)).then(() => fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls/${callId}`,
           { method: "POST", headers: { Authorization: `Bearer ${env.CLAWOPS_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ Status: "completed" }) }))
@@ -617,7 +633,7 @@ export default {
       return mcp(req);
     }
 
-    // 번호 statusCallback: 통화가 끝나는 즉시 받아쓰기 요청 → 약 16초 뒤 summary.completed(카드). managed_agent 모드는 agent.disconnected 웹훅이 안 와서(10-31 실측) 이 경로가 주 경로
+    // 번호 statusCallback: 통화가 끝나는 즉시 받아쓰기 요청 → 받아쓰기 완료(transcript.completed) → 카드. managed_agent 모드는 agent.disconnected 웹훅이 안 와서(10-31 실측) 이 경로가 주 경로
     if (m === "POST" && pathname.startsWith("/clawops/status/")) {
       if (pathname.slice("/clawops/status/".length) !== env.CALL_CONTEXT_SECRET) return json({ error: "not found" }, 404);
       const raw = await req.text();
@@ -639,7 +655,7 @@ export default {
       console.log("clawops webhook sig=" + sig, "ct=" + req.headers.get("content-type"));
       if (sig !== "ok") return json({ error: "bad_signature" }, 401); // 11-06 실통화 이벤트가 ok로 카드까지 간 것 확인 뒤 거절로 전환
       await saveInbox(env.DB, "event", "received", null, raw, { ct: req.headers.get("content-type"), sig, sig_header: req.headers.get("x-signature") });
-      // 계정 '통화 받아쓰기'가 꺼져 있어 통화가 끝나면 받아쓰기를 직접 요청한다 → transcript.completed → summary.completed(아래 카드)
+      // 계정 '통화 받아쓰기'가 꺼져 있어 통화가 끝나면 받아쓰기를 직접 요청한다 → transcript.completed → 받아쓰기로 카드(transcriptCard)
       const callId = sig === "ok" ? transcriptTarget(raw) : null;
       if (callId && env.CLAWOPS_API_KEY) {
         const r = await fetch(`https://api.claw-ops.com/v1/accounts/${env.CLAWOPS_ACCOUNT_ID}/calls/${callId}/transcript`,
@@ -650,6 +666,7 @@ export default {
         const job = transcriptCard(env, raw).catch((e) => console.log("transcript card error", String(e)));
         if (ctx) ctx.waitUntil(job); else await job;
       }
+      // summary.completed가 오는 계정 설정을 위한 보조 경로. 지금 계정은 이 이벤트가 오지 않아 위 받아쓰기 경로가 카드를 만든다
       const card = sig === "ok" ? summaryCard(raw) : null;
       if (card && sameNumber(new URLSearchParams(raw).get("From") ?? "", env.OWNER_NUMBER) && !(await kvGet(env.DB, "owner_as_guest"))) {
         // 주인 모드 통화 → 할 일 카드(문자 초안 등). 재전송 대비 1장만
@@ -699,7 +716,7 @@ export default {
       const day0 = Math.floor((now() + 9 * 3_600_000) / 86_400_000) * 86_400_000 - 9 * 3_600_000; // 오늘 0시(KST)
       const used = await env.DB.prepare("SELECT COUNT(*) AS n FROM inbox WHERE kind='reserve' AND created_at>=?").bind(day0).first<{ n: number }>();
       if ((used?.n ?? 0) >= RESERVE_DAILY_MAX) return json({ ok: false, code: "daily_limit" });
-      // ponytail: 시연·심사 중 실제 가게로 전화가 가면 안 된다. O4_LIVE=1일 때만 실제 가게 번호, 그 외엔 항상 주인 번호로 건다
+      // 한계: 시연·심사 중 실제 가게로 전화가 가면 안 된다. O4_LIVE=1일 때만 실제 가게 번호, 그 외엔 항상 주인 번호로 건다
       const to = (env.O4_LIVE === "1" ? (await placePhone(env.KAKAO_REST_KEY, place, lat, lng)).phone : env.OWNER_NUMBER)?.replace(/[\s-]/g, "");
       if (!to) return json({ ok: false, code: "no_number" });
       const owner = (await kvGet(env.DB, "settings"))?.owner_label;
@@ -924,6 +941,9 @@ export default {
     if (pathname === "/admin" || pathname.startsWith("/admin/")) {
       if (!basicOk(req.headers.get("authorization"), env.ADMIN_TOKEN))
         return new Response("unauthorized", { status: 401, headers: { "www-authenticate": 'Basic realm="carbiseo-admin", charset="UTF-8"' } });
+      // 브라우저 기본 로그인은 다른 사이트의 폼 전송에도 자동으로 붙는다 → 다른 출처의 POST는 거절(스크립트 호출처럼 Origin이 없으면 통과)
+      const origin = req.headers.get("origin");
+      if (m === "POST" && origin && origin !== new URL(req.url).origin) return new Response("forbidden", { status: 403 });
       // B안: 차가 만든 답장(최근 10건)을 '보낼 답장'으로 보여 준다
       const html = async (msg: string, status = 200) => {
         const { results } = await env.DB.prepare("SELECT from_label,summary,status FROM inbox WHERE kind='reply' ORDER BY id DESC LIMIT 10").all<ReplyRow>();

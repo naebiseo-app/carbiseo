@@ -33,7 +33,7 @@ export async function parkingNear(key: string | undefined, lots: Lot[], lat: num
   const near = nearbyLots(lots, lat, lng);
   if (!near.length) return { reason: "none" };
   try {
-    // ponytail: 전체(약 4600곳)를 매번 받는다(약 1초). 느리면 짧은 캐시. 
+    // 한계: 전체(약 4600곳)를 매번 받는다(약 1초). 느리면 짧은 캐시. 
     const r = await fetch(`https://apis.data.go.kr/B553881/Parking_v1/PrkRealtimeInfo_v1?serviceKey=${encodeURIComponent(key)}&pageNo=1&numOfRows=5000&format=2`);
     const rows = r.ok ? ((await r.json()) as { PrkRealtimeInfo?: Realtime[] }).PrkRealtimeInfo : undefined;
     if (!Array.isArray(rows)) return { reason: "error" };

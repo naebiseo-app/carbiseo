@@ -2,8 +2,9 @@
   "name": "carbiseo-api",
   "private": true,
   "type": "module",
+  "engines": { "node": ">=22.18" },
   "scripts": {
-    "test": "node --test test/script.test.ts test/sig.test.ts test/admin.test.ts test/retention.test.ts test/summary.test.ts test/owner.test.ts test/replay.test.ts test/context.test.ts test/relay.test.ts test/switch.test.ts test/notif.test.ts test/mcp.test.ts test/family.test.ts test/direct.test.ts test/guard.test.ts test/action.test.ts test/placephone.test.ts test/chat.test.ts test/reserve.test.ts test/nearby.test.ts test/parked.test.ts test/calendar.test.ts test/parking.test.ts test/sttdict.test.ts",
+    "test": "node --test test/script.test.ts test/sig.test.ts test/admin.test.ts test/retention.test.ts test/summary.test.ts test/owner.test.ts test/replay.test.ts test/context.test.ts test/relay.test.ts test/switch.test.ts test/notif.test.ts test/mcp.test.ts test/family.test.ts test/direct.test.ts test/guard.test.ts test/action.test.ts test/placephone.test.ts test/chat.test.ts test/reserve.test.ts test/nearby.test.ts test/parked.test.ts test/calendar.test.ts test/parking.test.ts test/sttdict.test.ts test/auth.test.ts",
     "deploy": "npx --yes wrangler@4 deploy"
   }
 }

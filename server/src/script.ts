@@ -26,7 +26,7 @@ const BY_ROOM: Record<Room, string> = {
 
 // 급함 판정(요약 문장). '급한·급합니다·급해요·급히·빨리·당장·즉시' 등, 부정형('급하지 않·안 급·급한 건 아니')은 제외.
 // '발급·지급·공급·월급·언급'처럼 앞 글자가 붙은 '급'은 급함이 아니다(lookbehind).
-// ponytail: 낱말 판정. 오판이 잦으면 요약 스키마에 urgent 필드를 두고 그 값을 우선
+// 한계: 낱말 판정. 오판이 잦으면 요약 스키마에 urgent 필드를 두고 그 값을 우선
 const URGENT = /(?<![공지발보수배진승특고초중상하월언취파봉급])급(하|한|합|해|히|함|했)|긴급|바로\s*(연락|회신|전화)|즉시|빨리|당장/;
 const NOT_URGENT = /급하지\s*(는\s*)?않|급하진\s*않|안\s*급|급한\s*(건|일|용건|거)?\s*(은|는)?\s*아니|급할\s*(건|거|것|일)?\s*(은|는)?\s*없|빨리\s*(안|않)|서두르지\s*않|천천히/;
 export const isUrgent = (text: string) => URGENT.test(text) && !NOT_URGENT.test(text);
@@ -95,7 +95,7 @@ export function nextWorkMorning(nowMs: number): string {
   return ahead === 0 ? "오늘 오전" : ahead === 1 ? "내일 오전" : "월요일 오전";
 }
 
-// 토·일(KST, 차 offDuty와 같은 기준)엔 쉼 방 문구를 '업무 마침' 대신 '쉬는 날'로. ponytail: 공휴일 없음 — 차 settings에 날짜가 생기면 /car/state로
+// 토·일(KST, 차 offDuty와 같은 기준)엔 쉼 방 문구를 '업무 마침' 대신 '쉬는 날'로. 한계: 공휴일 없음 — 차 settings에 날짜가 생기면 /car/state로
 export const restDay = (nowMs: number) => [0, 6].includes(new Date(nowMs + 9 * 3_600_000).getUTCDay());
 
 // M17: 저녁(18시~)·새벽(07시 전)·주말 정차는 '곧 회신' 대신 쉼 방 약속(차 업무시간 07~18과 같은 기준).

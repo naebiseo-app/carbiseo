@@ -23,7 +23,7 @@ export function toEvents(items: any[]): DemoEvent[] {
 const VAGUE = /^(집|우리집|본가|회사|사무실|학교|온라인|화상|줌|zoom|https?:.*)$/i;
 
 /** 장소 이름 → 좌표. 카카오 키워드 검색, 없으면 주소 검색. 못 찾으면 null(차는 좌표 0인 일정의 지각 계산을 건너뛴다). */
-// ponytail: 차 위치 없이 전국 검색이라 "스타벅스"는 아무 지점이 나온다. 구글 장소 자동완성을 쓰면 주소가 와서 괜찮다.
+// 한계: 차 위치 없이 전국 검색이라 "스타벅스"는 아무 지점이 나온다. 구글 장소 자동완성을 쓰면 주소가 와서 괜찮다.
 export async function placeCoord(key: string | undefined, place: string): Promise<{ lat: number; lng: number } | null> {
   if (!key || !place || VAGUE.test(place)) return null;
   for (const api of ["keyword", "address"]) {

@@ -97,7 +97,7 @@ test("손님 대본: 한 번에 하나, 다시 묻지 않음, 급하면 바로 �
   assert.doesNotMatch(s, /요약해서|내일 오전|월요일 오전/);
 });
 
-test("첫 인사: AI 비서 소개 + 방별 상황 + 하나씩 묻는다는 안내(대표님 통화 지적 3·8)", () => {
+test("첫 인사: AI 비서 소개 + 방별 상황 + 하나씩 묻는다는 안내(실통화 지적 3·8)", () => {
   const g = (r: "PARK" | "DRIVE_WORK" | "DRIVE_REST" | null, t: number) => pickScript(r, "김도윤", undefined, null, "ai", null, null, t).instruction.match(/^전화가 연결되면 첫 마디로 '([^']+)'/)![1];
   const WED_14 = WED_19 - 5 * 3_600_000;
   const tail = " 제가 듣고 전달해 드릴게요. 해당 내용은 녹음됩니다. 어떤 일로 전화 주셨나요?";
@@ -154,7 +154,7 @@ test("한 마디 안내: 기본·직접 쓴 멘트 모두 녹음 고지를 말�
   for (const m of [undefined, "회의 중이에요."]) assert.match(pickScript("DRIVE_WORK", "도윤", undefined, 5, "ment", null, null, Date.now(), m).instruction, /이 통화는 녹음됩니다\.'라고만 말하고/);
 });
 
-test("이름·용건을 들으면 되읽고 '맞으실까요?'로 한 번 확인한다(11-10 대표님 결정)", () => {
+test("이름·용건을 들으면 되읽고 '맞으실까요?'로 한 번 확인한다(11-10 결정)", () => {
   const s = pickScript("DRIVE_WORK", "주인").instruction;
   assert.match(s, /\[2-2\][^[]*맞으실까요\?/);
   assert.doesNotMatch(s, /'맞으시죠\?'라고 따로 확인하지 않습니다/);
